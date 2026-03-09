@@ -10,6 +10,7 @@ export const sessions = sqliteTable('sessions', {
   personas: text('personas').notNull().default('{}'),
   usageInputTokens: integer('usage_input_tokens').notNull().default(0),
   usageOutputTokens: integer('usage_output_tokens').notNull().default(0),
+  stopRequested: integer('stop_requested').notNull().default(0),
   status: text('status').notNull(),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
@@ -32,4 +33,17 @@ export const minutes = sqliteTable('minutes', {
   content: text('content').notNull(),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
+export const interjections = sqliteTable('interjections', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull(),
+  content: text('content').notNull(),
+  phaseHint: text('phase_hint'),
+  roundHint: integer('round_hint'),
+  consumed: integer('consumed').notNull().default(0),
+  consumedPhase: text('consumed_phase'),
+  consumedRound: integer('consumed_round'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  consumedAt: integer('consumed_at', { mode: 'timestamp_ms' }),
 });

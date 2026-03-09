@@ -3,15 +3,14 @@ import type { SessionAgent } from '@/lib/agents/types';
 import {
   appendMessage,
   createSession,
+  drainPendingInterjections,
+  isSessionStopRequested,
+  requestSessionStop,
   updateSessionUsage,
   updateSessionStatus,
   upsertMinutes,
 } from '@/lib/db/repository';
 import { DiscussionOrchestrator } from '@/lib/orchestrator/orchestrator';
-import {
-  clearInterjections,
-  drainInterjections,
-} from '@/lib/orchestrator/interjection-queue';
 import { encodeSSE } from '@/lib/sse/types';
 
 export const dynamic = 'force-dynamic';
@@ -53,28 +52,53 @@ export async function POST(
 
   // Build session agents from catalog, skipping those without API keys
   const agents: SessionAgent[] = [];
+  const resolvedModelSelections: Record<string, string> = {};
+  const resolvedPersonas: Record<string, string> = {};
   for (const agentId of agentIds) {
     const definition = AGENT_CATALOG.find((a) => a.id === agentId);
     if (!definition) continue;
     // Skip if API key is missing
     if (!process.env[definition.envKeyName]) continue;
-    agents.push({
-      definition,
-      selectedModelId: modelSelections[agentId],
-      persona: personas[agentId],
-    });
+    const selectedModelId = modelSelections[agentId];
+    const persona = personas[agentId];
+    agents.push({ definition, selectedModelId, persona });
+    resolvedModelSelections[agentId] = selectedModelId ?? definition.modelId;
+    if (persona) {
+      resolvedPersonas[agentId] = persona;
+    }
   }
 
   // Ensure moderator is included
   if (!agents.find((a) => a.definition.id === moderatorAgentId)) {
     const moderatorDef = AGENT_CATALOG.find((a) => a.id === moderatorAgentId);
     if (moderatorDef) {
+      const selectedModelId = modelSelections[moderatorAgentId];
+      const persona = personas[moderatorAgentId];
       agents.unshift({
         definition: moderatorDef,
-        selectedModelId: modelSelections[moderatorAgentId],
-        persona: personas[moderatorAgentId],
+        selectedModelId,
+        persona,
       });
+      resolvedModelSelections[moderatorAgentId] =
+        selectedModelId ?? moderatorDef.modelId;
+      if (persona) {
+        resolvedPersonas[moderatorAgentId] = persona;
+      }
     }
+  }
+
+  const participantCount = agents.filter(
+    (a) => a.definition.id !== moderatorAgentId
+  ).length;
+  const hasModerator = agents.some((a) => a.definition.id === moderatorAgentId);
+  if (!hasModerator || participantCount === 0) {
+    return new Response(
+      JSON.stringify({
+        error:
+          'No runnable agent set. Ensure moderator and at least one participant have valid API keys.',
+      }),
+      { status: 400 }
+    );
   }
 
   await createSession({
@@ -82,11 +106,10 @@ export async function POST(
     topic,
     moderatorAgentId,
     maxDebateRounds,
-    selectedAgentIds: agentIds,
-    modelSelections,
-    personas,
+    selectedAgentIds: agents.map((a) => a.definition.id),
+    modelSelections: resolvedModelSelections,
+    personas: resolvedPersonas,
   });
-  clearInterjections(id);
 
   const orchestrator = new DiscussionOrchestrator({
     sessionId: id,
@@ -94,7 +117,9 @@ export async function POST(
     agents,
     moderatorAgentId,
     maxDebateRounds,
-    drainInterjections: () => drainInterjections(id),
+    drainInterjections: ({ phase, round }) =>
+      drainPendingInterjections({ sessionId: id, phase, round }),
+    shouldStop: () => isSessionStopRequested(id),
     onMessagePersist: (message) =>
       appendMessage({
         sessionId: id,
@@ -114,6 +139,10 @@ export async function POST(
   });
 
   const encoder = new TextEncoder();
+  const onAbort = () => {
+    void requestSessionStop(id);
+  };
+  req.signal.addEventListener('abort', onAbort);
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -121,9 +150,11 @@ export async function POST(
         for await (const event of orchestrator.run()) {
           controller.enqueue(encoder.encode(encodeSSE(event)));
         }
-        await updateSessionStatus(id, 'completed');
+        const stopped = await isSessionStopRequested(id);
+        await updateSessionStatus(id, stopped ? 'stopped' : 'completed');
       } catch (error) {
-        await updateSessionStatus(id, 'failed');
+        const stopped = await isSessionStopRequested(id);
+        await updateSessionStatus(id, stopped ? 'stopped' : 'failed');
         const errorEvent = encodeSSE({
           type: 'agent_error',
           content: error instanceof Error ? error.message : String(error),
@@ -131,7 +162,7 @@ export async function POST(
         });
         controller.enqueue(encoder.encode(errorEvent));
       } finally {
-        clearInterjections(id);
+        req.signal.removeEventListener('abort', onAbort);
         controller.close();
       }
     },

@@ -73,6 +73,13 @@ export function useDiscussionStream() {
   );
 
   const stopDiscussion = useCallback(() => {
+    const { sessionId } = useDiscussionStore.getState();
+    if (sessionId) {
+      void fetch(`/api/sessions/${sessionId}/stop`, {
+        method: 'POST',
+        keepalive: true,
+      }).catch(() => undefined);
+    }
     abortRef.current?.abort();
     store.setRunning(false);
   }, [store]);

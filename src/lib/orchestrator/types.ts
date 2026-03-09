@@ -17,7 +17,10 @@ export interface DiscussionConfig {
   agents: SessionAgent[];
   moderatorAgentId: string;
   maxDebateRounds: number;
-  drainInterjections?: () => Promise<UserInterjection[]> | UserInterjection[];
+  drainInterjections?: (
+    context: { phase: string; round?: number }
+  ) => Promise<UserInterjection[]> | UserInterjection[];
+  shouldStop?: () => Promise<boolean> | boolean;
   onMessagePersist?: (
     message: PersistableMessage
   ) => Promise<void> | void;

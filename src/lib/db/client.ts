@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   personas TEXT NOT NULL DEFAULT '{}',
   usage_input_tokens INTEGER NOT NULL DEFAULT 0,
   usage_output_tokens INTEGER NOT NULL DEFAULT 0,
+  stop_requested INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -45,6 +46,19 @@ CREATE TABLE IF NOT EXISTS minutes (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS interjections (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  content TEXT NOT NULL,
+  phase_hint TEXT,
+  round_hint INTEGER,
+  consumed INTEGER NOT NULL DEFAULT 0,
+  consumed_phase TEXT,
+  consumed_round INTEGER,
+  created_at INTEGER NOT NULL,
+  consumed_at INTEGER
+);
 `);
 
 // Lightweight in-place migrations for existing local DB files.
@@ -62,6 +76,7 @@ ensureColumn('sessions', 'model_selections', "TEXT NOT NULL DEFAULT '{}'");
 ensureColumn('sessions', 'personas', "TEXT NOT NULL DEFAULT '{}'");
 ensureColumn('sessions', 'usage_input_tokens', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('sessions', 'usage_output_tokens', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('sessions', 'stop_requested', 'INTEGER NOT NULL DEFAULT 0');
 
 export const sqliteDb = sqlite;
 export const db = drizzle(sqlite);

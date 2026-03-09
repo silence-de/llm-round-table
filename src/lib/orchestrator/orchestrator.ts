@@ -29,27 +29,57 @@ export class DiscussionOrchestrator {
   }> = [];
   private lastAnalysis: ModeratorAnalysis | null = null;
   private interjectionContext: string[] = [];
+  private stopState = { checkedAt: 0, value: false };
 
   constructor(config: DiscussionConfig) {
     this.config = config;
   }
 
   async *run(): AsyncIterable<SSEEvent> {
+    if (await this.shouldStop()) {
+      yield* this.emitStopped();
+      return;
+    }
+
     // Phase 1: Opening
     yield* this.phaseOpening();
+    if (await this.shouldStop()) {
+      yield* this.emitStopped();
+      return;
+    }
 
     // Phase 2: Initial Responses (parallel)
     yield* this.phaseInitialResponses();
+    if (await this.shouldStop()) {
+      yield* this.emitStopped();
+      return;
+    }
 
     // Phase 3+4: Analysis and Debate loop
     for (let round = 0; round < this.config.maxDebateRounds; round++) {
+      if (await this.shouldStop()) {
+        yield* this.emitStopped();
+        return;
+      }
       yield* this.consumeInterjections(DiscussionPhase.ANALYSIS, round);
+      if (await this.shouldStop()) {
+        yield* this.emitStopped();
+        return;
+      }
       yield* this.phaseAnalysis(round);
 
       if (!this.lastAnalysis || this.lastAnalysis.shouldConverge) break;
 
       if (this.lastAnalysis.disagreements.length > 0) {
+        if (await this.shouldStop()) {
+          yield* this.emitStopped();
+          return;
+        }
         yield* this.consumeInterjections(DiscussionPhase.DEBATE, round);
+        if (await this.shouldStop()) {
+          yield* this.emitStopped();
+          return;
+        }
         yield* this.phaseDebate(round);
       } else {
         break;
@@ -57,7 +87,15 @@ export class DiscussionOrchestrator {
     }
 
     // Phase 5: Summary
+    if (await this.shouldStop()) {
+      yield* this.emitStopped();
+      return;
+    }
     yield* this.consumeInterjections(DiscussionPhase.SUMMARY);
+    if (await this.shouldStop()) {
+      yield* this.emitStopped();
+      return;
+    }
     yield* this.phaseSummary();
 
     yield {
@@ -72,7 +110,9 @@ export class DiscussionOrchestrator {
     phase: string,
     round?: number
   ): AsyncIterable<SSEEvent> {
-    const queue = this.config.drainInterjections ? await this.config.drainInterjections() : [];
+    const queue = this.config.drainInterjections
+      ? await this.config.drainInterjections({ phase, round })
+      : [];
 
     for (const interjection of queue) {
       this.interjectionContext.push(interjection.content);
@@ -92,6 +132,29 @@ export class DiscussionOrchestrator {
         timestamp: Date.now(),
       };
     }
+  }
+
+  private async *emitStopped(): AsyncIterable<SSEEvent> {
+    yield {
+      type: 'phase_change',
+      phase: DiscussionPhase.COMPLETED,
+      timestamp: Date.now(),
+    };
+    yield { type: 'discussion_complete', timestamp: Date.now() };
+  }
+
+  private async shouldStop(force = false): Promise<boolean> {
+    if (this.stopState.value) return true;
+    if (!this.config.shouldStop) return false;
+
+    const now = Date.now();
+    if (!force && now - this.stopState.checkedAt < 500) {
+      return false;
+    }
+
+    this.stopState.checkedAt = now;
+    this.stopState.value = Boolean(await this.config.shouldStop());
+    return this.stopState.value;
   }
 
   private async persistMessage(message: PersistableMessage) {
@@ -135,6 +198,9 @@ export class DiscussionOrchestrator {
 
     const prompt = buildOpeningPrompt(this.config.topic, agentNames);
     await this.persistUsage({ inputTokens: this.estimateTokens(prompt) });
+    if (await this.shouldStop()) {
+      return;
+    }
 
     yield { type: 'moderator_start', agentId: 'moderator', timestamp: Date.now() };
 
@@ -146,6 +212,9 @@ export class DiscussionOrchestrator {
       maxTokens: moderator.definition.maxTokens,
       timeoutMs: 60_000,
     })) {
+      if (await this.shouldStop()) {
+        break;
+      }
       if (chunk.type === 'text_delta') {
         fullContent += chunk.content;
         yield {
@@ -185,6 +254,9 @@ export class DiscussionOrchestrator {
     const participants = this.config.agents.filter(
       (a) => a.definition.id !== this.config.moderatorAgentId
     );
+    if (await this.shouldStop()) {
+      return;
+    }
 
     const contentCollectors = new Map<string, string>();
 
@@ -229,6 +301,9 @@ export class DiscussionOrchestrator {
     });
 
     for await (const event of multiplexStreams(agentStreams)) {
+      if (await this.shouldStop()) {
+        break;
+      }
       if (event.type === 'agent_token' && event.agentId && event.content) {
         const current = contentCollectors.get(event.agentId) ?? '';
         contentCollectors.set(event.agentId, current + event.content);
@@ -287,7 +362,9 @@ export class DiscussionOrchestrator {
     const responses = Array.from(this.agentResponses.values());
 
     const prompt = buildAnalysisPrompt(this.config.topic, responses, this.interjectionContext);
-    await this.persistUsage({ inputTokens: this.estimateTokens(prompt) });
+    if (await this.shouldStop()) {
+      return;
+    }
 
     yield { type: 'moderator_start', agentId: 'moderator', timestamp: Date.now() };
 
@@ -302,7 +379,7 @@ export class DiscussionOrchestrator {
     const analysis = parseAnalysis(result.content);
     this.lastAnalysis = analysis;
     await this.persistUsage({
-      inputTokens: result.usage?.inputTokens,
+      inputTokens: result.usage?.inputTokens ?? this.estimateTokens(prompt),
       outputTokens:
         result.usage?.outputTokens ??
         this.estimateTokens(analysis.moderatorNarrative),
@@ -391,6 +468,9 @@ export class DiscussionOrchestrator {
       });
 
       for await (const event of multiplexStreams(agentStreams)) {
+        if (await this.shouldStop()) {
+          break;
+        }
         if (event.type === 'agent_token' && event.agentId && event.content) {
           const current = contentCollectors.get(event.agentId) ?? '';
           contentCollectors.set(event.agentId, current + event.content);
@@ -444,6 +524,9 @@ export class DiscussionOrchestrator {
 
     const prompt = buildSummaryPrompt(this.config.topic, this.allMessages);
     await this.persistUsage({ inputTokens: this.estimateTokens(prompt) });
+    if (await this.shouldStop()) {
+      return;
+    }
 
     yield { type: 'moderator_start', agentId: 'moderator', timestamp: Date.now() };
 
@@ -455,6 +538,9 @@ export class DiscussionOrchestrator {
       maxTokens: 4096,
       timeoutMs: 70_000,
     })) {
+      if (await this.shouldStop()) {
+        break;
+      }
       if (chunk.type === 'text_delta') {
         fullContent += chunk.content;
         yield {

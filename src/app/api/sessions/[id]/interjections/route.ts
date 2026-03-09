@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
-import { appendMessage } from '@/lib/db/repository';
-import { enqueueInterjection } from '@/lib/orchestrator/interjection-queue';
+import {
+  appendMessage,
+  enqueueInterjection,
+  getSessionStatus,
+} from '@/lib/db/repository';
 
 export async function POST(
   req: Request,
@@ -18,9 +21,18 @@ export async function POST(
     return NextResponse.json({ error: 'content required' }, { status: 400 });
   }
 
-  const interjection = enqueueInterjection(id, {
+  const status = await getSessionStatus(id);
+  if (status !== 'running') {
+    return NextResponse.json(
+      { error: `session is not running (current: ${status ?? 'not_found'})` },
+      { status: 409 }
+    );
+  }
+
+  const interjection = enqueueInterjection({
+    sessionId: id,
     content,
-    phaseHint: body.phase,
+    phaseHint: body.phase ?? undefined,
     roundHint: body.round,
   });
 
@@ -33,5 +45,6 @@ export async function POST(
     displayName: 'User',
   });
 
-  return NextResponse.json({ ok: true, interjectionId: interjection.id });
+  const interjectionId = await interjection;
+  return NextResponse.json({ ok: true, interjectionId });
 }
