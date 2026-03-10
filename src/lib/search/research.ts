@@ -21,8 +21,10 @@ function formatBriefText(sources: ResearchSource[], topic: string): string {
 }
 
 export async function conductResearch(topic: string): Promise<ResearchBrief> {
+  const currentYear = new Date().getFullYear();
+
   // Two parallel searches: direct topic + "latest developments" angle
-  const queries = [topic, `${topic} 最新进展 2025`];
+  const queries = [topic, `${topic} 最新进展 ${currentYear}`];
 
   const results = await Promise.allSettled(
     queries.map((q) => tavilySearch({ query: q, maxResults: 5, searchDepth: 'basic' }))

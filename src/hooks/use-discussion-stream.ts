@@ -37,7 +37,7 @@ export function useDiscussionStream() {
         });
 
         if (!response.ok || !response.body) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          throw new Error(await extractErrorMessage(response));
         }
 
         const reader = response.body.getReader();
@@ -146,6 +146,7 @@ function handleEvent(event: SSEEvent) {
 
     case 'agent_error':
       if (event.agentId) s.finalizeAgent(event.agentId);
+      s.setError(event.content ?? 'Discussion failed.');
       break;
 
     case 'moderator_start':
@@ -217,5 +218,19 @@ async function hydrateUsageFromSession() {
     });
   } catch {
     // ignore post-run usage hydration errors
+  }
+}
+
+async function extractErrorMessage(response: Response): Promise<string> {
+  try {
+    const text = await response.text();
+    if (!text) {
+      return `HTTP ${response.status}: ${response.statusText}`;
+    }
+
+    const parsed = JSON.parse(text) as { error?: string };
+    return parsed.error || text;
+  } catch {
+    return `HTTP ${response.status}: ${response.statusText}`;
   }
 }

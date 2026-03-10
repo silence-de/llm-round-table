@@ -22,24 +22,29 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const body = await req.json();
-  const {
-    topic,
-    agentIds,
-    modelSelections = {},
-    personaSelections = {},
-    personas = {},
-    moderatorAgentId = 'claude',
-    maxDebateRounds = 2,
-  } = body as {
-    topic: string;
-    agentIds: string[];
-    modelSelections?: Record<string, string>; // agentId -> selectedModelId
+  const body = (await req.json()) as {
+    topic?: string;
+    agentIds?: string[];
+    modelSelections?: Record<string, string>;
     personaSelections?: Record<string, PersonaSelection>;
     personas?: Record<string, string>;
     moderatorAgentId?: string;
     maxDebateRounds?: number;
   };
+  const {
+    topic: rawTopic,
+    agentIds: rawAgentIds,
+    modelSelections = {},
+    personaSelections = {},
+    personas = {},
+    moderatorAgentId = 'claude',
+    maxDebateRounds: rawMaxDebateRounds = 2,
+  } = body;
+  const topic = rawTopic?.trim() ?? '';
+  const agentIds = Array.isArray(rawAgentIds) ? rawAgentIds : [];
+  const normalizedMaxDebateRounds = Number.isFinite(rawMaxDebateRounds)
+    ? Math.max(1, Math.min(5, Math.floor(rawMaxDebateRounds)))
+    : 2;
 
   if (!topic || !agentIds?.length) {
     return new Response(JSON.stringify({ error: 'topic and agentIds required' }), {
@@ -79,7 +84,7 @@ export async function POST(
   // Ensure moderator is included
   if (!agents.find((a) => a.definition.id === moderatorAgentId)) {
     const moderatorDef = AGENT_CATALOG.find((a) => a.id === moderatorAgentId);
-    if (moderatorDef) {
+    if (moderatorDef && process.env[moderatorDef.envKeyName]) {
       const selectedModelId = modelSelections[moderatorAgentId];
       const personaSelection = personaSelections[moderatorAgentId];
       const persona = resolvePersonaText(
@@ -121,7 +126,7 @@ export async function POST(
     id,
     topic,
     moderatorAgentId,
-    maxDebateRounds,
+    maxDebateRounds: normalizedMaxDebateRounds,
     selectedAgentIds: agents.map((a) => a.definition.id),
     modelSelections: resolvedModelSelections,
     personaSelections: resolvedPersonaSelections,
@@ -133,7 +138,7 @@ export async function POST(
     topic,
     agents,
     moderatorAgentId,
-    maxDebateRounds,
+    maxDebateRounds: normalizedMaxDebateRounds,
     drainInterjections: ({ phase, round }) =>
       drainPendingInterjections({ sessionId: id, phase, round }),
     shouldStop: () => isSessionStopRequested(id),

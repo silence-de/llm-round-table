@@ -3,12 +3,19 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 
-const dataDir = path.join(process.cwd(), 'data');
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+const configuredDbPath = process.env.ROUND_TABLE_DB_PATH?.trim();
+const dataDir = process.env.ROUND_TABLE_DATA_DIR?.trim()
+  ? path.resolve(process.env.ROUND_TABLE_DATA_DIR)
+  : path.join(process.cwd(), 'data');
+const dbPath = configuredDbPath
+  ? path.resolve(configuredDbPath)
+  : path.join(dataDir, 'round-table.db');
+const dbDir = path.dirname(dbPath);
+
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
 }
 
-const dbPath = path.join(dataDir, 'round-table.db');
 const sqlite = new Database(dbPath);
 
 sqlite.exec(`

@@ -22,9 +22,13 @@ export async function POST(
   }
 
   const status = await getSessionStatus(id);
+  if (!status) {
+    return NextResponse.json({ error: 'session not found' }, { status: 404 });
+  }
+
   if (status !== 'running') {
     return NextResponse.json(
-      { error: `session is not running (current: ${status ?? 'not_found'})` },
+      { error: `session is not running (current: ${status})` },
       { status: 409 }
     );
   }
