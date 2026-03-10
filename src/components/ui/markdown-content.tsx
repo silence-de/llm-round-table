@@ -121,10 +121,67 @@ interface MarkdownContentProps {
   className?: string;
 }
 
+// Normalize markdown around quotes to make LLM output more robust.
+// Common failure case: **“信息不对称”** may fail left-flanking delimiter rules
+// in some CommonMark parsers when markers touch CJK + punctuation boundaries.
+// Strategy:
+// 1) Prefer semantic rewrite: **“x”** -> “**x**”
+// 2) Fallback: inject ZWSP around marker/quote boundaries.
+function preprocessMarkdown(text: string): string {
+  const STRONG_MARKER = '(\\*\\*|__)';
+  const QUOTE_PAIRS: Array<[string, string]> = [
+    ['“', '”'],
+    ['‘', '’'],
+    ['"', '"'],
+    ["'", "'"],
+    ['「', '」'],
+    ['『', '』'],
+    ['《', '》'],
+    ['〈', '〉'],
+    ['«', '»'],
+    ['‹', '›'],
+    ['〝', '〞'],
+  ];
+
+  let normalized = text;
+
+  const escapeRegExp = (value: string) =>
+    value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // Step 1: Rewrite **“x”** / __“x”__ into “**x**” / “__x__”.
+  for (const [openQuote, closeQuote] of QUOTE_PAIRS) {
+    const pattern = new RegExp(
+      `${STRONG_MARKER}${escapeRegExp(openQuote)}([^\\n]+?)${escapeRegExp(
+        closeQuote
+      )}\\1`,
+      'gu'
+    );
+    normalized = normalized.replace(
+      pattern,
+      (_, marker: string, inner: string) =>
+        `${openQuote}${marker}${inner}${marker}${closeQuote}`
+    );
+  }
+
+  // Step 2: ZWSP fallback for remaining marker/quote adjacency.
+  const quoteClass = '["\'“”‘’「」『』《》〈〉«»‹›〝〞]';
+  normalized = normalized.replace(
+    new RegExp(`(\\*\\*|__)(${quoteClass})`, 'gu'),
+    '$1\u200B$2'
+  );
+  normalized = normalized.replace(
+    new RegExp(`(${quoteClass})(\\*\\*|__)`, 'gu'),
+    '$1\u200B$2'
+  );
+
+  return normalized;
+}
+
 export function MarkdownContent({ content, streaming, className }: MarkdownContentProps) {
   // Append block cursor character during streaming so it flows naturally inside
   // the last rendered paragraph rather than needing a separate DOM element.
-  const text = streaming ? `${content}▋` : content;
+  const raw = streaming ? `${content}▋` : content;
+  const text = preprocessMarkdown(raw);
 
   return (
     <div className={className}>
