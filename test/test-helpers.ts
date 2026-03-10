@@ -12,6 +12,9 @@ export function resetTestDatabase() {
     DELETE FROM interjections;
     DELETE FROM messages;
     DELETE FROM minutes;
+    DELETE FROM decision_summaries;
+    DELETE FROM research_sources;
+    DELETE FROM research_runs;
     DELETE FROM sessions;
   `);
 }

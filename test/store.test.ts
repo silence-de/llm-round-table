@@ -19,8 +19,34 @@ test('store reset clears live and replay state while preserving stage mode', () 
   store.startModerator('summary');
   store.appendModeratorToken('minutes');
   store.addInterjection({ content: 'follow-up' });
-  store.setResearchStatus('complete');
+  store.setDecisionSummary({
+    summary: 'summary',
+    recommendedOption: 'option',
+    why: [],
+    risks: [],
+    openQuestions: [],
+    nextActions: [],
+    confidence: 70,
+    evidence: [],
+  });
+  store.setResearchStatus('completed');
   store.setResearchBriefText('brief');
+  store.setResearchRun({
+    id: 'session-1',
+    sessionId: 'session-1',
+    status: 'completed',
+    queryPlan: ['query'],
+    searchConfig: {
+      enabled: true,
+      mode: 'auto',
+      userQueries: [],
+      preferredDomains: [],
+      maxSources: 6,
+    },
+    summary: 'research summary',
+    evaluation: null,
+    sources: [],
+  });
   store.setReplayStatus('playing');
   store.setReplayCursor(3);
 
@@ -33,7 +59,9 @@ test('store reset clears live and replay state while preserving stage mode', () 
   assert.equal(next.agentMessages.size, 0);
   assert.equal(next.moderatorMessages.length, 0);
   assert.equal(next.interjections.length, 0);
+  assert.equal(next.decisionSummary, null);
   assert.equal(next.research.status, 'idle');
+  assert.equal(next.research.run, null);
   assert.equal(next.replay.status, 'idle');
   assert.equal(next.ui.stageMode, 'mobile-hybrid');
 });
