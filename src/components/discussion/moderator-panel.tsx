@@ -24,10 +24,15 @@ export function ModeratorPanel({
   if (messages.length === 0) return null;
 
   return (
-    <Card className="border-amber-200/50 bg-[linear-gradient(180deg,rgba(255,246,221,.9),rgba(255,237,193,.65))] dark:bg-amber-950/20">
+    <Card className="rt-panel-strong">
       <CardHeader className="pb-2 pt-3 px-4">
         <CardTitle className="flex items-center gap-2 text-sm font-medium">
-          <PixelAgentAvatar seed="moderator" color="#f59e0b" size={34} />
+          <PixelAgentAvatar
+            seed="moderator"
+            color="var(--rt-warning-state)"
+            size={34}
+            sprite="/sprites/fallback.svg"
+          />
           主持人 (Moderator)
         </CardTitle>
       </CardHeader>
@@ -37,7 +42,7 @@ export function ModeratorPanel({
             <div key={i}>
               {i > 0 && <Separator className="my-3" />}
               <div className="mb-1">
-                <span className="text-xs font-medium text-amber-600">
+                <span className="text-xs font-medium rt-warning">
                   {PHASE_LABELS[msg.phase] ?? msg.phase}
                 </span>
               </div>

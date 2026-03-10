@@ -56,20 +56,21 @@ export function RoundTableStage({
   stageMode,
 }: RoundTableStageProps) {
   const activeAgent = agents.find((a) => a.id === activeSpeakerId);
+  const moderatorGlow = moderator.accentGlow ?? 'var(--rt-stage-glow-primary)';
 
   // ─── Mobile-hybrid layout ────────────────────────────────────────────────
   if (stageMode === 'mobile-hybrid') {
     return (
-      <section className="relative overflow-hidden rounded-3xl border border-indigo-200/35 bg-[radial-gradient(circle_at_20%_8%,rgba(98,70,234,0.3),transparent_34%),radial-gradient(circle_at_88%_90%,rgba(228,88,88,0.2),transparent_30%),linear-gradient(165deg,#101021,#191b38)] p-4 text-indigo-50">
-        <div className="pointer-events-none absolute inset-0 opacity-20 [background-image:linear-gradient(to_right,rgba(255,255,255,.1)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,.1)_1px,transparent_1px)] [background-size:20px_20px]" />
+      <section className="rt-stage-mobile rt-text-strong relative overflow-hidden rounded-3xl border p-4">
+        <div className="rt-stage-grid pointer-events-none absolute inset-0 bg-[length:20px_20px] opacity-20" />
 
         {/* Header row */}
         <div className="relative z-10 flex items-center justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[0.24em] text-indigo-200/80">Bridge Stage</p>
-            <h2 className="mt-0.5 text-sm font-semibold text-indigo-100">{labelPhase(phase)}</h2>
+            <p className="rt-label text-xs uppercase tracking-[0.24em]">Bridge Stage</p>
+            <h2 className="rt-text-strong mt-0.5 text-sm font-semibold">{labelPhase(phase)}</h2>
           </div>
-          <span className="rounded-full border border-indigo-300/35 bg-indigo-300/15 px-3 py-1 text-xs font-semibold text-indigo-100">
+          <span className="rt-chip-live rounded-full border px-3 py-1 text-xs font-semibold">
             {isRunning ? 'Live' : 'Idle'}
           </span>
         </div>
@@ -80,13 +81,13 @@ export function RoundTableStage({
           <motion.div
             animate={
               activeSpeakerId === 'moderator'
-                ? { boxShadow: '0 0 28px rgba(98,70,234,0.55)' }
-                : { boxShadow: '0 0 16px rgba(228,88,88,0.3)' }
+                ? { boxShadow: '0 0 28px color-mix(in srgb, var(--rt-live-state) 55%, transparent)' }
+                : { boxShadow: '0 0 16px color-mix(in srgb, var(--rt-stage-glow-secondary) 30%, transparent)' }
             }
-            className="relative z-10 flex h-24 w-24 items-center justify-center rounded-full border-2 border-rose-300/65 bg-[radial-gradient(circle,#ffe4e4_0%,#e45858_58%,#6246ea_100%)]"
+            className="rt-moderator-core relative z-10 flex h-24 w-24 items-center justify-center rounded-full border-2 border-[color:var(--rt-moderator-ring)]"
           >
-            <div className="rounded-full border border-rose-50/60 bg-black/55 p-2">
-              <PixelAgentAvatar seed={moderator.id} color={moderator.color} label={moderator.displayName} sprite={moderator.sprite} size={36} />
+            <div className="rt-surface-glass rounded-full border p-2">
+              <PixelAgentAvatar seed={moderator.id} color={moderator.color} sprite={moderator.sprite} size={36} />
             </div>
           </motion.div>
 
@@ -107,7 +108,7 @@ export function RoundTableStage({
                 <motion.div
                   animate={{ scale: isActive ? 1.25 : 1, opacity: isActive ? 1 : 0.65 }}
                   transition={{ duration: 0.35 }}
-                  className="h-3.5 w-3.5 rounded-full border border-indigo-100/40"
+                  className="h-3.5 w-3.5 rounded-full border border-[color:var(--rt-border-soft)]"
                   style={{
                     backgroundColor: agent.color,
                     boxShadow: isActive ? `0 0 10px ${agent.accentGlow ?? agent.color}` : 'none',
@@ -119,14 +120,14 @@ export function RoundTableStage({
         </div>
 
         {/* Active voice info */}
-        <div className="relative z-10 mt-3 rounded-2xl border border-indigo-300/20 bg-black/35 p-3">
-          <p className="text-[10px] uppercase tracking-[0.2em] text-indigo-200/70">Active Voice</p>
-          <p className="mt-0.5 text-sm font-semibold text-indigo-50">
+        <div className="rt-surface-glass relative z-10 mt-3 rounded-2xl border p-3">
+          <p className="rt-label text-[10px] uppercase tracking-[0.2em]">Active Voice</p>
+          <p className="rt-text-strong mt-0.5 text-sm font-semibold">
             {activeSpeakerId === 'moderator'
               ? `${moderator.displayName} (MC)`
               : activeAgent?.displayName ?? 'Waiting…'}
           </p>
-          <p className="mt-0.5 line-clamp-2 text-sm text-indigo-100/75">
+          <p className="rt-text-muted mt-0.5 line-clamp-2 text-sm">
             {activeSpeakerId === 'moderator'
               ? moderatorMessage?.slice(0, 120) || 'Preparing…'
               : activeAgent?.message?.content?.slice(0, 120) || 'Waiting for first response.'}
@@ -139,13 +140,13 @@ export function RoundTableStage({
   // ─── Desktop round-table layout ──────────────────────────────────────────
   // Uses a square canvas so orbit positions are a true circle, not an ellipse.
   return (
-    <section className="relative overflow-hidden rounded-3xl border border-indigo-200/40 bg-[radial-gradient(circle_at_35%_10%,rgba(98,70,234,0.3),transparent_45%),radial-gradient(circle_at_82%_92%,rgba(228,88,88,0.2),transparent_40%),linear-gradient(160deg,#121629,#1d2142)] p-5 text-indigo-50 md:p-6">
+    <section className="rt-stage rt-text-strong relative overflow-hidden rounded-3xl border p-5 md:p-6">
       {/* Grid texture */}
-      <div className="pointer-events-none absolute inset-0 opacity-20 [background-image:linear-gradient(to_right,rgba(255,255,255,.1)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,.1)_1px,transparent_1px)] [background-size:24px_24px]" />
+      <div className="rt-stage-grid pointer-events-none absolute inset-0 bg-[length:24px_24px] opacity-20" />
 
       {/* Ambient glow */}
       <motion.div
-        className="pointer-events-none absolute inset-x-16 top-4 h-16 rounded-full bg-indigo-300/10 blur-3xl"
+        className="pointer-events-none absolute inset-x-16 top-4 h-16 rounded-full bg-[color-mix(in_srgb,var(--rt-live-state)_15%,transparent)] blur-3xl"
         animate={{ opacity: isRunning ? 0.9 : 0.4 }}
         transition={{ duration: 1.6, repeat: Infinity, repeatType: 'reverse' }}
       />
@@ -171,7 +172,7 @@ export function RoundTableStage({
                 y1={CENTER}
                 x2={x2}
                 y2={y2}
-                stroke={isActive ? (agent.accentGlow ?? agent.color) : 'rgba(209,209,233,0.22)'}
+                stroke={isActive ? (agent.accentGlow ?? agent.color) : 'var(--rt-border-soft)'}
                 initial={{ opacity: 0.4 }}
                 animate={{
                   opacity: isActive ? 0.9 : 0.4,
@@ -213,33 +214,32 @@ export function RoundTableStage({
                   animate={
                     isActive
                       ? { boxShadow: `0 0 0 1.5px ${agent.accentGlow ?? agent.color}, 0 0 22px ${agent.accentGlow ?? agent.color}55` }
-                      : { boxShadow: '0 0 0 1px rgba(209,209,233,0.2)' }
+                      : { boxShadow: '0 0 0 1px var(--rt-border-soft)' }
                   }
-                  className="flex flex-col items-center gap-1.5 rounded-2xl border border-indigo-300/30 bg-black/40 px-3 py-2.5 backdrop-blur"
+                  className="rt-surface-glass flex flex-col items-center gap-1.5 rounded-2xl border px-3 py-2.5"
                   style={{ minWidth: 80 }}
                 >
                   <div className="relative">
                     <PixelAgentAvatar
                       seed={agent.id}
                       color={agent.color}
-                      label={agent.displayName}
                       size={40}
                       sprite={agent.sprite}
                     />
                     {isActive && (
-                      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 animate-pulse rounded-full bg-indigo-300 shadow-[0_0_8px_rgba(165,180,252,0.9)]" />
+                      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 animate-pulse rounded-full bg-[var(--rt-live-state)] shadow-[0_0_8px_color-mix(in_srgb,var(--rt-live-state)_88%,transparent)]" />
                     )}
                     {agent.message?.isStreaming && !isActive && (
-                      <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400/80" />
+                      <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-[color-mix(in_srgb,var(--rt-warning-state)_80%,transparent)]" />
                     )}
                   </div>
 
-                  <span className="max-w-[80px] truncate text-center text-[10px] font-semibold uppercase tracking-[0.18em] text-indigo-100/80">
+                  <span className="max-w-[80px] truncate text-center text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--rt-text-muted)]">
                     {agent.displayName}
                   </span>
 
                   {isActive && (
-                    <span className="rounded-full border border-indigo-300/50 bg-indigo-300/10 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest text-indigo-200">
+                    <span className="rt-chip-live rounded-full border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest">
                       live
                     </span>
                   )}
@@ -251,27 +251,26 @@ export function RoundTableStage({
 
         {/* Moderator at center — static CSS positioning, framer-motion only on inner glow */}
         <div className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
-          <motion.div
-            animate={
-              activeSpeakerId === 'moderator'
-                ? { boxShadow: `0 0 0 18px ${moderator.accentGlow ?? '#6246ea'}33, 0 0 60px ${moderator.accentGlow ?? '#e45858'}55` }
-                : { boxShadow: '0 0 0 12px rgba(228,88,88,0.15), 0 0 50px rgba(98,70,234,0.25)' }
+        <motion.div
+          animate={
+            activeSpeakerId === 'moderator'
+                ? { boxShadow: `0 0 0 18px ${moderatorGlow}33, 0 0 60px ${moderatorGlow}66` }
+                : { boxShadow: '0 0 0 12px color-mix(in srgb, var(--rt-stage-glow-secondary) 25%, transparent), 0 0 50px color-mix(in srgb, var(--rt-stage-glow-primary) 32%, transparent)' }
             }
             style={{ borderRadius: '50%' }}
           >
-          <div className="flex h-[180px] w-[180px] items-center justify-center rounded-full border-4 border-rose-300/70 bg-[radial-gradient(circle,#ffe6e6_0%,#e45858_50%,#6246ea_100%)]">
-            <div className="flex h-[138px] w-[138px] flex-col items-center justify-center rounded-full border border-rose-50/60 bg-black/55 px-3 text-center">
+          <div className="rt-moderator-core flex h-[180px] w-[180px] items-center justify-center rounded-full border-4 border-[color:var(--rt-moderator-ring)]">
+            <div className="rt-surface-glass flex h-[138px] w-[138px] flex-col items-center justify-center rounded-full border px-3 text-center">
               <PixelAgentAvatar
                 seed={moderator.id}
                 color={moderator.color}
-                label={moderator.displayName}
                 size={44}
                 sprite={moderator.sprite}
               />
-              <p className="mt-1.5 text-[9px] font-bold uppercase tracking-[0.28em] text-rose-100/80">
+              <p className="mt-1.5 text-[9px] font-bold uppercase tracking-[0.28em] text-[var(--rt-text-muted)]">
                 {activeSpeakerId === 'moderator' ? 'Moderating' : 'MC'}
               </p>
-              <p className="mt-0.5 line-clamp-2 max-w-full text-[10px] leading-snug text-rose-100/90">
+              <p className="mt-0.5 line-clamp-2 max-w-full text-[10px] leading-snug text-[var(--rt-text-strong)]">
                 {moderatorMessage?.slice(0, 60) || moderator.displayName}
               </p>
             </div>
@@ -281,7 +280,7 @@ export function RoundTableStage({
       </div>{/* end canvas square */}
 
       {/* Legend bar */}
-      <div className="relative mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-indigo-200/15 pt-3 text-xs text-indigo-100/65">
+      <div className="rt-border-soft rt-text-dim relative mt-4 flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-xs">
         <p className="hidden sm:block">
           {isRunning
             ? 'Highlighted nodes are speaking. Follow active spokes.'
@@ -289,14 +288,14 @@ export function RoundTableStage({
         </p>
         <div className="flex items-center gap-3">
           <span className="inline-flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-indigo-300 shadow-[0_0_10px_rgba(165,180,252,0.8)]" />
+            <span className="h-2 w-2 rounded-full bg-[var(--rt-live-state)] shadow-[0_0_10px_color-mix(in_srgb,var(--rt-live-state)_85%,transparent)]" />
             Speaking
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-rose-300" />
+            <span className="h-2 w-2 rounded-full bg-[var(--rt-moderator-ring)]" />
             MC
           </span>
-          <span className="rounded-full border border-indigo-300/20 bg-indigo-300/10 px-2 py-0.5 font-semibold text-indigo-100/90">
+          <span className="rt-chip-live rounded-full border px-2 py-0.5 font-semibold">
             {labelPhase(phase)}
           </span>
         </div>

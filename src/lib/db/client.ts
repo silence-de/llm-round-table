@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   max_debate_rounds INTEGER NOT NULL,
   selected_agent_ids TEXT NOT NULL DEFAULT '[]',
   model_selections TEXT NOT NULL DEFAULT '{}',
+  persona_selections TEXT NOT NULL DEFAULT '{}',
   personas TEXT NOT NULL DEFAULT '{}',
   usage_input_tokens INTEGER NOT NULL DEFAULT 0,
   usage_output_tokens INTEGER NOT NULL DEFAULT 0,
@@ -73,6 +74,7 @@ const ensureColumn = (table: string, column: string, definition: string) => {
 
 ensureColumn('sessions', 'selected_agent_ids', "TEXT NOT NULL DEFAULT '[]'");
 ensureColumn('sessions', 'model_selections', "TEXT NOT NULL DEFAULT '{}'");
+ensureColumn('sessions', 'persona_selections', "TEXT NOT NULL DEFAULT '{}'");
 ensureColumn('sessions', 'personas', "TEXT NOT NULL DEFAULT '{}'");
 ensureColumn('sessions', 'usage_input_tokens', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('sessions', 'usage_output_tokens', 'INTEGER NOT NULL DEFAULT 0');

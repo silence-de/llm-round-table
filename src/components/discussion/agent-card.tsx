@@ -1,7 +1,8 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import type { AgentMessage } from '@/stores/discussion-store';
 import { PixelAgentAvatar } from '@/components/discussion/pixel-agent-avatar';
 
@@ -9,39 +10,87 @@ interface AgentCardProps {
   agentId: string;
   displayName: string;
   color: string;
+  sprite?: string;
+  accentGlow?: string;
   message?: AgentMessage;
 }
 
-export function AgentCard({ displayName, color, message }: AgentCardProps) {
+export function AgentCard({
+  displayName,
+  color,
+  sprite,
+  accentGlow,
+  message,
+}: AgentCardProps) {
+  const isSpeaking = Boolean(message?.isStreaming);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!message?.isStreaming) return;
+    if (!viewportRef.current) return;
+    viewportRef.current.scrollTop = viewportRef.current.scrollHeight;
+  }, [message?.content, message?.isStreaming]);
+
   return (
-    <Card className="flex h-full min-h-[240px] flex-col border-cyan-300/25 bg-cyan-950/5">
-      <CardHeader className="pb-2 pt-3 px-4">
-        <CardTitle className="flex items-center gap-2 text-sm font-medium">
-          <PixelAgentAvatar seed={displayName} color={color} size={34} />
-          {displayName}
-          {message?.isStreaming && (
-            <span className="ml-auto text-xs text-muted-foreground animate-pulse">
-              输出中...
-            </span>
-          )}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="flex-1 px-4 pb-3">
-        <ScrollArea className="h-full max-h-[300px]">
-          {message ? (
-            <div className="text-sm whitespace-pre-wrap leading-relaxed">
-              {message.content}
-              {message.isStreaming && (
-                <span className="inline-block w-1.5 h-4 bg-foreground/70 animate-pulse ml-0.5" />
-              )}
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28 }}
+      className="h-full"
+    >
+      <Card
+        className={`flex h-full min-h-[268px] flex-col transition-all duration-300 ${
+          isSpeaking
+            ? 'rt-border-strong bg-[color-mix(in_srgb,var(--rt-live-state)_12%,transparent)]'
+            : 'rt-border-soft bg-[color-mix(in_srgb,var(--rt-live-state)_6%,transparent)]'
+        }`}
+        style={
+          isSpeaking
+            ? {
+                boxShadow: `0 0 0 1px ${accentGlow ?? color}, 0 0 30px ${(accentGlow ?? color)}55`,
+              }
+            : undefined
+        }
+      >
+        <CardHeader className="px-4 pb-2 pt-3">
+          <CardTitle className="flex items-center gap-2 text-sm font-medium">
+            <PixelAgentAvatar
+              seed={displayName}
+              color={color}
+              sprite={sprite}
+              size={34}
+            />
+            <div className="min-w-0">
+              <div className="truncate text-base font-semibold rt-text-strong">
+                {displayName}
+              </div>
+              <div className="text-[10px] uppercase tracking-[0.2em] rt-text-muted">
+                {message?.phase ?? 'awaiting turn'}
+              </div>
             </div>
-          ) : (
-            <div className="text-sm text-muted-foreground italic">
-              等待发言...
-            </div>
-          )}
-        </ScrollArea>
-      </CardContent>
-    </Card>
+            {message?.isStreaming && (
+              <span className="ml-auto text-xs rt-text-muted animate-pulse">
+                输出中...
+              </span>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex-1 px-4 pb-3">
+          <div ref={viewportRef} className="h-full max-h-[320px] overflow-auto pr-1">
+            {message ? (
+              <div className="whitespace-pre-wrap text-sm leading-7 rt-text-strong">
+                {message.content}
+                {message.isStreaming && (
+                  <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-foreground/70" />
+                )}
+              </div>
+            ) : (
+              <div className="text-sm italic rt-text-dim">等待发言...</div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
   );
 }

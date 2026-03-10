@@ -1,5 +1,6 @@
 import { AGENT_CATALOG } from '@/lib/agents/registry';
-import type { SessionAgent } from '@/lib/agents/types';
+import { resolvePersonaText } from '@/lib/agents/persona-presets';
+import type { PersonaSelection, SessionAgent } from '@/lib/agents/types';
 import {
   appendMessage,
   createSession,
@@ -26,6 +27,7 @@ export async function POST(
     topic,
     agentIds,
     modelSelections = {},
+    personaSelections = {},
     personas = {},
     moderatorAgentId = 'claude',
     maxDebateRounds = 2,
@@ -33,6 +35,7 @@ export async function POST(
     topic: string;
     agentIds: string[];
     modelSelections?: Record<string, string>; // agentId -> selectedModelId
+    personaSelections?: Record<string, PersonaSelection>;
     personas?: Record<string, string>;
     moderatorAgentId?: string;
     maxDebateRounds?: number;
@@ -53,6 +56,7 @@ export async function POST(
   // Build session agents from catalog, skipping those without API keys
   const agents: SessionAgent[] = [];
   const resolvedModelSelections: Record<string, string> = {};
+  const resolvedPersonaSelections: Record<string, PersonaSelection> = {};
   const resolvedPersonas: Record<string, string> = {};
   for (const agentId of agentIds) {
     const definition = AGENT_CATALOG.find((a) => a.id === agentId);
@@ -60,9 +64,13 @@ export async function POST(
     // Skip if API key is missing
     if (!process.env[definition.envKeyName]) continue;
     const selectedModelId = modelSelections[agentId];
-    const persona = personas[agentId];
-    agents.push({ definition, selectedModelId, persona });
+    const personaSelection = personaSelections[agentId];
+    const persona = resolvePersonaText(personaSelection, personas[agentId]);
+    agents.push({ definition, selectedModelId, personaSelection, persona });
     resolvedModelSelections[agentId] = selectedModelId ?? definition.modelId;
+    if (personaSelection?.presetId || personaSelection?.customNote) {
+      resolvedPersonaSelections[agentId] = personaSelection;
+    }
     if (persona) {
       resolvedPersonas[agentId] = persona;
     }
@@ -73,14 +81,22 @@ export async function POST(
     const moderatorDef = AGENT_CATALOG.find((a) => a.id === moderatorAgentId);
     if (moderatorDef) {
       const selectedModelId = modelSelections[moderatorAgentId];
-      const persona = personas[moderatorAgentId];
+      const personaSelection = personaSelections[moderatorAgentId];
+      const persona = resolvePersonaText(
+        personaSelection,
+        personas[moderatorAgentId]
+      );
       agents.unshift({
         definition: moderatorDef,
         selectedModelId,
+        personaSelection,
         persona,
       });
       resolvedModelSelections[moderatorAgentId] =
         selectedModelId ?? moderatorDef.modelId;
+      if (personaSelection?.presetId || personaSelection?.customNote) {
+        resolvedPersonaSelections[moderatorAgentId] = personaSelection;
+      }
       if (persona) {
         resolvedPersonas[moderatorAgentId] = persona;
       }
@@ -108,6 +124,7 @@ export async function POST(
     maxDebateRounds,
     selectedAgentIds: agents.map((a) => a.definition.id),
     modelSelections: resolvedModelSelections,
+    personaSelections: resolvedPersonaSelections,
     personas: resolvedPersonas,
   });
 

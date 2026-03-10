@@ -2,6 +2,7 @@
 
 import { useCallback, useRef } from 'react';
 import { nanoid } from 'nanoid';
+import type { PersonaSelection } from '@/lib/agents/types';
 import { useDiscussionStore } from '@/stores/discussion-store';
 import type { SSEEvent } from '@/lib/sse/types';
 
@@ -14,6 +15,7 @@ export function useDiscussionStream() {
       topic: string;
       agentIds: string[];
       modelSelections?: Record<string, string>;
+      personaSelections?: Record<string, PersonaSelection>;
       personas?: Record<string, string>;
       moderatorAgentId?: string;
       maxDebateRounds?: number;

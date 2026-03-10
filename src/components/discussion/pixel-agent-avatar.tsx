@@ -1,19 +1,14 @@
 'use client';
 
+import { useState } from 'react';
+import Image from 'next/image';
+
 interface PixelAgentAvatarProps {
   seed: string;
   color: string;
   size?: number;
   label?: string;
-}
-
-function hashSeed(seed: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < seed.length; i++) {
-    h ^= seed.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
+  sprite?: string;
 }
 
 export function PixelAgentAvatar({
@@ -21,59 +16,40 @@ export function PixelAgentAvatar({
   color,
   size = 56,
   label,
+  sprite,
 }: PixelAgentAvatarProps) {
-  const n = hashSeed(seed);
-  const grid = 8;
-  const cell = Math.floor(size / grid);
-  const pixels: boolean[][] = [];
-
-  for (let y = 0; y < grid; y++) {
-    pixels[y] = [];
-    for (let x = 0; x < grid; x++) {
-      // Mirror horizontal halves to get clean pixel-art identity
-      const sx = x <= 3 ? x : 7 - x;
-      const bit = ((n >> ((y * 4 + sx) % 24)) & 1) === 1;
-      const border = y === 0 || y === 7 || x === 0 || x === 7;
-      pixels[y][x] = border ? false : bit;
-    }
-  }
-
-  // Add deterministic eyes/mouth for portrait feel.
-  const eyeRow = 2 + (n % 2);
-  pixels[eyeRow][2] = true;
-  pixels[eyeRow][5] = true;
-  pixels[5][3] = true;
-  pixels[5][4] = true;
+  const [broken, setBroken] = useState(false);
+  const imageSrc = !broken && sprite ? sprite : '/sprites/fallback.svg';
 
   return (
     <div className="inline-flex flex-col items-center gap-1.5" title={label ?? seed}>
       <div
-        className="rounded-md border-2 border-black/70 bg-neutral-900 p-1 shadow-[3px_3px_0_rgba(0,0,0,0.55)]"
-        style={{ width: size + 10, height: size + 10 }}
+        className="rt-surface-strong rounded-md border-2 p-1"
+        style={{
+          width: size + 10,
+          height: size + 10,
+          borderColor: `${color}66`,
+          boxShadow: `2px 2px 0 ${color}33`,
+        }}
       >
-        <div
-          className="grid"
+        <Image
+          src={imageSrc}
+          alt={label ?? seed}
+          width={size}
+          height={size}
+          className="pixelated h-full w-full rounded-[4px]"
+          draggable={false}
           style={{
-            gridTemplateColumns: `repeat(${grid}, ${cell}px)`,
-            gridTemplateRows: `repeat(${grid}, ${cell}px)`,
+            border: `1px solid ${color}33`,
+            imageRendering: 'pixelated',
           }}
-        >
-          {pixels.flatMap((row, y) =>
-            row.map((on, x) => (
-              <span
-                key={`${x}-${y}`}
-                style={{
-                  width: cell,
-                  height: cell,
-                  background: on ? color : 'transparent',
-                }}
-              />
-            ))
-          )}
-        </div>
+          onError={() => setBroken(true)}
+          loading="lazy"
+          unoptimized
+        />
       </div>
       {label && (
-        <span className="max-w-[78px] truncate text-[10px] font-semibold uppercase tracking-wide text-foreground/85">
+        <span className="max-w-[84px] truncate text-[10px] font-semibold uppercase tracking-wide text-foreground/85">
           {label}
         </span>
       )}

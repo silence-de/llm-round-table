@@ -1,5 +1,6 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
+import type { PersonaSelection } from '../agents/types';
 import { db, sqliteDb } from './client';
 import { interjections, messages, minutes, sessions } from './schema';
 
@@ -10,6 +11,7 @@ export async function createSession(input: {
   maxDebateRounds: number;
   selectedAgentIds: string[];
   modelSelections: Record<string, string>;
+  personaSelections: Record<string, PersonaSelection>;
   personas: Record<string, string>;
 }) {
   const now = new Date();
@@ -20,6 +22,7 @@ export async function createSession(input: {
     maxDebateRounds: input.maxDebateRounds,
     selectedAgentIds: JSON.stringify(input.selectedAgentIds),
     modelSelections: JSON.stringify(input.modelSelections),
+    personaSelections: JSON.stringify(input.personaSelections),
     personas: JSON.stringify(input.personas),
     stopRequested: 0,
     status: 'running',

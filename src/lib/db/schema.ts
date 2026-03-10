@@ -7,6 +7,7 @@ export const sessions = sqliteTable('sessions', {
   maxDebateRounds: integer('max_debate_rounds').notNull(),
   selectedAgentIds: text('selected_agent_ids').notNull().default('[]'),
   modelSelections: text('model_selections').notNull().default('{}'),
+  personaSelections: text('persona_selections').notNull().default('{}'),
   personas: text('personas').notNull().default('{}'),
   usageInputTokens: integer('usage_input_tokens').notNull().default(0),
   usageOutputTokens: integer('usage_output_tokens').notNull().default(0),

@@ -1,15 +1,28 @@
 'use client';
 
+import { motion } from 'framer-motion';
 import { Badge } from '@/components/ui/badge';
 
-const PHASE_LABELS: Record<string, { label: string; color: string }> = {
-  opening: { label: '开场', color: 'bg-blue-500' },
-  initial_responses: { label: '独立发言', color: 'bg-green-500' },
-  analysis: { label: '分析', color: 'bg-yellow-500' },
-  debate: { label: '辩论', color: 'bg-orange-500' },
-  convergence: { label: '收敛', color: 'bg-purple-500' },
-  summary: { label: '总结', color: 'bg-emerald-500' },
-  completed: { label: '完成', color: 'bg-gray-500' },
+const PHASE_LABELS: Record<string, { label: string; tone: string }> = {
+  opening: { label: '开场', tone: 'var(--rt-stage-glow-primary)' },
+  initial_responses: { label: '独立发言', tone: 'var(--rt-live-state)' },
+  analysis: {
+    label: '分析',
+    tone: 'color-mix(in srgb, var(--rt-stage-glow-primary) 65%, var(--rt-hh6-headline))',
+  },
+  debate: { label: '辩论', tone: 'var(--rt-stage-glow-secondary)' },
+  convergence: {
+    label: '收敛',
+    tone: 'color-mix(in srgb, var(--rt-live-state) 65%, var(--rt-hh6-headline))',
+  },
+  summary: {
+    label: '总结',
+    tone: 'color-mix(in srgb, var(--rt-stage-glow-secondary) 45%, var(--rt-stage-glow-primary))',
+  },
+  completed: {
+    label: '完成',
+    tone: 'color-mix(in srgb, var(--rt-text-dim) 70%, var(--rt-hh6-headline))',
+  },
 };
 
 export function PhaseIndicator({
@@ -23,27 +36,43 @@ export function PhaseIndicator({
   isRunning: boolean;
   moderator?: string;
 }) {
-  const phaseInfo = PHASE_LABELS[phase] ?? { label: phase || '就绪', color: 'bg-gray-400' };
+  const phaseInfo = PHASE_LABELS[phase] ?? {
+    label: phase || '就绪',
+    tone: 'color-mix(in srgb, var(--rt-text-muted) 70%, var(--rt-hh6-headline))',
+  };
 
   return (
-    <div className="flex items-center gap-3">
-      <Badge
-        variant="secondary"
-        className={`${phaseInfo.color} text-white px-3 py-1`}
-      >
-        {phaseInfo.label}
-      </Badge>
+    <div className="flex flex-wrap items-center justify-end gap-2.5">
+      <motion.div layout>
+        <Badge
+          variant="secondary"
+          className="px-3 py-1 text-sm font-semibold text-white shadow-sm"
+          style={{
+            backgroundColor: phaseInfo.tone,
+            borderColor: 'color-mix(in srgb, var(--rt-border-strong) 65%, transparent)',
+          }}
+        >
+          {phaseInfo.label}
+        </Badge>
+      </motion.div>
       {round > 0 && (
-        <span className="text-sm text-muted-foreground">第 {round + 1} 轮</span>
+        <span className="rt-pill rounded-full border px-3 py-1 text-sm rt-text-strong">
+          第 {round + 1} 轮
+        </span>
       )}
       {moderator && !isRunning && (
-        <span className="text-xs text-muted-foreground">MC: {moderator}</span>
+        <span className="text-sm rt-text-muted">MC: {moderator}</span>
       )}
       {isRunning && (
-        <span className="flex items-center gap-1 text-sm text-muted-foreground">
-          <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+        <motion.span
+          initial={{ opacity: 0.75 }}
+          animate={{ opacity: 1 }}
+          transition={{ repeat: Infinity, repeatType: 'reverse', duration: 0.9 }}
+          className="rt-chip-live flex items-center gap-2 rounded-full border px-3 py-1 text-sm"
+        >
+          <span className="inline-block h-2.5 w-2.5 rounded-full bg-[var(--rt-stage-glow-secondary)] shadow-[0_0_12px_color-mix(in_srgb,var(--rt-stage-glow-secondary)_78%,transparent)]" />
           讨论进行中
-        </span>
+        </motion.span>
       )}
     </div>
   );
