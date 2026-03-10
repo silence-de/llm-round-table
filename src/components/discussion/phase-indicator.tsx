@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { Badge } from '@/components/ui/badge';
 
 const PHASE_LABELS: Record<string, { label: string; tone: string }> = {
+  research: { label: '网络检索', tone: 'color-mix(in srgb, var(--rt-live-state) 55%, var(--rt-hh6-primary))' },
   opening: { label: '开场', tone: 'var(--rt-stage-glow-primary)' },
   initial_responses: { label: '独立发言', tone: 'var(--rt-live-state)' },
   analysis: {

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { ResearchSource } from '@/lib/search/types';
 
 export interface AgentMessage {
   agentId: string;
@@ -10,6 +11,7 @@ export interface AgentMessage {
 export type StageMode = 'desktop-roundtable' | 'mobile-hybrid';
 export type AutoScrollMode = 'follow' | 'paused';
 export type ReplayStatus = 'idle' | 'playing' | 'paused';
+export type ResearchStatus = 'idle' | 'running' | 'complete' | 'skipped';
 
 interface DiscussionState {
   sessionId: string | null;
@@ -22,6 +24,11 @@ interface DiscussionState {
   moderatorMessages: Array<{ content: string; phase: string }>;
   interjections: Array<{ content: string; phase?: string; round?: number }>;
   error: string | null;
+  research: {
+    status: ResearchStatus;
+    sources: ResearchSource[];
+    briefText: string;
+  };
   ui: {
     activeSpeakerId: string | null;
     stageMode: StageMode;
@@ -53,6 +60,9 @@ interface DiscussionState {
   appendModeratorToken: (token: string) => void;
   finalizeModerator: () => void;
   addInterjection: (interjection: { content: string; phase?: string; round?: number }) => void;
+  setResearchStatus: (status: ResearchStatus) => void;
+  addResearchSources: (sources: ResearchSource[]) => void;
+  setResearchBriefText: (text: string) => void;
   reset: () => void;
 }
 
@@ -67,6 +77,11 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
   moderatorMessages: [],
   interjections: [],
   error: null,
+  research: {
+    status: 'idle',
+    sources: [],
+    briefText: '',
+  },
   ui: {
     activeSpeakerId: null,
     stageMode: 'desktop-roundtable',
@@ -226,6 +241,24 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
     }));
   },
 
+  setResearchStatus: (status) =>
+    set((state) => ({
+      research: { ...state.research, status },
+    })),
+
+  addResearchSources: (sources) =>
+    set((state) => ({
+      research: {
+        ...state.research,
+        sources: [...state.research.sources, ...sources],
+      },
+    })),
+
+  setResearchBriefText: (text) =>
+    set((state) => ({
+      research: { ...state.research, briefText: text },
+    })),
+
   reset: () =>
     set((state) => ({
       sessionId: null,
@@ -238,6 +271,11 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
       moderatorMessages: [],
       interjections: [],
       error: null,
+      research: {
+        status: 'idle',
+        sources: [],
+        briefText: '',
+      },
       replay: {
         status: 'idle',
         cursor: 0,

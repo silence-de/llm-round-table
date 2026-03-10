@@ -1,24 +1,37 @@
 import type { AgentResponse, ModeratorAnalysis } from './types';
 
-export function buildOpeningPrompt(topic: string, agentNames: string[]): string {
+export function buildOpeningPrompt(
+  topic: string,
+  agentNames: string[],
+  researchBrief?: string
+): string {
+  const researchSection = researchBrief
+    ? `\n\n在讨论开始前，已进行网络资讯检索，相关最新动态如下：\n${researchBrief}\n`
+    : '';
+
   return `你是一场圆桌讨论的主持人。参与者包括：${agentNames.join('、')}。
 
-讨论议题：「${topic}」
+讨论议题：「${topic}」${researchSection}
 
 请用简洁的方式：
 1. 介绍今天的讨论议题
 2. 将议题拆解为 2-3 个关键子问题，供参与者回答
 3. 邀请各位参与者分享观点
 
-用中文回答，保持专业但友好的语气。控制在 200 字以内。`;
+用中文回答，保持专业但友好的语气。控制在 250 字以内。`;
 }
 
 export function buildAgentSystemPrompt(
   topic: string,
   persona?: string,
-  interjections?: string[]
+  interjections?: string[],
+  researchBrief?: string
 ): string {
-  const base = `你是一场圆桌讨论的参与者。讨论议题：「${topic}」
+  const researchSection = researchBrief
+    ? `\n\n${researchBrief}\n\n（以上为讨论前检索到的最新网络资讯，请结合这些信息进行分析，但不必拘泥于此。）`
+    : '';
+
+  const base = `你是一场圆桌讨论的参与者。讨论议题：「${topic}」${researchSection}
 
 请从你的专业视角出发，给出你的观点和分析。要求：
 - 观点明确，有理有据

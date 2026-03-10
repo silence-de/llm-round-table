@@ -2,6 +2,7 @@ import type { SessionAgent } from '../agents/types';
 
 export enum DiscussionPhase {
   CREATED = 'created',
+  RESEARCH = 'research',
   OPENING = 'opening',
   INITIAL_RESPONSES = 'initial_responses',
   ANALYSIS = 'analysis',

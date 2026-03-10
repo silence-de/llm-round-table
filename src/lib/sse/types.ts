@@ -8,7 +8,10 @@ export type SSEEventType =
   | 'moderator_token'
   | 'moderator_done'
   | 'user_interjection'
-  | 'discussion_complete';
+  | 'discussion_complete'
+  | 'research_start'
+  | 'research_result'
+  | 'research_complete';
 
 export interface SSEEvent {
   type: SSEEventType;

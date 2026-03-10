@@ -5,6 +5,7 @@ import { nanoid } from 'nanoid';
 import type { PersonaSelection } from '@/lib/agents/types';
 import { useDiscussionStore } from '@/stores/discussion-store';
 import type { SSEEvent } from '@/lib/sse/types';
+import type { ResearchSource } from '@/lib/search/types';
 
 export function useDiscussionStream() {
   const store = useDiscussionStore();
@@ -171,6 +172,30 @@ function handleEvent(event: SSEEvent) {
           phase: event.phase,
           round: event.round,
         });
+      }
+      break;
+
+    case 'research_start':
+      s.setResearchStatus('running');
+      break;
+
+    case 'research_result':
+      if (event.content) {
+        try {
+          const sources = JSON.parse(event.content) as ResearchSource[];
+          s.addResearchSources(sources);
+        } catch {
+          // ignore malformed research result
+        }
+      }
+      break;
+
+    case 'research_complete':
+      if (event.content) {
+        s.setResearchStatus('complete');
+        s.setResearchBriefText(event.content);
+      } else {
+        s.setResearchStatus('skipped');
       }
       break;
   }

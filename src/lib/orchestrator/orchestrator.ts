@@ -17,6 +17,7 @@ import {
   buildSummaryPrompt,
   parseAnalysis,
 } from './moderator';
+import { conductResearch } from '../search/research';
 
 export class DiscussionOrchestrator {
   private config: DiscussionConfig;
@@ -30,12 +31,20 @@ export class DiscussionOrchestrator {
   private lastAnalysis: ModeratorAnalysis | null = null;
   private interjectionContext: string[] = [];
   private stopState = { checkedAt: 0, value: false };
+  private researchBrief: string | null = null;
 
   constructor(config: DiscussionConfig) {
     this.config = config;
   }
 
   async *run(): AsyncIterable<SSEEvent> {
+    if (await this.shouldStop()) {
+      yield* this.emitStopped();
+      return;
+    }
+
+    // Phase 0: Web Research (skipped gracefully if TAVILY_API_KEY not set)
+    yield* this.phaseResearch();
     if (await this.shouldStop()) {
       yield* this.emitStopped();
       return;
@@ -178,6 +187,44 @@ export class DiscussionOrchestrator {
     return phase === DiscussionPhase.DEBATE ? 45_000 : 60_000;
   }
 
+  private async *phaseResearch(): AsyncIterable<SSEEvent> {
+    // Skip gracefully when TAVILY_API_KEY is not configured
+    if (!process.env.TAVILY_API_KEY) {
+      yield { type: 'research_start', timestamp: Date.now() };
+      yield { type: 'research_complete', content: '', timestamp: Date.now() };
+      return;
+    }
+
+    yield {
+      type: 'phase_change',
+      phase: DiscussionPhase.RESEARCH,
+      timestamp: Date.now(),
+    };
+    yield { type: 'research_start', timestamp: Date.now() };
+
+    try {
+      const brief = await conductResearch(this.config.topic);
+      this.researchBrief = brief.briefText;
+
+      // Emit sources as JSON-encoded content for the client to display
+      yield {
+        type: 'research_result',
+        content: JSON.stringify(brief.sources),
+        timestamp: Date.now(),
+      };
+
+      yield {
+        type: 'research_complete',
+        content: brief.briefText,
+        timestamp: Date.now(),
+      };
+    } catch (err) {
+      // Non-fatal: log and continue without research
+      console.error('[Research] Failed, continuing without research brief:', err);
+      yield { type: 'research_complete', content: '', timestamp: Date.now() };
+    }
+  }
+
   private async *phaseOpening(): AsyncIterable<SSEEvent> {
     yield {
       type: 'phase_change',
@@ -196,7 +243,11 @@ export class DiscussionOrchestrator {
       .filter((a) => a.definition.id !== this.config.moderatorAgentId)
       .map((a) => a.definition.displayName);
 
-    const prompt = buildOpeningPrompt(this.config.topic, agentNames);
+    const prompt = buildOpeningPrompt(
+      this.config.topic,
+      agentNames,
+      this.researchBrief ?? undefined
+    );
     await this.persistUsage({ inputTokens: this.estimateTokens(prompt) });
     if (await this.shouldStop()) {
       return;
@@ -266,7 +317,8 @@ export class DiscussionOrchestrator {
       const systemPrompt = buildAgentSystemPrompt(
         this.config.topic,
         agent.persona,
-        this.interjectionContext
+        this.interjectionContext,
+        this.researchBrief ?? undefined
       );
       const userPrompt = `请就以下议题发表你的观点：「${this.config.topic}」`;
       const timeoutMs = this.getAgentTimeoutMs(
@@ -458,7 +510,8 @@ export class DiscussionOrchestrator {
             systemPrompt: buildAgentSystemPrompt(
               this.config.topic,
               agent.persona,
-              this.interjectionContext
+              this.interjectionContext,
+              this.researchBrief ?? undefined
             ),
             temperature: agent.definition.defaultTemperature,
             maxTokens: 1500,

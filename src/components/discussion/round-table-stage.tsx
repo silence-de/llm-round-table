@@ -31,6 +31,7 @@ interface RoundTableStageProps {
 
 function labelPhase(phase: string) {
   const map: Record<string, string> = {
+    research: 'Research',
     opening: 'Opening',
     initial_responses: 'Initial',
     analysis: 'Analysis',

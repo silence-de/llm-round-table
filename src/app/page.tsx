@@ -32,6 +32,7 @@ import { PhaseIndicator } from '@/components/discussion/phase-indicator';
 import { AgentCard } from '@/components/discussion/agent-card';
 import { ModeratorPanel } from '@/components/discussion/moderator-panel';
 import { RoundTableStage } from '@/components/discussion/round-table-stage';
+import { ResearchPanel } from '@/components/discussion/research-panel';
 import type { PersonaPreset, PersonaSelection } from '@/lib/agents/types';
 
 interface AgentInfo {
@@ -145,6 +146,7 @@ export default function HomePage() {
     moderatorMessages,
     interjections,
     error,
+    research,
     ui,
     replay,
     setError,
@@ -1083,6 +1085,10 @@ export default function HomePage() {
             isRunning={isRunning}
             stageMode={ui.stageMode}
           />
+
+          {research.status !== 'idle' && (
+            <ResearchPanel status={research.status} sources={research.sources} />
+          )}
 
           {error && (
             <Card className="rt-panel-strong bg-[color-mix(in_srgb,var(--rt-stage-glow-secondary)_15%,transparent)]">
