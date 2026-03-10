@@ -50,32 +50,127 @@
 :root {
   /* ── HappyHues #6 source palette (5 base colors) ──────────────────────────
      All colors in this file MUST be derivable from these five.
-     Page background : #d1d1e9   ← HSL(240° 35% 87%) — dark bg scale derives from this hue
+     Page background : #d1d1e9   ← HSL(240° 35% 87%) — light mode bg & dark hue source
      Card background : #fffffe
      Primary purple  : #6246ea
      Coral red       : #e45858
-     Charcoal dark   : #2b2c34   (text / headline color — NOT the bg derivation source)
+     Charcoal dark   : #2b2c34   (text / headline color)
   ── */
 
-  /* Source tokens (never used directly in components, only as derivation
-     reference — components use the semantic tokens below) */
+  /* Source tokens — never used directly in components */
   --rt-hh6-primary:    #6246ea;
   --rt-hh6-lavender:   #d1d1e9;   /* page background — H=240° */
   --rt-hh6-coral:      #e45858;
   --rt-hh6-charcoal:   #2b2c34;   /* text / headline */
   --rt-hh6-offwhite:   #fffffe;   /* card background */
-  /* Keep legacy names for any external reference */
   --rt-hh6-secondary:  #d1d1e9;
   --rt-hh6-tertiary:   #e45858;
   --rt-hh6-headline:   #2b2c34;
-  --rt-hh6-background: #d1d1e9;   /* ← correct: HH6 page background, not #fffffe */
+  --rt-hh6-background: #d1d1e9;
 
-  /* ── Dark background scale ─────────────────────────────────────────────────
-     Derived by darkening #d1d1e9 (hsl = 240° 35% 87%) while preserving
-     its pure H=240° hue character (R=G channels — no warm/green drift).
-     Saturation is clamped to ~19-25% to stay in-gamut at low lightness.
-     Level 0 (darkest) → Level 5 (most elevated)
+  /* ── Light background scale (H=240°, lavender → white) ─────────────────
+     Level 0 (deepest shadow) → Level 5 (highest card elevation)
   */
+  --rt-bg-0:  #c4c4e0;   /* deep lavender shadow          (H=240° S=32% L=76%) */
+  --rt-bg-1:  #d1d1e9;   /* page background  — HH6 exact  (H=240° S=35% L=87%) */
+  --rt-bg-2:  #e4e4f4;   /* panel / sidebar tint           (H=240° S=42% L=93%) */
+  --rt-bg-3:  #f0f0fb;   /* surface / card                 (H=240° S=70% L=97%) */
+  --rt-bg-4:  #f6f6fd;   /* elevated surface               (H=240° S=80% L=98%) */
+  --rt-bg-5:  #fffffe;   /* highest elevation — HH6 exact  (off-white) */
+
+  /* ── Gradient anchors ──────────────────────────────────────────────────── */
+  --rt-shell-grad-a:        var(--rt-bg-1);      /* #d1d1e9 lavender */
+  --rt-shell-grad-b:        var(--rt-bg-0);      /* #c4c4e0 deep lavender */
+  --rt-shell-grad-c:        #c8b8fc;             /* HH6 purple tint (light) */
+  --rt-stage-grad-a:        var(--rt-bg-1);
+  --rt-stage-grad-b:        var(--rt-bg-2);
+  --rt-stage-mobile-grad-a: var(--rt-bg-1);
+  --rt-stage-mobile-grad-b: var(--rt-bg-2);
+  --rt-grid-line: #2b2c3410;
+
+  /* ── Panel / surface semantic tokens ──────────────────────────────────── */
+  --rt-panel-bg:        var(--rt-bg-5);   /* white panels on lavender bg */
+  --rt-panel-bg-strong: var(--rt-bg-0);   /* deep lavender for strong contrast */
+  --rt-surface-bg:      var(--rt-bg-5);   /* white surfaces */
+  --rt-surface-overlay: var(--rt-bg-3);   /* near-white overlay */
+
+  /* Meeting-minutes surface: lavender tint */
+  --rt-surface-minutes: #eaeaf8;
+
+  /* ── Accent / state colors ──────────────────────────────────────────────
+     Adjusted for legibility on light lavender background.
+  */
+  --rt-surface-live:         #6246ea;   /* exact HH6 primary */
+  --rt-live-state:           #6246ea;
+
+  --rt-stage-glow-primary:   #6246ea;
+  --rt-stage-glow-secondary: #e45858;
+
+  /* Warning: darkened amber for light-bg contrast */
+  --rt-warning-state: #b96010;
+
+  /* Error: darkened coral for light-bg contrast */
+  --rt-error-state: #c83838;
+
+  /* Moderator avatar */
+  --rt-moderator-ring: #f0aeae;
+  --rt-moderator-core: #f8d0d0;
+
+  /* ── Text scale (HH6 charcoal → muted) ───────────────────────────────── */
+  --rt-text-strong: #2b2c34;   /* HH6 charcoal exact */
+  --rt-text-muted:  #5e5f6e;   /* charcoal lightened ≈ 40% */
+  --rt-text-dim:    #8b8c9e;   /* charcoal lightened ≈ 60% */
+  --rt-label:       #72738a;   /* charcoal lightened ≈ 50% */
+
+  /* ── Borders (HH6 charcoal with opacity) ─────────────────────────────── */
+  --rt-border-soft:   #2b2c3422;
+  --rt-border-strong: #2b2c3452;
+
+  /* ── Typography ─────────────────────────────────────────────────────────── */
+  --rt-font-sans: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
+  --rt-font-mono: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+
+  /* ── shadcn/ui semantic tokens (light mode) ─────────────────────────────── */
+  --background:          #d1d1e9;   /* HH6 page bg */
+  --foreground:          #2b2c34;   /* HH6 charcoal */
+  --card:                #fffffe;   /* HH6 card bg */
+  --card-foreground:     #2b2c34;
+  --popover:             #fffffe;
+  --popover-foreground:  #2b2c34;
+  --primary:             #6246ea;   /* HH6 primary */
+  --primary-foreground:  #fffffe;
+  --secondary:           #e4e4f4;   /* bg-2 panel tint */
+  --secondary-foreground: #2b2c34;
+  --muted:               #e4e4f4;
+  --muted-foreground:    #72738a;   /* rt-label */
+  --accent:              #e45858;   /* HH6 coral */
+  --accent-foreground:   #fffffe;
+  --destructive:         #c83838;
+  --border:              #2b2c3422; /* rt-border-soft */
+  --input:               #2b2c3415;
+  --ring:                #6246ea;
+
+  /* Charts */
+  --chart-1: #6246ea;
+  --chart-2: #8a78f5;
+  --chart-3: #b8acff;
+  --chart-4: #e45858;
+  --chart-5: #f09058;
+
+  --radius: 0.625rem;
+
+  --sidebar:                    #fffffe;
+  --sidebar-foreground:         #2b2c34;
+  --sidebar-primary:            #6246ea;
+  --sidebar-primary-foreground: #fffffe;
+  --sidebar-accent:             #e4e4f4;
+  --sidebar-accent-foreground:  #2b2c34;
+  --sidebar-border:             #2b2c3422;
+  --sidebar-ring:               #6246ea;
+}
+
+.dark {
+  /* ── Dark background scale (H=240°, derived from #d1d1e9's hue) ─────── */
   --rt-bg-0:  #0f0f17;   /* near-black shell underlay   (H=240° S=21% L≈7%) */
   --rt-bg-1:  #13131c;   /* page background             (H=240° S=19% L≈9%) */
   --rt-bg-2:  #1a1a28;   /* panel / sidebar             (H=240° S=21% L≈13%) */
@@ -83,103 +178,44 @@
   --rt-bg-4:  #282840;   /* elevated surface            (H=240° S=23% L≈20%) */
   --rt-bg-5:  #31314e;   /* hover / accent surface      (H=240° S=23% L≈25%) */
 
-  /* ── Gradient anchors ──────────────────────────────────────────────────── */
-  --rt-shell-grad-a:        var(--rt-bg-1);      /* #13131c */
-  --rt-shell-grad-b:        var(--rt-bg-2);      /* #1a1a28 */
-  --rt-shell-grad-c:        #321b5e;             /* HH6 purple #6246ea @ 23% lightness */
+  /* ── Gradient anchors ────────────────────────────────────────────────── */
+  --rt-shell-grad-a:        var(--rt-bg-1);
+  --rt-shell-grad-b:        var(--rt-bg-2);
+  --rt-shell-grad-c:        #321b5e;      /* HH6 purple #6246ea @ 23% L */
   --rt-stage-grad-a:        var(--rt-bg-1);
   --rt-stage-grad-b:        var(--rt-bg-2);
-  --rt-stage-mobile-grad-a: var(--rt-bg-0);      /* #0f0f17 */
-  --rt-stage-mobile-grad-b: #151520;             /* between bg-0 and bg-2, H=240° */
+  --rt-stage-mobile-grad-a: var(--rt-bg-0);
+  --rt-stage-mobile-grad-b: #151520;
   --rt-grid-line: #ffffff1a;
 
-  /* ── Panel / surface semantic tokens ──────────────────────────────────── */
-  --rt-panel-bg:        var(--rt-bg-2);   /* #1a1a28 */
-  --rt-panel-bg-strong: var(--rt-bg-0);   /* #0f0f17 */
-  --rt-surface-bg:      var(--rt-bg-3);   /* #212133 */
-  --rt-surface-overlay: var(--rt-bg-0);   /* #0f0f17 */
-
-  /* Meeting-minutes surface: HH6 lavender (#d1d1e9) darkened to bg-3 depth */
+  /* ── Panel / surface ─────────────────────────────────────────────────── */
+  --rt-panel-bg:        var(--rt-bg-2);
+  --rt-panel-bg-strong: var(--rt-bg-0);
+  --rt-surface-bg:      var(--rt-bg-3);
+  --rt-surface-overlay: var(--rt-bg-0);
   --rt-surface-minutes: #242545;
 
-  /* ── Accent / state colors ──────────────────────────────────────────────
-     All derived from HH6 primary (#6246ea) or coral (#e45858).
-  */
-  /* Live / streaming: HH6 purple brightened +15% for dark-bg legibility */
-  --rt-surface-live:        #7357f5;
-  --rt-live-state:          #7357f5;
-
-  /* Stage glow: exact HH6 colors */
+  /* ── Accent / state ──────────────────────────────────────────────────── */
+  --rt-surface-live:         #7357f5;   /* HH6 primary +15% for dark-bg */
+  --rt-live-state:           #7357f5;
   --rt-stage-glow-primary:   #6246ea;
   --rt-stage-glow-secondary: #e45858;
+  --rt-warning-state:        #f09058;   /* coral shifted +20° to amber */
+  --rt-error-state:          #f06868;   /* coral brightened */
+  --rt-moderator-ring:       #f0aeae;
+  --rt-moderator-core:       #f8d0d0;
 
-  /* Warning: HH6 coral (#e45858) hue shifted +20° toward amber-orange */
-  --rt-warning-state: #f09058;
+  /* ── Text ────────────────────────────────────────────────────────────── */
+  --rt-text-strong: #fffffe;
+  --rt-text-muted:  #d1d1e9;
+  --rt-text-dim:    #9496b4;
+  --rt-label:       #b8b9d0;
 
-  /* Error: HH6 coral (#e45858) brightened slightly */
-  --rt-error-state: #f06868;
-
-  /* Moderator avatar: warm coral palette (from HH6 coral, progressively lightened) */
-  --rt-moderator-ring: #f0aeae;   /* coral + 40% white */
-  --rt-moderator-core: #f8d0d0;   /* coral + 65% white */
-
-  /* ── Text scale (from HH6 lavender + off-white) ──────────────────────── */
-  --rt-text-strong: #fffffe;   /* HH6 off-white exact */
-  --rt-text-muted:  #d1d1e9;   /* HH6 lavender exact */
-  --rt-text-dim:    #9496b4;   /* HH6 lavender @ 60% saturation + –30% lightness */
-  --rt-label:       #b8b9d0;   /* HH6 lavender @ –12% lightness */
-
-  /* ── Borders (HH6 lavender with opacity) ─────────────────────────────── */
+  /* ── Borders ─────────────────────────────────────────────────────────── */
   --rt-border-soft:   #d1d1e930;
   --rt-border-strong: #d1d1e965;
 
-  /* ── Typography ─────────────────────────────────────────────────────────── */
-  --rt-font-sans: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
-  --rt-font-mono: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-
-  /* ── shadcn/ui semantic tokens ──────────────────────────────────────────
-     All derived from HH6 palette.
-  */
-  --background:          #13131c;   /* bg-1: derived from #d1d1e9 H=240° */
-  --foreground:          #fffffe;   /* HH6 off-white */
-  --card:                #212133;   /* bg-3 */
-  --card-foreground:     #fffffe;
-  --popover:             #1d1d2d;   /* between bg-2 and bg-3, H=240° */
-  --popover-foreground:  #fffffe;
-  --primary:             #6246ea;   /* HH6 primary exact */
-  --primary-foreground:  #fffffe;
-  --secondary:           #2b2c34;   /* HH6 charcoal exact */
-  --secondary-foreground: #fffffe;
-  --muted:               #272740;   /* near bg-4, H=240° */
-  --muted-foreground:    #b8b9d0;   /* rt-label */
-  --accent:              #e45858;   /* HH6 coral exact */
-  --accent-foreground:   #fffffe;
-  --destructive:         #f06868;   /* rt-error-state */
-  --border:              #d1d1e930; /* rt-border-soft */
-  --input:               #d1d1e920; /* lavender, very transparent */
-  --ring:                #8a78f5;   /* HH6 purple + 25% brightness */
-
-  /* Charts: purple → lavender → coral ramp (all HH6-derived) */
-  --chart-1: #6246ea;   /* HH6 primary */
-  --chart-2: #7357f5;   /* primary +15% */
-  --chart-3: #8a78f5;   /* primary +25% */
-  --chart-4: #b8acff;   /* primary +42% (tint) */
-  --chart-5: #e45858;   /* HH6 coral */
-
-  --radius: 0.625rem;
-
-  --sidebar:                    #1a1a28;   /* bg-2, H=240° */
-  --sidebar-foreground:         #fffffe;
-  --sidebar-primary:            #6246ea;
-  --sidebar-primary-foreground: #fffffe;
-  --sidebar-accent:             #282840;   /* bg-4, H=240° */
-  --sidebar-accent-foreground:  #fffffe;
-  --sidebar-border:             #d1d1e930;
-  --sidebar-ring:               #8a78f5;
-}
-
-.dark {
-  /* Same as :root — app is dark-only; no light variant */
+  /* ── shadcn/ui tokens ────────────────────────────────────────────────── */
   --background:          #13131c;
   --foreground:          #fffffe;
   --card:                #212133;

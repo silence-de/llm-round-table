@@ -32,6 +32,7 @@ import {
 import { useDiscussionStore } from '@/stores/discussion-store';
 import { useDiscussionStream } from '@/hooks/use-discussion-stream';
 import { PhaseIndicator } from '@/components/discussion/phase-indicator';
+import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { RoundTableStage } from '@/components/discussion/round-table-stage';
 import { ResearchPanel } from '@/components/discussion/research-panel';
 import { MarkdownContent } from '@/components/ui/markdown-content';
@@ -1354,12 +1355,15 @@ export default function HomePage() {
               Multi-agent council · strategy, investment &amp; life planning
             </p>
           </div>
-          <PhaseIndicator
-            phase={phase}
-            round={round}
-            isRunning={isRunning}
-            moderator={stageModerator.displayName}
-          />
+          <div className="flex items-center gap-2">
+            <PhaseIndicator
+              phase={phase}
+              round={round}
+              isRunning={isRunning}
+              moderator={stageModerator.displayName}
+            />
+            <ThemeToggle />
+          </div>
         </div>
       </header>
 
