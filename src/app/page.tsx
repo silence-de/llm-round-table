@@ -11,6 +11,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -31,6 +32,7 @@ import { MarkdownContent } from '@/components/ui/markdown-content';
 import { DiscussionFeed } from '@/components/discussion/discussion-feed';
 import type { FeedMessage } from '@/components/discussion/discussion-feed';
 import type { PersonaPreset, PersonaSelection } from '@/lib/agents/types';
+import { buildTranscriptMarkdown, type TranscriptMessage } from '@/lib/session-artifacts';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,7 +56,9 @@ interface SessionRecord {
   status: string;
   createdAt: number | string;
   moderatorAgentId: string;
+  maxDebateRounds: number;
   selectedAgentIds?: string;
+  modelSelections?: string;
   personaSelections?: string;
   usageInputTokens: number;
   usageOutputTokens: number;
@@ -107,6 +111,19 @@ function parsePersonaSelectionMap(value?: string | null): Record<string, Persona
   }
 }
 
+function parseModelSelectionMap(value?: string | null): Record<string, string> {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object') return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    );
+  } catch {
+    return {};
+  }
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function HomePage() {
@@ -123,6 +140,8 @@ export default function HomePage() {
   const [loadingAgents, setLoadingAgents] = useState(true);
 
   const [rightTab, setRightTab] = useState<'context' | 'history'>('context');
+  const [historyQuery, setHistoryQuery] = useState('');
+  const [historyStatusFilter, setHistoryStatusFilter] = useState<'all' | SessionRecord['status']>('all');
 
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
@@ -382,6 +401,10 @@ export default function HomePage() {
     () => parsePersonaSelectionMap(historyDetail?.session.personaSelections),
     [historyDetail]
   );
+  const historyModelSelections = useMemo(
+    () => parseModelSelectionMap(historyDetail?.session.modelSelections),
+    [historyDetail]
+  );
 
   const replayableMessages = useMemo(
     () =>
@@ -623,6 +646,134 @@ export default function HomePage() {
     sprite: stageModerator.sprite,
     accentGlow: stageModerator.accentGlow,
   };
+
+  const historySearchIndex = useCallback(
+    (session: SessionRecord) => {
+      const presetLabels = Object.values(parsePersonaSelectionMap(session.personaSelections))
+        .map((selection) =>
+          selection.presetId
+            ? personaPresetMap.get(selection.presetId)?.label
+            : selection.customNote
+              ? 'Custom'
+              : undefined
+        )
+        .filter((label): label is string => Boolean(label));
+
+      return [session.topic, session.id, session.status, ...presetLabels].join(' ').toLowerCase();
+    },
+    [personaPresetMap]
+  );
+
+  const filteredSessions = useMemo(() => {
+    const query = historyQuery.trim().toLowerCase();
+    return sessions.filter((session) => {
+      const statusMatches =
+        historyStatusFilter === 'all' || session.status === historyStatusFilter;
+      if (!statusMatches) return false;
+      if (!query) return true;
+      return historySearchIndex(session).includes(query);
+    });
+  }, [historyQuery, historySearchIndex, historyStatusFilter, sessions]);
+
+  const historyStatusOptions = useMemo(
+    () =>
+      Array.from(new Set(sessions.map((session) => session.status))).sort() as Array<
+        SessionRecord['status']
+      >,
+    [sessions]
+  );
+
+  const liveTranscriptMessages = useMemo<TranscriptMessage[]>(
+    () =>
+      feedMessages.map((message) => ({
+        role: message.role,
+        phase: message.phase,
+        content: message.content,
+        displayName: message.displayName,
+      })),
+    [feedMessages]
+  );
+
+  const handleExportLiveTranscript = useCallback(() => {
+    const exportedTopic = topic.trim() || 'Live discussion';
+    downloadMarkdown(
+      `transcript-${sessionId ?? 'live'}.md`,
+      buildTranscriptMarkdown({
+        topic: exportedTopic,
+        status: isRunning ? phase || 'running' : 'idle',
+        messages: liveTranscriptMessages,
+      })
+    );
+  }, [isRunning, liveTranscriptMessages, phase, sessionId, topic]);
+
+  const handleExportHistoryTranscript = useCallback(() => {
+    if (!historyDetail) return;
+    downloadMarkdown(
+      `transcript-${historyDetail.session.id}.md`,
+      buildTranscriptMarkdown({
+        topic: historyDetail.session.topic,
+        status: historyDetail.session.status,
+        messages: historyDetail.messages.map((message) => ({
+          role: message.role,
+          phase: message.phase,
+          content: message.content,
+          displayName: message.displayName ?? message.agentId ?? message.role,
+          createdAt: message.createdAt,
+        })),
+      })
+    );
+  }, [historyDetail]);
+
+  const handleReuseHistorySetup = useCallback(() => {
+    if (!historyDetail) return;
+
+    const availableAgentIds = new Set(
+      agents.filter((agent) => agent.available).map((agent) => agent.id)
+    );
+    const requestedAgentIds = parseAgentList(historyDetail.session.selectedAgentIds);
+    const reusableAgentIds = requestedAgentIds.filter((agentId) =>
+      availableAgentIds.has(agentId)
+    );
+    const missingAgentIds = requestedAgentIds.filter(
+      (agentId) => !availableAgentIds.has(agentId)
+    );
+
+    const nextModeratorId = availableAgentIds.has(historyDetail.session.moderatorAgentId)
+      ? historyDetail.session.moderatorAgentId
+      : moderatorAgentId;
+    const nextSelectedAgents = new Set(reusableAgentIds);
+    nextSelectedAgents.add(nextModeratorId);
+
+    setTopic(historyDetail.session.topic);
+    setModeratorAgentId(nextModeratorId);
+    setMaxDebateRounds(historyDetail.session.maxDebateRounds ?? 2);
+    setSelectedAgents(nextSelectedAgents);
+    setModelSelections((prev) => ({ ...prev, ...historyModelSelections }));
+    setPersonaSelections((prev) => ({ ...prev, ...historyPersonaSelections }));
+    setRightTab('context');
+    setActiveHistoryId(null);
+    setHistoryDetail(null);
+    resetReplay();
+    setAutoScroll('follow');
+
+    if (missingAgentIds.length > 0) {
+      setError(
+        `Loaded setup with available agents only. Missing API keys for: ${missingAgentIds.join(', ')}`
+      );
+      return;
+    }
+
+    setError(null);
+  }, [
+    agents,
+    historyDetail,
+    historyModelSelections,
+    historyPersonaSelections,
+    moderatorAgentId,
+    resetReplay,
+    setAutoScroll,
+    setError,
+  ]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Render
@@ -910,6 +1061,17 @@ export default function HomePage() {
                     : 'Discussion Feed'}
               </h2>
 
+              {!historyDetail && feedMessages.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 shrink-0 text-xs"
+                  onClick={handleExportLiveTranscript}
+                >
+                  Export Transcript
+                </Button>
+              )}
+
               {/* Follow-latest button when auto-scroll is paused */}
               {ui.autoScroll === 'paused' && !historyDetail && (
                 <Button
@@ -1141,11 +1303,48 @@ export default function HomePage() {
                       Sessions
                     </p>
                   </div>
+                  <div className="mb-2 space-y-2">
+                    <Input
+                      value={historyQuery}
+                      onChange={(event) => setHistoryQuery(event.target.value)}
+                      placeholder="Search topic, status, preset…"
+                      className="rt-input h-8 text-xs"
+                    />
+                    <div className="flex items-center gap-2">
+                      <Select
+                        value={historyStatusFilter}
+                        onValueChange={(value) =>
+                          setHistoryStatusFilter(value as typeof historyStatusFilter)
+                        }
+                      >
+                        <SelectTrigger className="rt-input h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all" className="text-xs">
+                            All statuses
+                          </SelectItem>
+                          {historyStatusOptions.map((status) => (
+                            <SelectItem key={status} value={status} className="text-xs">
+                              {status}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <span className="text-[11px] rt-text-dim">
+                        {filteredSessions.length} / {sessions.length}
+                      </span>
+                    </div>
+                  </div>
                   {sessions.length === 0 ? (
                     <p className="text-sm rt-text-muted">No sessions yet.</p>
+                  ) : filteredSessions.length === 0 ? (
+                    <p className="text-sm rt-text-muted">
+                      No sessions match the current filters.
+                    </p>
                   ) : (
                     <div className="space-y-1.5">
-                      {sessions.map((session) => {
+                      {filteredSessions.map((session) => {
                         const active = session.id === activeHistoryId;
                         const presetLabels = Object.values(
                           parsePersonaSelectionMap(session.personaSelections)
@@ -1239,6 +1438,23 @@ export default function HomePage() {
                             </span>
                           );
                         })}
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        <Button
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          onClick={handleReuseHistorySetup}
+                        >
+                          Use setup
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 text-xs"
+                          onClick={handleExportHistoryTranscript}
+                        >
+                          Export transcript
+                        </Button>
                       </div>
                     </div>
 
