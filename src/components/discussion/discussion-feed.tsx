@@ -32,7 +32,6 @@ function phaseLabel(phase: string): string {
   if (phase === 'opening') return 'Opening';
   if (phase === 'closing' || phase === 'summary') return 'Closing Summary';
   if (phase === 'research') return 'Research Phase';
-  // debate_1, debate_2 … or debate/round_1 etc.
   const roundMatch = phase.match(/(\d+)/);
   if (roundMatch) return `Round ${roundMatch[1]}`;
   return phase.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -84,19 +83,17 @@ export function DiscussionFeed({
           <p className="text-sm rt-text-dim">{emptyLabel}</p>
         </div>
       ) : (
-        <div className="py-3">
+        <div className="py-2">
           {messages.map((msg, idx) => {
             const prev = messages[idx - 1];
             const next = messages[idx + 1];
 
-            // Phase change separator
             const phaseChanged = !prev || prev.phase !== msg.phase;
             const showSeparator =
               phaseChanged &&
               idx > 0 &&
               phaseOrder(msg.phase) !== phaseOrder(prev?.phase ?? '');
 
-            // Group consecutive same-speaker bubbles
             const isFirst =
               !prev || prev.displayName !== msg.displayName || prev.role !== msg.role || phaseChanged;
             const isLast =
@@ -104,14 +101,8 @@ export function DiscussionFeed({
 
             return (
               <div key={msg.id}>
-                {showSeparator && (
-                  <PhaseSeparator phase={msg.phase} />
-                )}
-                <FeedBubble
-                  message={msg}
-                  showHeader={isFirst}
-                  roundBottom={isLast}
-                />
+                {showSeparator && <PhaseSeparator phase={msg.phase} />}
+                <FeedBubble message={msg} showHeader={isFirst} roundBottom={isLast} />
               </div>
             );
           })}
@@ -130,23 +121,41 @@ function PhaseSeparator({ phase }: { phase: string }) {
   const isClosing = phase === 'closing' || phase === 'summary';
 
   return (
-    <div className="relative flex items-center gap-3 px-4 py-4">
-      <div className="flex-1 border-t rt-border-soft" />
+    <div className="relative flex items-center gap-3 px-5 py-3">
+      <div className="flex-1 border-t border-dashed rt-border-soft" />
       <span
         className={[
-          'shrink-0 rounded-full border px-3 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em]',
+          'shrink-0 rounded-full border px-2.5 py-0.5 text-[10px] font-medium tracking-wide',
           isDebate
-            ? 'border-[color-mix(in_srgb,var(--rt-live-state)_35%,transparent)] bg-[color-mix(in_srgb,var(--rt-live-state)_10%,transparent)] text-[color-mix(in_srgb,var(--rt-live-state)_90%,var(--foreground))]'
+            ? 'border-[color-mix(in_srgb,var(--rt-live-state)_30%,transparent)] bg-[color-mix(in_srgb,var(--rt-live-state)_8%,transparent)] text-[color-mix(in_srgb,var(--rt-live-state)_85%,var(--foreground))]'
             : isClosing
-              ? 'border-[color-mix(in_srgb,var(--rt-warning-state)_40%,transparent)] bg-[color-mix(in_srgb,var(--rt-warning-state)_10%,transparent)] text-[color-mix(in_srgb,var(--rt-warning-state)_90%,var(--foreground))]'
+              ? 'border-[color-mix(in_srgb,var(--rt-warning-state)_30%,transparent)] bg-[color-mix(in_srgb,var(--rt-warning-state)_8%,transparent)] text-[color-mix(in_srgb,var(--rt-warning-state)_85%,var(--foreground))]'
               : 'rt-border-soft rt-surface rt-text-dim',
-        ]
-          .join(' ')}
+        ].join(' ')}
       >
         {label}
       </span>
-      <div className="flex-1 border-t rt-border-soft" />
+      <div className="flex-1 border-t border-dashed rt-border-soft" />
     </div>
+  );
+}
+
+// ─── Live streaming dot ────────────────────────────────────────────────────────
+
+function LiveDot({ color }: { color: string }) {
+  return (
+    <span className="flex items-center gap-1">
+      <span className="relative flex h-1.5 w-1.5">
+        <span
+          className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60"
+          style={{ backgroundColor: color }}
+        />
+        <span
+          className="relative inline-flex rounded-full h-1.5 w-1.5"
+          style={{ backgroundColor: color }}
+        />
+      </span>
+    </span>
   );
 }
 
@@ -165,46 +174,33 @@ function FeedBubble({
   const accentColor =
     message.color ?? (isModerator ? 'var(--rt-warning-state)' : 'var(--rt-text-muted)');
 
-  // Moderator messages: full-width announcement card (no avatar column)
+  // Moderator: full-width left-border card with subtle purple tint
   if (isModerator) {
     return (
       <div className={`px-4 ${showHeader ? 'pt-3' : 'pt-0.5'}`}>
         {showHeader && (
-          <div className="mb-1 flex items-center gap-2">
+          <div className="mb-1.5 flex items-center gap-2">
             <span
               className="h-1.5 w-1.5 rounded-full shrink-0"
               style={{ backgroundColor: accentColor }}
             />
             <span
-              className="text-[11px] font-semibold uppercase tracking-[0.15em]"
+              className="text-xs font-semibold"
               style={{ color: accentColor }}
             >
               {message.displayName}
             </span>
-            <span className="text-[10px] uppercase tracking-[0.12em] rt-text-dim">MC</span>
-            {message.isStreaming && (
-              <span className="flex items-center gap-1 ml-1">
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
-                    style={{ backgroundColor: 'var(--rt-warning-state)' }} />
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5"
-                    style={{ backgroundColor: 'var(--rt-warning-state)' }} />
-                </span>
-                <span className="text-[10px] rt-text-muted">Live</span>
-              </span>
-            )}
+            <span className="text-[10px] rt-text-dim font-medium">Moderator</span>
+            {message.isStreaming && <LiveDot color={accentColor} />}
           </div>
         )}
         <div
           className={[
             'px-4 py-3 text-sm border-l-2',
-            'border-l-[color-mix(in_srgb,var(--rt-warning-state)_55%,transparent)]',
-            'bg-[color-mix(in_srgb,var(--rt-warning-state)_6%,transparent)]',
+            'border-l-[color-mix(in_srgb,var(--rt-hh6-primary)_35%,transparent)]',
+            'bg-[color-mix(in_srgb,var(--rt-hh6-primary)_5%,transparent)]',
             showHeader ? 'rounded-tr-2xl rounded-br-xl' : 'rounded-r-xl',
             roundBottom ? 'rounded-br-2xl' : '',
-            message.isStreaming
-              ? 'shadow-[2px_0_12px_color-mix(in_srgb,var(--rt-warning-state)_15%,transparent)]'
-              : '',
           ]
             .filter(Boolean)
             .join(' ')}
@@ -219,22 +215,22 @@ function FeedBubble({
     );
   }
 
-  // Agent messages: avatar + chat bubble
+  // Agent: avatar + chat bubble
   return (
     <div className={`flex gap-3 px-4 ${showHeader ? 'pt-4' : 'pt-0.5'}`}>
-      {/* Avatar column */}
-      <div className="w-8 shrink-0">
+      {/* Avatar column — slightly smaller (28px) */}
+      <div className="w-7 shrink-0">
         {showHeader &&
           (message.sprite ? (
             <PixelAgentAvatar
               seed={message.displayName}
               color={message.color ?? '#888'}
               sprite={message.sprite}
-              size={32}
+              size={28}
             />
           ) : (
             <div
-              className="flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-bold uppercase text-white"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold text-white"
               style={{ backgroundColor: accentColor }}
             >
               {message.displayName.slice(0, 2)}
@@ -252,31 +248,20 @@ function FeedBubble({
             >
               {message.displayName}
             </span>
-            <span className="text-[10px] uppercase tracking-[0.12em] rt-text-dim">
-              {message.phase}
+            <span className="text-[10px] rt-text-dim">
+              {phaseLabel(message.phase)}
             </span>
-            {message.isStreaming && (
-              <span className="flex items-center gap-1 ml-0.5">
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
-                    style={{ backgroundColor: accentColor }} />
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5"
-                    style={{ backgroundColor: accentColor }} />
-                </span>
-                <span className="text-[10px] rt-text-muted">Live</span>
-              </span>
-            )}
+            {message.isStreaming && <LiveDot color={accentColor} />}
           </div>
         )}
 
         <div
           className={[
-            'px-3.5 py-2.5 text-sm',
-            'rt-surface border border-[color-mix(in_srgb,var(--rt-live-state)_18%,transparent)]',
+            'px-4 py-3 text-sm rt-surface border',
             showHeader ? 'rounded-t-2xl' : 'rounded-t-sm',
             roundBottom ? 'rounded-b-2xl' : 'rounded-b-sm',
             message.isStreaming
-              ? 'shadow-[0_0_14px_color-mix(in_srgb,var(--rt-live-state)_20%,transparent)]'
+              ? 'shadow-[0_0_12px_color-mix(in_srgb,var(--rt-live-state)_18%,transparent)]'
               : '',
           ]
             .filter(Boolean)

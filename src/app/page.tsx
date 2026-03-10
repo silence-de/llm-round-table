@@ -1348,11 +1348,11 @@ export default function HomePage() {
       <header className="shrink-0 border-b rt-surface-glass px-4 py-2.5 md:px-5">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-black tracking-tight rt-text-strong md:text-2xl">
+            <h1 className="text-lg font-bold tracking-tight rt-text-strong">
               Round Table
             </h1>
-            <p className="hidden text-xs rt-text-muted sm:block">
-              Multi-agent council · strategy, investment &amp; life planning
+            <p className="hidden text-xs rt-text-dim sm:block font-normal">
+              Multi-agent council · strategy &amp; decisions
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -1368,14 +1368,14 @@ export default function HomePage() {
       </header>
 
       {/* ── 3-column main grid ── */}
-      <main className="flex-1 overflow-hidden grid gap-3 p-3 xl:grid-cols-[280px_1fr_340px] lg:grid-cols-[260px_1fr]">
+      <main className="flex-1 overflow-hidden grid gap-2 p-3 xl:grid-cols-[280px_1fr_340px] lg:grid-cols-[260px_1fr]">
 
         {/* ─────────────────────────────────────────────────────────────────
             LEFT PANEL: Session Setup + Compact Agent Config
         ───────────────────────────────────────────────────────────────── */}
         <aside className="flex min-h-0 flex-col gap-2 overflow-hidden">
           {/* ── Tab navigation ── */}
-          <div className="shrink-0 flex rounded-xl border rt-surface p-1 gap-0.5">
+          <div className="shrink-0 flex border-b rt-border-soft gap-0">
             {([
               { id: 'brief', icon: FileText, label: 'Brief' },
               { id: 'council', icon: Users, label: 'Council' },
@@ -1384,10 +1384,10 @@ export default function HomePage() {
               <button
                 key={id}
                 onClick={() => setLeftTab(id)}
-                className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition-all ${
+                className={`flex flex-1 items-center justify-center gap-1.5 py-2 text-xs font-medium transition-all border-b-2 -mb-px ${
                   leftTab === id
-                    ? 'bg-[color-mix(in_srgb,var(--rt-live-state)_18%,transparent)] rt-text-strong'
-                    : 'rt-text-dim hover:rt-text-muted'
+                    ? 'border-[var(--rt-hh6-primary)] rt-text-strong'
+                    : 'border-transparent rt-text-dim hover:rt-text-muted'
                 }`}
               >
                 <Icon className="h-3.5 w-3.5 shrink-0" />
@@ -1403,7 +1403,7 @@ export default function HomePage() {
             {leftTab === 'brief' && <>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                <label className="mb-1 block rt-eyebrow">
                   Template
                 </label>
                 <Select
@@ -1433,7 +1433,7 @@ export default function HomePage() {
                 </Select>
               </div>
               <div>
-                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                <label className="mb-1 block rt-eyebrow">
                   Decision Type
                 </label>
                 <Select
@@ -1469,7 +1469,7 @@ export default function HomePage() {
             </div>
 
             <div>
-              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+              <label className="mb-1.5 block rt-eyebrow">
                 Topic
               </label>
               <Textarea
@@ -1482,7 +1482,7 @@ export default function HomePage() {
             </div>
 
             <div>
-              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+              <label className="mb-1.5 block rt-eyebrow">
                 Goal
               </label>
               <Textarea
@@ -1496,7 +1496,7 @@ export default function HomePage() {
 
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                <label className="mb-1 block rt-eyebrow">
                   Desired Output
                 </label>
                 <Select
@@ -1537,7 +1537,7 @@ export default function HomePage() {
 
             {activeTemplate && (
               <div className="rounded-xl border rt-surface p-2.5">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                <p className="rt-eyebrow">
                   Template Guide
                 </p>
                 <div className="mt-2 space-y-1.5 text-[11px] leading-relaxed rt-text-dim">
@@ -1549,7 +1549,7 @@ export default function HomePage() {
             )}
 
             <div>
-              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+              <label className="mb-1.5 block rt-eyebrow">
                 Background
               </label>
               <Textarea
@@ -1562,7 +1562,7 @@ export default function HomePage() {
             </div>
 
             <div>
-              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+              <label className="mb-1.5 block rt-eyebrow">
                 Constraints
               </label>
               <Textarea
@@ -1578,7 +1578,7 @@ export default function HomePage() {
             {/* ── Research Tab ── */}
             {leftTab === 'research' && <>
             <div className="rounded-xl border rt-surface p-2.5">
-              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+              <p className="mb-2 rt-eyebrow">
                 Agenda
               </p>
               <div className="space-y-2">
@@ -1620,7 +1620,7 @@ export default function HomePage() {
             </div>
 
             <div className="rounded-xl border rt-surface p-2.5">
-              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+              <p className="mb-2 rt-eyebrow">
                 Research
               </p>
               <div className="space-y-2">
@@ -1742,7 +1742,7 @@ export default function HomePage() {
             {/* Moderator + Debate Rounds (2-column) */}
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                <label className="mb-1 block rt-eyebrow">
                   Moderator
                 </label>
                 <Select
@@ -1769,7 +1769,7 @@ export default function HomePage() {
                 </Select>
               </div>
               <div>
-                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                <label className="mb-1 block rt-eyebrow">
                   Rounds
                 </label>
                 <Select
@@ -1796,7 +1796,7 @@ export default function HomePage() {
 
             {/* Council heading */}
             <div className="flex items-center justify-between">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+              <p className="rt-eyebrow">
                 Council
               </p>
               <span className="text-[11px] rt-text-dim">{selectedAgents.size} selected</span>
@@ -1819,10 +1819,10 @@ export default function HomePage() {
                   return (
                     <div
                       key={agent.id}
-                      className={`rounded-xl border p-2.5 transition-all duration-200 ${
+                      className={`border-l-2 pl-2.5 pr-3 py-3 rt-surface rounded-xl transition-all duration-200 ${
                         isSelected
-                          ? 'rt-surface-live shadow-[0_0_16px_color-mix(in_srgb,var(--rt-stage-glow-primary)_18%,transparent)]'
-                          : 'rt-surface-faint opacity-55'
+                          ? 'border-[var(--rt-live-state)]'
+                          : 'border-transparent opacity-55'
                       } ${!agent.available ? 'opacity-40' : ''}`}
                     >
                       {/* Row 1: checkbox + color dot + name + badges */}
@@ -1925,8 +1925,9 @@ export default function HomePage() {
               <Button
                 onClick={handleStart}
                 disabled={isRunning || !brief.topic.trim() || selectedAgents.size < 2}
-                className="h-10 flex-1 text-sm"
+                className="h-10 flex-1 rounded-2xl text-sm"
               >
+                <Play className="h-4 w-4" />
                 Start Session
               </Button>
               {isRunning && (
@@ -1953,7 +1954,7 @@ export default function HomePage() {
           {/* Feed header */}
           <div className="shrink-0 space-y-1.5">
             <div className="flex items-center gap-2 px-0.5">
-              <h2 className="min-w-0 flex-1 truncate text-sm font-semibold rt-text-strong">
+              <h2 className="min-w-0 flex-1 truncate text-base font-semibold rt-text-strong">
                 {historyDetail
                   ? historyDetail.session.topic
                   : isRunning
@@ -2097,35 +2098,24 @@ export default function HomePage() {
           {/* ── Interjection bar — visible during live discussion ── */}
           {isRunning && !historyDetail && (
             <div className="shrink-0 rounded-2xl border rt-surface p-2.5 space-y-2">
-              {/* Control-type icon strip */}
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.18em] rt-text-dim mr-1">
-                  Control
-                </span>
-                {(
-                  [
-                    { value: 'general', label: 'General', icon: MessageSquare },
-                    { value: 'add_constraint', label: 'Add Constraint', icon: Zap },
-                    { value: 'ask_comparison', label: 'Compare', icon: Activity },
-                    { value: 'force_converge', label: 'Converge', icon: FastForward },
-                    { value: 'continue_debate', label: 'Debate', icon: RotateCcw },
-                  ] as { value: DecisionControlType; label: string; icon: React.ComponentType<{ className?: string }> }[]
-                ).map(({ value, label, icon: Icon }) => (
-                  <button
-                    key={value}
-                    type="button"
-                    title={DECISION_CONTROL_LABELS[value]}
-                    onClick={() => setInterjectionControlType(value)}
-                    className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-medium transition-all ${
-                      interjectionControlType === value
-                        ? 'rt-border-strong bg-[color-mix(in_srgb,var(--rt-live-state)_20%,transparent)] rt-text-strong'
-                        : 'rt-surface rt-text-dim hover:rt-text-muted'
-                    }`}
-                  >
-                    <Icon className="h-3 w-3 shrink-0" />
-                    <span className="hidden sm:inline">{label}</span>
-                  </button>
-                ))}
+              {/* Control-type dropdown */}
+              <div className="flex items-center gap-2">
+                <span className="rt-eyebrow shrink-0">Mode</span>
+                <Select
+                  value={interjectionControlType}
+                  onValueChange={(v) => setInterjectionControlType(v as DecisionControlType)}
+                >
+                  <SelectTrigger className="h-7 w-40 text-xs rt-input border rounded-lg px-2">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.entries(DECISION_CONTROL_LABELS) as [DecisionControlType, string][]).map(([value, label]) => (
+                      <SelectItem key={value} value={value} className="text-xs">
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 {interjections.length > 0 && (
                   <span className="ml-auto text-[10px] rt-text-dim">
                     {interjections.length} queued
@@ -2143,7 +2133,7 @@ export default function HomePage() {
                       handleInterjection();
                     }
                   }}
-                  className="rt-input min-h-[44px] flex-1 resize-none text-sm"
+                  className="rt-input min-h-[52px] flex-1 resize-none text-sm"
                   rows={2}
                 />
                 <Button
@@ -2504,7 +2494,7 @@ export default function HomePage() {
                     <p className="font-mono text-xl font-semibold rt-text-strong">
                       {usageInputTokens.toLocaleString()}
                     </p>
-                    <p className="text-[10px] uppercase tracking-[0.18em] rt-text-muted">
+                    <p className="rt-eyebrow">
                       tokens
                     </p>
                   </div>
@@ -2516,7 +2506,7 @@ export default function HomePage() {
                     <p className="font-mono text-xl font-semibold rt-text-strong">
                       {usageOutputTokens.toLocaleString()}
                     </p>
-                    <p className="text-[10px] uppercase tracking-[0.18em] rt-text-muted">
+                    <p className="rt-eyebrow">
                       tokens
                     </p>
                   </div>
@@ -2535,7 +2525,7 @@ export default function HomePage() {
                 <div>
                   <div className="mb-2 flex items-center gap-2">
                     <History className="h-3.5 w-3.5 rt-text-muted" />
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                    <p className="rt-eyebrow">
                       Sessions
                     </p>
                   </div>
@@ -2755,7 +2745,7 @@ export default function HomePage() {
                         })}
                       </div>
                       <div className="mt-2">
-                        <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                        <label className="mb-1 block rt-eyebrow">
                           Decision status
                         </label>
                         <Select
@@ -2884,7 +2874,7 @@ export default function HomePage() {
                     {historyDetail.actionItems.length > 0 && (
                       <div className="rounded-xl border rt-surface p-2.5">
                         <div className="mb-2 flex items-center justify-between gap-2">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                          <p className="rt-eyebrow">
                             Execution Plan
                           </p>
                           <span className="text-[10px] rt-text-dim">
@@ -3005,7 +2995,7 @@ export default function HomePage() {
                     )}
 
                     <div className="rounded-xl border rt-surface p-2.5">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                      <p className="rt-eyebrow">
                         Outcome Review
                       </p>
                       <div className="mt-2 space-y-2">
@@ -3074,7 +3064,7 @@ export default function HomePage() {
                     {historyDetail.minutes?.content && (
                       <div className="rt-surface-minutes rounded-xl border p-2.5">
                         <div className="mb-1.5 flex items-center justify-between">
-                          <span className="text-[11px] font-semibold uppercase tracking-wide rt-text-strong">
+                          <span className="rt-eyebrow">
                             Minutes
                           </span>
                           <Button
@@ -3098,7 +3088,7 @@ export default function HomePage() {
 
                     {historyDetail.childSessions.length > 0 && (
                       <div className="rounded-xl border rt-surface p-2.5">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                        <p className="rt-eyebrow">
                           Follow-up Sessions
                         </p>
                         <div className="mt-2 space-y-1.5">
@@ -3118,7 +3108,7 @@ export default function HomePage() {
 
                     {similarSessions.length > 0 && (
                       <div className="rounded-xl border rt-surface p-2.5">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                        <p className="rt-eyebrow">
                           Similar Sessions
                         </p>
                         <div className="mt-2 space-y-1.5">
@@ -3140,7 +3130,7 @@ export default function HomePage() {
 
                 {compareDetails.length === 2 && (
                   <div className="rounded-xl border rt-surface p-2.5">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                    <p className="rt-eyebrow">
                       Compare Sessions
                     </p>
                     <div className="mt-2 grid gap-2">
@@ -3157,7 +3147,7 @@ export default function HomePage() {
                           </p>
                           <div className="mt-2 space-y-2">
                             <div>
-                              <p className="text-[10px] uppercase tracking-[0.18em] rt-text-muted">
+                              <p className="rt-eyebrow">
                                 Recommendation
                               </p>
                               <p className="mt-1 text-xs rt-text-dim">
@@ -3166,7 +3156,7 @@ export default function HomePage() {
                               </p>
                             </div>
                             <div>
-                              <p className="text-[10px] uppercase tracking-[0.18em] rt-text-muted">
+                              <p className="rt-eyebrow">
                                 Risks
                               </p>
                               <p className="mt-1 text-xs rt-text-dim">
@@ -3174,7 +3164,7 @@ export default function HomePage() {
                               </p>
                             </div>
                             <div>
-                              <p className="text-[10px] uppercase tracking-[0.18em] rt-text-muted">
+                              <p className="rt-eyebrow">
                                 Research gaps
                               </p>
                               <p className="mt-1 text-xs rt-text-dim">
@@ -3182,7 +3172,7 @@ export default function HomePage() {
                               </p>
                             </div>
                             <div>
-                              <p className="text-[10px] uppercase tracking-[0.18em] rt-text-muted">
+                              <p className="rt-eyebrow">
                                 Action items
                               </p>
                               <p className="mt-1 text-xs rt-text-dim">

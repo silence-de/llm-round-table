@@ -68,7 +68,7 @@ export function RoundTableStage({
         {/* Header row */}
         <div className="relative z-10 flex items-center justify-between">
           <div>
-            <p className="rt-label text-xs uppercase tracking-[0.24em]">Bridge Stage</p>
+            <p className="rt-eyebrow">Bridge Stage</p>
             <h2 className="rt-text-strong mt-0.5 text-sm font-semibold">{labelPhase(phase)}</h2>
           </div>
           <span className="rt-chip-live rounded-full border px-3 py-1 text-xs font-semibold">
@@ -122,7 +122,7 @@ export function RoundTableStage({
 
         {/* Active voice info */}
         <div className="rt-surface-glass relative z-10 mt-3 rounded-2xl border p-3">
-          <p className="rt-label text-[10px] uppercase tracking-[0.2em]">Active Voice</p>
+          <p className="rt-eyebrow">Active Voice</p>
           <p className="rt-text-strong mt-0.5 text-sm font-semibold">
             {activeSpeakerId === 'moderator'
               ? `${moderator.displayName} (MC)`
@@ -235,13 +235,13 @@ export function RoundTableStage({
                     )}
                   </div>
 
-                  <span className="max-w-[80px] truncate text-center text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--rt-text-muted)]">
+                  <span className="max-w-[80px] truncate text-center rt-eyebrow">
                     {agent.displayName}
                   </span>
 
                   {isActive && (
-                    <span className="rt-chip-live rounded-full border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest">
-                      live
+                    <span className="rt-chip-live rounded-full border px-1.5 py-0.5 text-[8px] font-medium tracking-wide">
+                      Live
                     </span>
                   )}
                 </motion.div>
@@ -268,7 +268,7 @@ export function RoundTableStage({
                 size={44}
                 sprite={moderator.sprite}
               />
-              <p className="mt-1.5 text-[9px] font-bold uppercase tracking-[0.28em] text-[var(--rt-text-muted)]">
+              <p className="mt-1.5 rt-eyebrow">
                 {activeSpeakerId === 'moderator' ? 'Moderating' : 'MC'}
               </p>
               <p className="mt-0.5 line-clamp-2 max-w-full text-[10px] leading-snug text-[var(--rt-text-strong)]">

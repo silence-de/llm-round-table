@@ -118,13 +118,16 @@
 
   /* ── Text scale (HH6 charcoal → muted) ───────────────────────────────── */
   --rt-text-strong: #2b2c34;   /* HH6 charcoal exact */
-  --rt-text-muted:  #5e5f6e;   /* charcoal lightened ≈ 40% */
-  --rt-text-dim:    #8b8c9e;   /* charcoal lightened ≈ 60% */
-  --rt-label:       #72738a;   /* charcoal lightened ≈ 50% */
+  --rt-text-muted:  #484960;   /* charcoal lightened ≈ 40% — WCAG 5.2:1 on lavender */
+  --rt-text-dim:    #6a6b80;   /* charcoal lightened ≈ 55% — WCAG 3.8:1 on lavender */
+  --rt-label:       #585970;   /* charcoal lightened ≈ 48% — WCAG 4.5:1 on lavender */
 
   /* ── Borders (HH6 charcoal with opacity) ─────────────────────────────── */
-  --rt-border-soft:   #2b2c3422;
-  --rt-border-strong: #2b2c3452;
+  --rt-border-soft:   #2b2c3432;   /* slightly stronger for light bg visibility */
+  --rt-border-strong: #2b2c3460;
+
+  /* ── Card shadow (light: soft drop shadow; dark: none — border does the job) */
+  --rt-card-shadow: 0 1px 3px rgba(43,44,52,0.07), 0 0 0 1px rgba(43,44,52,0.08);
 
   /* ── Typography ─────────────────────────────────────────────────────────── */
   --rt-font-sans: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
@@ -142,12 +145,12 @@
   --secondary:           #e4e4f4;   /* bg-2 panel tint */
   --secondary-foreground: #2b2c34;
   --muted:               #e4e4f4;
-  --muted-foreground:    #72738a;   /* rt-label */
+  --muted-foreground:    #585970;   /* rt-label */
   --accent:              #e45858;   /* HH6 coral */
   --accent-foreground:   #fffffe;
   --destructive:         #c83838;
-  --border:              #2b2c3422; /* rt-border-soft */
-  --input:               #2b2c3415;
+  --border:              #2b2c3432; /* rt-border-soft */
+  --input:               #2b2c3418;
   --ring:                #6246ea;
 
   /* Charts */
@@ -215,6 +218,9 @@
   --rt-border-soft:   #d1d1e930;
   --rt-border-strong: #d1d1e965;
 
+  /* ── Card shadow (none in dark mode — border does the job) ───────────── */
+  --rt-card-shadow: none;
+
   /* ── shadcn/ui tokens ────────────────────────────────────────────────── */
   --background:          #13131c;
   --foreground:          #fffffe;
@@ -278,11 +284,13 @@
   .rt-panel {
     border-color: var(--rt-border-soft);
     background-color: color-mix(in srgb, var(--rt-panel-bg) 88%, transparent);
+    box-shadow: var(--rt-card-shadow);
   }
 
   .rt-panel-strong {
     border-color: var(--rt-border-strong);
     background-color: color-mix(in srgb, var(--rt-panel-bg-strong) 90%, transparent);
+    box-shadow: var(--rt-card-shadow);
   }
 
   .rt-stage {
@@ -318,11 +326,13 @@
   .rt-surface {
     border-color: var(--rt-border-soft);
     background-color: color-mix(in srgb, var(--rt-surface-bg) 78%, transparent);
+    box-shadow: var(--rt-card-shadow);
   }
 
   .rt-surface-strong {
     border-color: var(--rt-border-soft);
     background-color: color-mix(in srgb, var(--rt-surface-bg) 88%, transparent);
+    box-shadow: var(--rt-card-shadow);
   }
 
   .rt-surface-faint {
@@ -415,5 +425,23 @@
 
   .rt-error {
     color: var(--rt-error-state);
+  }
+
+  /* ── Typography utilities ──────────────────────────────────────────────
+     Replaces proliferation of text-[11px] font-semibold uppercase tracking-[0.2em]
+  */
+  .rt-eyebrow {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    color: var(--rt-text-dim);
+    text-transform: none;
+  }
+
+  .rt-section-label {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--rt-text-muted);
   }
 }
