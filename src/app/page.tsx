@@ -1,19 +1,16 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo, useRef, type UIEvent } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Activity,
-  ChevronDown,
   Cpu,
   FastForward,
   History,
   Pause,
   Play,
   RotateCcw,
-  Sparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -25,16 +22,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
 import { useDiscussionStore } from '@/stores/discussion-store';
 import { useDiscussionStream } from '@/hooks/use-discussion-stream';
 import { PhaseIndicator } from '@/components/discussion/phase-indicator';
-import { AgentCard } from '@/components/discussion/agent-card';
-import { ModeratorPanel } from '@/components/discussion/moderator-panel';
 import { RoundTableStage } from '@/components/discussion/round-table-stage';
 import { ResearchPanel } from '@/components/discussion/research-panel';
 import { MarkdownContent } from '@/components/ui/markdown-content';
+import { DiscussionFeed } from '@/components/discussion/discussion-feed';
+import type { FeedMessage } from '@/components/discussion/discussion-feed';
 import type { PersonaPreset, PersonaSelection } from '@/lib/agents/types';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface AgentInfo {
   id: string;
@@ -76,14 +74,7 @@ interface SessionDetail {
   minutes: { content: string } | null;
 }
 
-interface DetailMessage {
-  id: string;
-  role: string;
-  phase: string;
-  content: string;
-  displayName?: string | null;
-  createdAt?: number | string;
-}
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function downloadMarkdown(filename: string, content: string) {
   const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
@@ -116,12 +107,14 @@ function parsePersonaSelectionMap(value?: string | null): Record<string, Persona
   }
 }
 
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
 export default function HomePage() {
+  // ── Local state ──────────────────────────────────────────────────────────
   const [topic, setTopic] = useState('');
   const [interjection, setInterjection] = useState('');
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [selectedAgents, setSelectedAgents] = useState<Set<string>>(new Set());
-  const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
   const [modelSelections, setModelSelections] = useState<Record<string, string>>({});
   const [personaSelections, setPersonaSelections] = useState<Record<string, PersonaSelection>>({});
   const [personaPresets, setPersonaPresets] = useState<PersonaPreset[]>([]);
@@ -129,13 +122,14 @@ export default function HomePage() {
   const [maxDebateRounds, setMaxDebateRounds] = useState<number>(2);
   const [loadingAgents, setLoadingAgents] = useState(true);
 
+  const [rightTab, setRightTab] = useState<'context' | 'history'>('context');
+
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
   const [historyDetail, setHistoryDetail] = useState<SessionDetail | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
-  const detailViewportRef = useRef<HTMLDivElement | null>(null);
-
+  // ── Store ────────────────────────────────────────────────────────────────
   const {
     phase,
     round,
@@ -151,7 +145,6 @@ export default function HomePage() {
     ui,
     replay,
     setError,
-    setStageMode,
     setAutoScroll,
     setReplayStatus,
     setReplayCursor,
@@ -160,6 +153,8 @@ export default function HomePage() {
   } = useDiscussionStore();
 
   const { startDiscussion, stopDiscussion, sendInterjection } = useDiscussionStream();
+
+  // ── Data fetching ────────────────────────────────────────────────────────
 
   const refreshSessions = useCallback(async () => {
     const res = await fetch('/api/sessions');
@@ -174,7 +169,6 @@ export default function HomePage() {
       setActiveHistoryId(id);
       setAutoScroll('follow');
       resetReplay();
-
       try {
         const res = await fetch(`/api/sessions/${id}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -206,15 +200,7 @@ export default function HomePage() {
     [activeHistoryId, refreshSessions, resetReplay, setError]
   );
 
-  useEffect(() => {
-    const syncMode = () => {
-      setStageMode(window.innerWidth < 1024 ? 'mobile-hybrid' : 'desktop-roundtable');
-    };
-
-    syncMode();
-    window.addEventListener('resize', syncMode);
-    return () => window.removeEventListener('resize', syncMode);
-  }, [setStageMode]);
+  // ── Bootstrap ────────────────────────────────────────────────────────────
 
   useEffect(() => {
     fetch('/api/agents')
@@ -225,37 +211,33 @@ export default function HomePage() {
             | AgentInfo[]
             | { agents: AgentInfo[]; personaPresets?: PersonaPreset[] }
         ) => {
-        const data = Array.isArray(payload) ? payload : payload.agents;
-        const presets = Array.isArray(payload)
-          ? []
-          : (payload.personaPresets ?? []);
-        setAgents(data);
-        setPersonaPresets(presets);
-        const available = data.filter((a) => a.available);
-        const defaultSelected = new Set(available.map((a) => a.id));
-        setSelectedAgents(defaultSelected);
-        setExpandedAgents(new Set(available.slice(0, 3).map((a) => a.id)));
+          const data = Array.isArray(payload) ? payload : payload.agents;
+          const presets = Array.isArray(payload) ? [] : (payload.personaPresets ?? []);
+          setAgents(data);
+          setPersonaPresets(presets);
+          const available = data.filter((a) => a.available);
+          setSelectedAgents(new Set(available.map((a) => a.id)));
 
-        const preferredMod = available.find((a) => a.id === 'claude') ?? available[0];
-        if (preferredMod) setModeratorAgentId(preferredMod.id);
+          const preferredMod = available.find((a) => a.id === 'claude') ?? available[0];
+          if (preferredMod) setModeratorAgentId(preferredMod.id);
 
-        const defaults: Record<string, string> = {};
-        const defaultPersonaSelections: Record<string, PersonaSelection> = {};
-        const presetIds = new Set(presets.map((preset) => preset.id));
-        for (const a of data) {
-          defaults[a.id] = a.modelId;
-          const recommended = (a.recommendedPersonaPresetIds ?? []).find(
-            (id) => presetIds.has(id)
-          );
-          defaultPersonaSelections[a.id] = recommended
-            ? { presetId: recommended, customNote: '' }
-            : { customNote: '' };
+          const defaults: Record<string, string> = {};
+          const defaultPersonaSelections: Record<string, PersonaSelection> = {};
+          const presetIds = new Set(presets.map((preset) => preset.id));
+          for (const a of data) {
+            defaults[a.id] = a.modelId;
+            const recommended = (a.recommendedPersonaPresetIds ?? []).find(
+              (id) => presetIds.has(id)
+            );
+            defaultPersonaSelections[a.id] = recommended
+              ? { presetId: recommended, customNote: '' }
+              : { customNote: '' };
+          }
+          setModelSelections(defaults);
+          setPersonaSelections(defaultPersonaSelections);
+          setLoadingAgents(false);
         }
-
-        setModelSelections(defaults);
-        setPersonaSelections(defaultPersonaSelections);
-        setLoadingAgents(false);
-      })
+      )
       .catch(() => setLoadingAgents(false));
 
     void refreshSessions();
@@ -266,6 +248,18 @@ export default function HomePage() {
       void refreshSessions();
     }
   }, [isRunning, refreshSessions]);
+
+  // ── Right-panel tab auto-switching ───────────────────────────────────────
+
+  useEffect(() => {
+    if (historyDetail) setRightTab('history');
+  }, [historyDetail]);
+
+  useEffect(() => {
+    if (isRunning) setRightTab('context');
+  }, [isRunning]);
+
+  // ── Agent config callbacks ───────────────────────────────────────────────
 
   const toggleAgent = useCallback(
     (agentId: string) => {
@@ -278,32 +272,14 @@ export default function HomePage() {
           if (agentId === moderatorAgentId) return prev;
           if (next.size <= 2) return prev;
           next.delete(agentId);
-          setExpandedAgents((expanded) => {
-            const updated = new Set(expanded);
-            updated.delete(agentId);
-            return updated;
-          });
         } else {
           next.add(agentId);
-          setExpandedAgents((expanded) => new Set(expanded).add(agentId));
         }
         return next;
       });
     },
     [agents, moderatorAgentId]
   );
-
-  const toggleExpanded = useCallback((agentId: string) => {
-    setExpandedAgents((prev) => {
-      const next = new Set(prev);
-      if (next.has(agentId)) {
-        next.delete(agentId);
-      } else {
-        next.add(agentId);
-      }
-      return next;
-    });
-  }, []);
 
   const handleModelChange = useCallback((agentId: string, modelId: string) => {
     setModelSelections((prev) => ({ ...prev, [agentId]: modelId }));
@@ -313,24 +289,13 @@ export default function HomePage() {
     (agentId: string, presetId?: string) => {
       setPersonaSelections((prev) => ({
         ...prev,
-        [agentId]: {
-          ...prev[agentId],
-          presetId,
-        },
+        [agentId]: { ...prev[agentId], presetId },
       }));
     },
     []
   );
 
-  const handlePersonaNoteChange = useCallback((agentId: string, note: string) => {
-    setPersonaSelections((prev) => ({
-      ...prev,
-      [agentId]: {
-        ...prev[agentId],
-        customNote: note,
-      },
-    }));
-  }, []);
+  // ── Session actions ──────────────────────────────────────────────────────
 
   const handleStart = useCallback(() => {
     if (!topic.trim() || selectedAgents.size < 2) return;
@@ -375,8 +340,12 @@ export default function HomePage() {
     }
   }, [interjection, isRunning, sendInterjection, setError]);
 
+  // ── Derived data ─────────────────────────────────────────────────────────
+
   const currentSummary = useMemo(
-    () => [...moderatorMessages].reverse().find((message) => message.phase === 'summary')?.content,
+    () =>
+      [...moderatorMessages].reverse().find((message) => message.phase === 'summary')
+        ?.content,
     [moderatorMessages]
   );
 
@@ -425,11 +394,9 @@ export default function HomePage() {
   useEffect(() => {
     if (replay.status !== 'playing') return;
     if (replayableMessages.length === 0) return;
-
     const timer = window.setInterval(() => {
       advanceReplayCursor(replayableMessages.length - 1);
     }, 900);
-
     return () => window.clearInterval(timer);
   }, [advanceReplayCursor, replay.status, replayableMessages.length]);
 
@@ -445,7 +412,10 @@ export default function HomePage() {
     if (!historyDetail) return [];
     if (replay.status === 'idle') return replayableMessages;
     if (replayableMessages.length === 0) return [];
-    return replayableMessages.slice(0, Math.min(replay.cursor + 1, replayableMessages.length));
+    return replayableMessages.slice(
+      0,
+      Math.min(replay.cursor + 1, replayableMessages.length)
+    );
   }, [historyDetail, replay.cursor, replay.status, replayableMessages]);
 
   const historySelectedAgentIds = useMemo(
@@ -488,8 +458,12 @@ export default function HomePage() {
       });
   }, [agents, historyDetail, historySelectedAgentIds]);
 
+  // Stage data for the right-panel visual ─────────────────────────────────
   const replayStageData = useMemo(() => {
-    const map = new Map<string, { agentId: string; content: string; isStreaming: boolean; phase: string }>();
+    const map = new Map<
+      string,
+      { agentId: string; content: string; isStreaming: boolean; phase: string }
+    >();
     let moderatorMessage = '';
     let activeSpeakerId: string | null = null;
     let phaseLabel = '';
@@ -501,16 +475,12 @@ export default function HomePage() {
         phaseLabel = message.phase || phaseLabel;
         continue;
       }
-
       if (message.role !== 'agent') continue;
-
       const guessedId =
         message.agentId ??
         agents.find((agent) => agent.displayName === message.displayName)?.id ??
         '';
-
       if (!guessedId) continue;
-
       map.set(guessedId, {
         agentId: guessedId,
         content: message.content,
@@ -520,13 +490,7 @@ export default function HomePage() {
       activeSpeakerId = guessedId;
       phaseLabel = message.phase || phaseLabel;
     }
-
-    return {
-      map,
-      moderatorMessage,
-      activeSpeakerId,
-      phase: phaseLabel,
-    };
+    return { map, moderatorMessage, activeSpeakerId, phase: phaseLabel };
   }, [agents, replayVisibleMessages]);
 
   const stageParticipants = !isRunning && historyDetail ? historyParticipants : participants;
@@ -541,67 +505,88 @@ export default function HomePage() {
     ? phase
     : replayStageData.phase || historyDetail?.session.status || phase;
 
-  const liveDetailMessages = useMemo<DetailMessage[]>(() => {
-    const messages: DetailMessage[] = [];
+  // ── Unified discussion feed messages ─────────────────────────────────────
 
-    moderatorMessages.forEach((message, index) => {
-      if (!message.content.trim()) return;
-      messages.push({
-        id: `live-moderator-${index}`,
+  const feedMessages = useMemo<FeedMessage[]>(() => {
+    // History / replay mode: map all chronological messages
+    if (historyDetail) {
+      return replayVisibleMessages.map((msg) => {
+        if (msg.role === 'moderator') {
+          return {
+            id: msg.id,
+            role: 'moderator' as const,
+            phase: msg.phase,
+            content: msg.content,
+            displayName: historyModerator.displayName,
+            color: historyModerator.color,
+            sprite: historyModerator.sprite,
+          };
+        }
+        const agent = agents.find(
+          (a) => a.id === msg.agentId || a.displayName === msg.displayName
+        );
+        return {
+          id: msg.id,
+          role: 'agent' as const,
+          phase: msg.phase,
+          content: msg.content,
+          displayName: msg.displayName ?? msg.agentId ?? 'Unknown',
+          agentId: msg.agentId ?? undefined,
+          color: agent?.color,
+          sprite: agent?.sprite,
+        };
+      });
+    }
+
+    // Live mode: all moderator messages in order + current-round agent messages
+    const msgs: FeedMessage[] = [];
+
+    moderatorMessages.forEach((msg, i) => {
+      if (!msg.content.trim()) return;
+      msgs.push({
+        id: `live-mod-${i}`,
         role: 'moderator',
-        phase: message.phase,
-        content: message.content,
+        phase: msg.phase,
+        content: msg.content,
         displayName: moderatorAgent.displayName,
+        color: moderatorAgent.color,
+        sprite: moderatorAgent.sprite,
       });
     });
 
-    participants.forEach((agent, index) => {
-      const message = agentMessages.get(agent.id);
-      if (!message?.content.trim()) return;
-      messages.push({
-        id: `live-agent-${agent.id}-${index}`,
+    participants.forEach((agent) => {
+      const msg = agentMessages.get(agent.id);
+      if (!msg?.content.trim()) return;
+      msgs.push({
+        id: `live-agent-${agent.id}`,
         role: 'agent',
-        phase: message.phase,
-        content: message.content,
+        phase: msg.phase,
+        content: msg.content,
         displayName: agent.displayName,
+        agentId: agent.id,
+        color: agent.color,
+        sprite: agent.sprite,
+        isStreaming: msg.isStreaming,
       });
     });
 
-    return messages;
-  }, [agentMessages, moderatorAgent.displayName, moderatorMessages, participants]);
+    return msgs;
+  }, [
+    agentMessages,
+    agents,
+    historyDetail,
+    historyModerator,
+    moderatorAgent,
+    moderatorMessages,
+    participants,
+    replayVisibleMessages,
+  ]);
 
-  const detailMessages = historyDetail ? replayVisibleMessages : liveDetailMessages;
-
-  useEffect(() => {
-    if (ui.autoScroll !== 'follow') return;
-    if (!detailViewportRef.current) return;
-    detailViewportRef.current.scrollTo({
-      top: detailViewportRef.current.scrollHeight,
-      behavior: 'smooth',
-    });
-  }, [detailMessages, replay.cursor, replay.status, ui.autoScroll]);
-
-  const handleDetailScroll = useCallback(
-    (event: UIEvent<HTMLDivElement>) => {
-      const element = event.currentTarget;
-      const distanceToBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
-
-      if (distanceToBottom > 52 && ui.autoScroll === 'follow') {
-        setAutoScroll('paused');
-      }
-
-      if (distanceToBottom <= 20 && ui.autoScroll === 'paused') {
-        setAutoScroll('follow');
-      }
-    },
-    [setAutoScroll, ui.autoScroll]
-  );
+  // ── Replay controls ──────────────────────────────────────────────────────
 
   const startReplay = useCallback(() => {
     if (!historyDetail || replayableMessages.length === 0) return;
-    if (replay.status === 'idle') {
-      setReplayCursor(0);
-    }
+    if (replay.status === 'idle') setReplayCursor(0);
     setReplayStatus('playing');
   }, [historyDetail, replay.status, replayableMessages.length, setReplayCursor, setReplayStatus]);
 
@@ -620,16 +605,40 @@ export default function HomePage() {
     setReplayCursor(Math.max(0, replayableMessages.length - 1));
   }, [replayableMessages.length, setReplayCursor, setReplayStatus]);
 
+  // ── Stage props helper ───────────────────────────────────────────────────
+
+  const stageAgents = stageParticipants.map((agent) => ({
+    id: agent.id,
+    displayName: agent.displayName,
+    color: agent.color,
+    accentGlow: agent.accentGlow,
+    sprite: agent.sprite,
+    message: isRunning ? agentMessages.get(agent.id) : replayStageData.map.get(agent.id),
+  }));
+
+  const stageMod = {
+    id: stageModerator.id,
+    displayName: stageModerator.displayName,
+    color: stageModerator.color,
+    sprite: stageModerator.sprite,
+    accentGlow: stageModerator.accentGlow,
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────────────────
+
   return (
-    <div className="min-h-screen rt-shell">
-      <header className="rt-surface-glass border-b px-4 py-4 md:px-6">
-        <div className="mx-auto flex max-w-[1620px] flex-wrap items-center justify-between gap-3">
+    <div className="flex h-dvh flex-col overflow-hidden rt-shell">
+      {/* ── Header ── */}
+      <header className="shrink-0 border-b rt-surface-glass px-4 py-2.5 md:px-5">
+        <div className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-black tracking-tight rt-text-strong md:text-4xl">
-              Round Table Command Deck
+            <h1 className="text-xl font-black tracking-tight rt-text-strong md:text-2xl">
+              Round Table
             </h1>
-            <p className="mt-1 text-sm rt-text-muted md:text-base">
-              Multi-agent council for strategy, investment, and life planning
+            <p className="hidden text-xs rt-text-muted sm:block">
+              Multi-agent council · strategy, investment &amp; life planning
             </p>
           </div>
           <PhaseIndicator
@@ -641,688 +650,629 @@ export default function HomePage() {
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-[1620px] gap-4 p-4 xl:grid-cols-[390px_minmax(0,1fr)] xl:gap-5 xl:p-5">
-        <aside className="order-1 space-y-4 xl:order-1">
-          <Card className="rt-panel xl:sticky xl:top-5">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-lg rt-text-strong">
-                <Sparkles className="h-4 w-4 rt-text-muted" />
-                Session Setup
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 pb-4 pt-0">
-              <div className="flex flex-col gap-3 overflow-hidden md:h-[calc(100vh-9.5rem)] md:min-h-[680px]">
-                <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
-                  <div>
-                    <label className="mb-1.5 block text-sm font-semibold uppercase tracking-[0.18em] rt-text-muted">
-                      Topic
-                    </label>
-                    <Textarea
-                      placeholder="输入要讨论的议题"
-                      value={topic}
-                      onChange={(e) => setTopic(e.target.value)}
-                      disabled={isRunning}
-                      className="rt-input min-h-[96px] text-sm"
-                    />
-                  </div>
+      {/* ── 3-column main grid ── */}
+      <main className="flex-1 overflow-hidden grid gap-3 p-3 xl:grid-cols-[280px_1fr_340px] lg:grid-cols-[260px_1fr]">
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="mb-1.5 block text-sm font-semibold uppercase tracking-[0.18em] rt-text-muted">
-                        Moderator
-                      </label>
-                      <Select
-                        value={moderatorAgentId}
-                        onValueChange={(value) => {
-                          if (!value) return;
-                          setModeratorAgentId(value);
-                          setSelectedAgents((prev) => new Set([...prev, value]));
-                          setExpandedAgents((prev) => new Set([...prev, value]));
-                        }}
-                        disabled={isRunning}
-                      >
-                        <SelectTrigger className="rt-input h-10 text-sm">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {agents
-                            .filter((agent) => agent.available)
-                            .map((agent) => (
-                              <SelectItem key={agent.id} value={agent.id} className="text-sm">
-                                {agent.displayName}
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+        {/* ─────────────────────────────────────────────────────────────────
+            LEFT PANEL: Session Setup + Compact Agent Config
+        ───────────────────────────────────────────────────────────────── */}
+        <aside className="flex min-h-0 flex-col gap-2 overflow-hidden">
+          {/* Scrollable config area */}
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-0.5">
 
-                    <div>
-                      <label className="mb-1.5 block text-sm font-semibold uppercase tracking-[0.18em] rt-text-muted">
-                        Debate Rounds
-                      </label>
-                      <Select
-                        value={String(maxDebateRounds)}
-                        onValueChange={(value) => setMaxDebateRounds(Number(value))}
-                        disabled={isRunning}
-                      >
-                        <SelectTrigger className="rt-input h-10 text-sm">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {[1, 2, 3].map((n) => (
-                            <SelectItem key={n} value={String(n)} className="text-sm">
-                              {n} rounds
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
+            {/* Topic */}
+            <div>
+              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                Topic
+              </label>
+              <Textarea
+                placeholder="输入要讨论的议题"
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                disabled={isRunning}
+                className="rt-input min-h-[80px] text-sm"
+              />
+            </div>
 
-                  <div>
-                    <div className="mb-2 flex items-center justify-between">
-                      <p className="text-sm font-semibold uppercase tracking-[0.18em] rt-text-muted">
-                        Council Members
-                      </p>
-                      <span className="text-xs rt-text-dim">
-                        {selectedAgents.size} selected
-                      </span>
-                    </div>
+            {/* Moderator + Debate Rounds (2-column) */}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                  Moderator
+                </label>
+                <Select
+                  value={moderatorAgentId}
+                  onValueChange={(value) => {
+                    if (!value) return;
+                    setModeratorAgentId(value);
+                    setSelectedAgents((prev) => new Set([...prev, value]));
+                  }}
+                  disabled={isRunning}
+                >
+                  <SelectTrigger className="rt-input h-9 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {agents
+                      .filter((agent) => agent.available)
+                      .map((agent) => (
+                        <SelectItem key={agent.id} value={agent.id} className="text-sm">
+                          {agent.displayName}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                  Rounds
+                </label>
+                <Select
+                  value={String(maxDebateRounds)}
+                  onValueChange={(value) => setMaxDebateRounds(Number(value))}
+                  disabled={isRunning}
+                >
+                  <SelectTrigger className="rt-input h-9 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[1, 2, 3].map((n) => (
+                      <SelectItem key={n} value={String(n)} className="text-sm">
+                        {n} rounds
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
 
-                    {loadingAgents ? (
-                      <p className="text-sm rt-text-muted">Loading agents...</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {agents.map((agent) => {
-                          const isModerator = agent.id === moderatorAgentId;
-                          const isSelected = selectedAgents.has(agent.id);
-                          const isExpanded = expandedAgents.has(agent.id);
-                          const isDisabled = !agent.available || isRunning;
-                          const personaSelection = personaSelections[agent.id] ?? {};
-                          const selectedPreset = personaSelection.presetId
-                            ? personaPresetMap.get(personaSelection.presetId)
-                            : undefined;
-                          const recommendedPresetIds = (
-                            agent.recommendedPersonaPresetIds ?? []
-                          )
-                            .filter((presetId) => personaPresetMap.has(presetId))
-                            .slice(0, 4);
+            {/* Council heading */}
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                Council
+              </p>
+              <span className="text-[11px] rt-text-dim">{selectedAgents.size} selected</span>
+            </div>
 
-                          return (
-                            <div
-                              key={agent.id}
-                              className={`rounded-2xl border p-3 transition-all duration-300 ${
-                                isSelected
-                                  ? 'rt-surface-live shadow-[0_0_20px_color-mix(in_srgb,var(--rt-stage-glow-primary)_24%,transparent)]'
-                                  : 'rt-surface-faint opacity-50'
-                              } ${!agent.available ? 'opacity-45' : ''}`}
-                            >
-                              <div className="flex items-center gap-2">
-                                <Checkbox
-                                  checked={isSelected}
-                                  onCheckedChange={() => toggleAgent(agent.id)}
-                                  disabled={isDisabled || isModerator}
-                                  onClick={(event) => event.stopPropagation()}
-                                />
-                                <button
-                                  type="button"
-                                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                                  onClick={() => toggleExpanded(agent.id)}
-                                >
-                                  <span
-                                    className="inline-block h-3 w-3 rounded-full shadow-[0_0_14px_color-mix(in_srgb,var(--rt-text-strong)_8%,transparent)]"
-                                    style={{ backgroundColor: agent.color }}
-                                  />
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex items-center gap-2">
-                                      <span className="rt-text-strong truncate text-sm font-semibold md:text-base">
-                                        {agent.displayName}
-                                      </span>
-                                      {isModerator && (
-                                        <Badge
-                                          variant="secondary"
-                                          className="border border-[color-mix(in_srgb,var(--rt-stage-glow-secondary)_35%,transparent)] bg-[color-mix(in_srgb,var(--rt-stage-glow-secondary)_20%,transparent)] text-[10px] rt-text-strong"
-                                        >
-                                          MC
-                                        </Badge>
-                                      )}
-                                    </div>
-                                    <p className="truncate text-[11px] uppercase tracking-[0.18em] rt-text-dim">
-                                      {agent.provider}
-                                    </p>
-                                    {selectedPreset && (
-                                      <p className="mt-0.5 truncate text-[11px] rt-text-muted">
-                                        Persona: {selectedPreset.label}
-                                      </p>
-                                    )}
-                                  </div>
-                                  <ChevronDown
-                                    className={`h-4 w-4 rt-text-muted transition-transform ${
-                                      isExpanded ? 'rotate-180' : ''
-                                    }`}
-                                  />
-                                </button>
-                              </div>
+            {/* Compact agent cards — no accordion, config always visible */}
+            {loadingAgents ? (
+              <p className="text-sm rt-text-muted">Loading agents…</p>
+            ) : (
+              <div className="space-y-1.5">
+                {agents.map((agent) => {
+                  const isModerator = agent.id === moderatorAgentId;
+                  const isSelected = selectedAgents.has(agent.id);
+                  const isDisabled = !agent.available || isRunning;
+                  const personaSelection = personaSelections[agent.id] ?? {};
+                  const recommendedPresetIds = (agent.recommendedPersonaPresetIds ?? [])
+                    .filter((id) => personaPresetMap.has(id))
+                    .slice(0, 3);
 
-                              {!agent.available ? (
-                                <p className="mt-3 text-sm rt-error">Missing key: {agent.missingKey}</p>
-                              ) : isSelected && isExpanded ? (
-                                <div className="mt-3 space-y-3 border-t rt-border-soft pt-3">
-                                  {agent.availableModels.length > 0 ? (
-                                    <Select
-                                      value={modelSelections[agent.id] ?? agent.modelId}
-                                      onValueChange={(value) => value && handleModelChange(agent.id, value)}
-                                      disabled={isRunning}
-                                    >
-                                      <SelectTrigger className="rt-input h-9 text-sm">
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {agent.availableModels.map((model) => (
-                                          <SelectItem key={model.id} value={model.id} className="text-sm">
-                                            {model.label}
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  ) : (
-                                    <p className="text-sm rt-text-dim">No model options available for this seat.</p>
-                                  )}
-
-                                  <div className="rt-surface space-y-2 rounded-xl border p-2.5">
-                                    <label className="text-xs font-semibold uppercase tracking-[0.16em] rt-text-muted">
-                                      Persona Preset
-                                    </label>
-                                    <Select
-                                      value={personaSelection.presetId ?? '__none__'}
-                                      onValueChange={(value) => {
-                                        const normalizedPresetId =
-                                          typeof value === 'string' && value !== '__none__'
-                                            ? value
-                                            : undefined;
-                                        handlePersonaPresetChange(agent.id, normalizedPresetId);
-                                      }}
-                                      disabled={isRunning}
-                                    >
-                                      <SelectTrigger className="rt-input h-9 text-sm">
-                                        <SelectValue placeholder="Choose a preset">
-                                          {personaSelection.presetId
-                                            ? (personaPresetMap.get(personaSelection.presetId)?.label ?? personaSelection.presetId)
-                                            : 'Custom Only'}
-                                        </SelectValue>
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="__none__" className="text-sm">
-                                          Custom Only
-                                        </SelectItem>
-                                        {personaPresets.map((preset) => (
-                                          <SelectItem
-                                            key={preset.id}
-                                            value={preset.id}
-                                            className="text-sm"
-                                          >
-                                            {preset.label}
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-
-                                    {recommendedPresetIds.length > 0 && (
-                                      <div className="flex flex-wrap gap-1.5">
-                                        {recommendedPresetIds.map((presetId) => {
-                                          const preset = personaPresetMap.get(presetId);
-                                          if (!preset) return null;
-                                          const active = presetId === personaSelection.presetId;
-                                          return (
-                                            <button
-                                              key={presetId}
-                                              type="button"
-                                              onClick={() =>
-                                                handlePersonaPresetChange(agent.id, presetId)
-                                              }
-                                              className={`rounded-full border px-2 py-1 text-[11px] transition ${
-                                                active
-                                                  ? 'rt-border-strong bg-[color-mix(in_srgb,var(--rt-live-state)_20%,transparent)] rt-text-strong'
-                                                  : 'rt-surface-strong rt-text-muted'
-                                              }`}
-                                            >
-                                              {preset.label}
-                                            </button>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-
-                                    <Input
-                                      placeholder="Micro note (optional)"
-                                      value={personaSelection.customNote ?? ''}
-                                      onChange={(event) =>
-                                        handlePersonaNoteChange(
-                                          agent.id,
-                                          event.target.value
-                                        )
-                                      }
-                                      disabled={isRunning}
-                                      className="rt-input h-9 text-sm"
-                                    />
-
-                                    <p className="text-xs leading-relaxed rt-text-muted">
-                                      {selectedPreset
-                                        ? selectedPreset.description
-                                        : 'No preset selected. You can run with only a micro note.'}
-                                    </p>
-                                  </div>
-                                </div>
-                              ) : (
-                                <p className="mt-3 text-sm rt-text-dim">
-                                  {isSelected
-                                    ? 'Expand to edit model and persona preset.'
-                                    : 'Select this agent to configure model and persona preset.'}
-                                </p>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="rt-surface-deck sticky bottom-0 space-y-3 rounded-2xl border p-3">
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={handleStart}
-                      disabled={isRunning || !topic.trim() || selectedAgents.size < 2}
-                      className="h-11 flex-1 bg-primary text-base text-primary-foreground hover:bg-primary/85"
+                  return (
+                    <div
+                      key={agent.id}
+                      className={`rounded-xl border p-2.5 transition-all duration-200 ${
+                        isSelected
+                          ? 'rt-surface-live shadow-[0_0_16px_color-mix(in_srgb,var(--rt-stage-glow-primary)_18%,transparent)]'
+                          : 'rt-surface-faint opacity-55'
+                      } ${!agent.available ? 'opacity-40' : ''}`}
                     >
-                      Start Session
-                    </Button>
-                    {isRunning && (
-                      <Button variant="destructive" className="h-11" onClick={stopDiscussion}>
-                        Stop
-                      </Button>
-                    )}
-                  </div>
-
-                  <div className="rt-surface space-y-2 rounded-2xl border p-3">
-                    <label className="text-sm font-semibold uppercase tracking-[0.18em] rt-text-muted">
-                      Interjection
-                    </label>
-                    <Textarea
-                      placeholder="每轮开始前可注入新要求"
-                      value={interjection}
-                      onChange={(e) => setInterjection(e.target.value)}
-                      disabled={!isRunning}
-                      className="rt-input min-h-[70px] text-sm"
-                    />
-                    <div className="flex items-center justify-between">
-                      <Button size="sm" onClick={handleInterjection} disabled={!isRunning || !interjection.trim()}>
-                        Send
-                      </Button>
-                      <span className="text-sm rt-text-muted">Queued: {interjections.length}</span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="rt-surface rounded-2xl border p-3">
-                      <div className="mb-1 flex items-center gap-2 rt-text-muted">
-                        <Cpu className="h-4 w-4" />
-                        <p className="text-sm font-semibold">Input</p>
+                      {/* Row 1: checkbox + color dot + name + badges */}
+                      <div className="flex items-center gap-1.5">
+                        <Checkbox
+                          checked={isSelected}
+                          onCheckedChange={() => toggleAgent(agent.id)}
+                          disabled={isDisabled || isModerator}
+                        />
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: agent.color }}
+                        />
+                        <span className="min-w-0 flex-1 truncate text-sm font-semibold rt-text-strong">
+                          {agent.displayName}
+                        </span>
+                        {isModerator && (
+                          <Badge
+                            variant="secondary"
+                            className="shrink-0 border border-[color-mix(in_srgb,var(--rt-stage-glow-secondary)_35%,transparent)] bg-[color-mix(in_srgb,var(--rt-stage-glow-secondary)_18%,transparent)] px-1.5 py-0 text-[9px] rt-text-strong"
+                          >
+                            MC
+                          </Badge>
+                        )}
+                        {!agent.available && (
+                          <span className="shrink-0 text-[10px] rt-error">No key</span>
+                        )}
                       </div>
-                      <p className="font-mono text-2xl font-semibold rt-text-strong">
-                        {usageInputTokens.toLocaleString()}
-                      </p>
-                      <p className="text-xs uppercase tracking-[0.18em] rt-text-muted">tokens</p>
-                    </div>
 
-                    <div className="rt-surface rounded-2xl border p-3">
-                      <div className="mb-1 flex items-center gap-2 rt-text-muted">
-                        <Activity className="h-4 w-4" />
-                        <p className="text-sm font-semibold">Output</p>
-                      </div>
-                      <p className="font-mono text-2xl font-semibold rt-text-strong">
-                        {usageOutputTokens.toLocaleString()}
-                      </p>
-                      <p className="text-xs uppercase tracking-[0.18em] rt-text-muted">tokens</p>
-                    </div>
-                  </div>
+                      {/* Inline config — visible when selected, no expand needed */}
+                      {isSelected && agent.available && (
+                        <div className="mt-2 space-y-1.5 pl-[22px]">
+                          {/* Model select */}
+                          {agent.availableModels.length > 0 && (
+                            <Select
+                              value={modelSelections[agent.id] ?? agent.modelId}
+                              onValueChange={(v) => v && handleModelChange(agent.id, v)}
+                              disabled={isRunning}
+                            >
+                              <SelectTrigger className="rt-input h-7 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {agent.availableModels.map((m) => (
+                                  <SelectItem key={m.id} value={m.id} className="text-xs">
+                                    {m.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
 
-                  {sessionId && (
-                    <p className="truncate text-xs rt-text-dim">Session ID: {sessionId}</p>
-                  )}
+                          {/* Persona preset chips */}
+                          {recommendedPresetIds.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {recommendedPresetIds.map((presetId) => {
+                                const preset = personaPresetMap.get(presetId);
+                                if (!preset) return null;
+                                const active = presetId === personaSelection.presetId;
+                                return (
+                                  <button
+                                    key={presetId}
+                                    type="button"
+                                    disabled={isRunning}
+                                    onClick={() =>
+                                      handlePersonaPresetChange(
+                                        agent.id,
+                                        active ? undefined : presetId
+                                      )
+                                    }
+                                    className={`rounded-full border px-2 py-0.5 text-[10px] transition-all ${
+                                      active
+                                        ? 'rt-border-strong bg-[color-mix(in_srgb,var(--rt-live-state)_22%,transparent)] rt-text-strong'
+                                        : 'rt-surface rt-text-dim hover:rt-text-muted'
+                                    }`}
+                                  >
+                                    {preset.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {!agent.available && (
+                        <p className="mt-2 text-xs rt-error">Missing key: {agent.missingKey}</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Sticky bottom: Start / Stop + Interjection */}
+          <div className="shrink-0 space-y-2">
+            <div className="flex gap-2">
+              <Button
+                onClick={handleStart}
+                disabled={isRunning || !topic.trim() || selectedAgents.size < 2}
+                className="h-10 flex-1 text-sm"
+              >
+                Start Session
+              </Button>
+              {isRunning && (
+                <Button variant="destructive" className="h-10" onClick={stopDiscussion}>
+                  Stop
+                </Button>
+              )}
+            </div>
+
+            {/* Interjection — only visible while running */}
+            {isRunning && (
+              <div className="rt-surface space-y-1.5 rounded-xl border p-2.5">
+                <label className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                  Interjection
+                </label>
+                <Textarea
+                  placeholder="每轮开始前注入新要求…"
+                  value={interjection}
+                  onChange={(e) => setInterjection(e.target.value)}
+                  className="rt-input min-h-[56px] text-xs"
+                />
+                <div className="flex items-center justify-between">
+                  <Button
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={handleInterjection}
+                    disabled={!interjection.trim()}
+                  >
+                    Send
+                  </Button>
+                  <span className="text-xs rt-text-dim">Queued: {interjections.length}</span>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rt-panel">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-lg rt-text-strong">
-                <History className="h-4 w-4 rt-text-muted" />
-                History
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {sessions.length === 0 ? (
-                <p className="text-sm rt-text-muted">No sessions yet.</p>
-              ) : (
-                <div className="max-h-[300px] space-y-2 overflow-y-auto pr-1">
-                  {sessions.map((session) => {
-                    const active = session.id === activeHistoryId;
-                    const presetLabels = Object.values(
-                      parsePersonaSelectionMap(session.personaSelections)
-                    )
-                      .map((selection) =>
-                        selection.presetId
-                          ? personaPresetMap.get(selection.presetId)?.label
-                          : selection.customNote
-                            ? 'Custom persona'
-                            : undefined
-                      )
-                      .filter((label): label is string => Boolean(label));
-                    const uniquePresetLabels = Array.from(new Set(presetLabels)).slice(0, 3);
-                    return (
-                      <div
-                        key={session.id}
-                        className={`rounded-2xl border p-3 ${
-                          active
-                            ? 'rt-surface-live'
-                            : 'rt-surface'
-                        }`}
-                      >
-                        <button className="w-full text-left" onClick={() => void loadHistory(session.id)}>
-                          <p className="line-clamp-2 text-sm font-semibold rt-text-strong">{session.topic}</p>
-                          <p className="mt-1 text-xs rt-text-muted">
-                            {new Date(session.createdAt).toLocaleString()} · {session.status}
-                          </p>
-                          {uniquePresetLabels.length > 0 && (
-                            <p className="mt-1 line-clamp-1 text-[11px] rt-text-dim">
-                              Presets: {uniquePresetLabels.join(', ')}
-                            </p>
-                          )}
-                        </button>
-                        <div className="mt-2 flex items-center justify-between">
-                          <span className="text-xs rt-text-dim">{session.id.slice(0, 8)}</span>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 px-2 text-xs rt-error hover:bg-[color-mix(in_srgb,var(--rt-stage-glow-secondary)_20%,transparent)]"
-                            onClick={() => void deleteHistory(session.id)}
-                          >
-                            Delete
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+            )}
+          </div>
         </aside>
 
-        <section className="order-2 space-y-4 xl:order-2">
-          <RoundTableStage
-            moderator={{
-              id: stageModerator.id,
-              displayName: stageModerator.displayName,
-              color: stageModerator.color,
-              sprite: stageModerator.sprite,
-              accentGlow: stageModerator.accentGlow,
-            }}
-            moderatorMessage={stageModeratorMessage}
-            agents={stageParticipants.map((agent) => ({
-              id: agent.id,
-              displayName: agent.displayName,
-              color: agent.color,
-              accentGlow: agent.accentGlow,
-              sprite: agent.sprite,
-              message: isRunning
-                ? agentMessages.get(agent.id)
-                : replayStageData.map.get(agent.id),
-            }))}
-            activeSpeakerId={stageActiveSpeakerId}
-            phase={stagePhase}
-            isRunning={isRunning}
-            stageMode={ui.stageMode}
-          />
+        {/* ─────────────────────────────────────────────────────────────────
+            CENTER PANEL: Unified Discussion Feed
+        ───────────────────────────────────────────────────────────────── */}
+        <div className="flex min-h-0 flex-col gap-2 overflow-hidden">
+          {/* Feed header */}
+          <div className="shrink-0 space-y-1.5">
+            <div className="flex items-center gap-2 px-0.5">
+              <h2 className="min-w-0 flex-1 truncate text-sm font-semibold rt-text-strong">
+                {historyDetail
+                  ? historyDetail.session.topic
+                  : isRunning
+                    ? 'Live Discussion'
+                    : 'Discussion Feed'}
+              </h2>
 
-          {research.status !== 'idle' && (
-            <ResearchPanel status={research.status} sources={research.sources} />
-          )}
+              {/* Follow-latest button when auto-scroll is paused */}
+              {ui.autoScroll === 'paused' && !historyDetail && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="h-6 shrink-0 text-[11px]"
+                  onClick={() => setAutoScroll('follow')}
+                >
+                  ↓ Follow
+                </Button>
+              )}
 
+              {/* Replay controls */}
+              {historyDetail && (
+                <div className="flex shrink-0 items-center gap-1">
+                  {replay.status === 'playing' ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="h-7 gap-1 text-xs"
+                      onClick={pauseReplay}
+                    >
+                      <Pause className="h-3 w-3" />
+                    </Button>
+                  ) : (
+                    <Button size="sm" className="h-7 gap-1 text-xs" onClick={startReplay}>
+                      <Play className="h-3 w-3" />
+                      {replay.status === 'idle' ? 'Replay' : 'Resume'}
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-xs"
+                    onClick={resetReplayCursor}
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-xs"
+                    onClick={exitReplay}
+                    title="Show full timeline"
+                  >
+                    <FastForward className="h-3 w-3" />
+                  </Button>
+                  <span className="rt-chip-live rounded-full border px-2 py-0.5 text-[10px]">
+                    {replay.status === 'idle'
+                      ? `${replayableMessages.length} msgs`
+                      : `${Math.min(replay.cursor + 1, replayableMessages.length)} / ${replayableMessages.length}`}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Replay timeline scrubber */}
+            {historyDetail && replayableMessages.length > 0 && (
+              <input
+                type="range"
+                min={0}
+                max={Math.max(0, replayableMessages.length - 1)}
+                value={
+                  replay.status === 'idle'
+                    ? Math.max(0, replayableMessages.length - 1)
+                    : Math.min(
+                        replay.cursor,
+                        Math.max(0, replayableMessages.length - 1)
+                      )
+                }
+                onChange={(e) => {
+                  setReplayStatus('paused');
+                  setReplayCursor(Number(e.currentTarget.value));
+                }}
+                className="h-1.5 w-full accent-[var(--rt-live-state)]"
+              />
+            )}
+          </div>
+
+          {/* Discussion Feed */}
+          <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border rt-surface">
+            <DiscussionFeed
+              messages={feedMessages}
+              autoScroll={ui.autoScroll === 'follow'}
+              onScrolledUp={() => setAutoScroll('paused')}
+              onScrolledToBottom={() => setAutoScroll('follow')}
+              className="h-full"
+              emptyLabel={
+                isRunning ? '会议进行中，等待发言…' : '选择话题并开始会议，对话将显示在这里'
+              }
+            />
+          </div>
+
+          {/* Error banner */}
           {error && (
-            <Card className="rt-panel-strong bg-[color-mix(in_srgb,var(--rt-stage-glow-secondary)_15%,transparent)]">
-              <CardContent className="py-3">
-                <p className="text-sm rt-error">{error}</p>
-              </CardContent>
-            </Card>
-          )}
-
-          {moderatorMessages.length > 0 && !historyDetail && <ModeratorPanel messages={moderatorMessages} />}
-
-          {participants.length > 0 && agentMessages.size > 0 && (
-            <div>
-              <h2 className="mb-2 text-lg font-semibold rt-text-strong md:text-xl">Agent Transcript</h2>
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {participants.map((agent) => (
-                  <AgentCard
-                    key={agent.id}
-                    agentId={agent.id}
-                    displayName={agent.displayName}
-                    color={agent.color}
-                    sprite={agent.sprite}
-                    accentGlow={agent.accentGlow}
-                    message={agentMessages.get(agent.id)}
-                  />
-                ))}
-              </div>
+            <div className="shrink-0 rounded-xl border bg-[color-mix(in_srgb,var(--rt-stage-glow-secondary)_12%,transparent)] px-3 py-2 text-sm rt-error">
+              {error}
             </div>
           )}
 
-          {currentSummary && (
-            <Card className="rt-surface-minutes">
-              <CardHeader className="pb-2">
-                <CardTitle className="rt-text-strong text-base">Current Minutes</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="rt-surface-glass mb-3 max-h-[200px] overflow-auto rounded-md border p-3 text-sm">
-                  <MarkdownContent content={currentSummary} />
-                </div>
-                <Button
-                  size="sm"
-                  onClick={() =>
-                    downloadMarkdown(`minutes-${sessionId ?? 'current'}.md`, currentSummary)
-                  }
-                >
-                  Export Markdown
-                </Button>
-              </CardContent>
-            </Card>
-          )}
+          {/* Stage + Research fallback at lg (non-xl screens without right panel) */}
+          <div className="xl:hidden shrink-0 space-y-3">
+            <RoundTableStage
+              moderator={stageMod}
+              moderatorMessage={stageModeratorMessage}
+              agents={stageAgents}
+              activeSpeakerId={stageActiveSpeakerId}
+              phase={stagePhase}
+              isRunning={isRunning}
+              stageMode="mobile-hybrid"
+            />
+            {research.status !== 'idle' && (
+              <ResearchPanel status={research.status} sources={research.sources} />
+            )}
+          </div>
+        </div>
 
-          <Separator className="bg-[var(--rt-border-soft)]" />
+        {/* ─────────────────────────────────────────────────────────────────
+            RIGHT PANEL: Context | History (xl+ only)
+        ───────────────────────────────────────────────────────────────── */}
+        <div className="hidden xl:flex min-h-0 flex-col gap-2 overflow-hidden">
+          {/* Tab switcher */}
+          <div className="shrink-0 flex gap-1 rounded-xl border rt-surface p-1">
+            {(['context', 'history'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setRightTab(tab)}
+                className={`flex-1 rounded-lg py-1.5 text-xs font-semibold capitalize transition-all ${
+                  rightTab === tab
+                    ? 'bg-[color-mix(in_srgb,var(--rt-live-state)_18%,transparent)] rt-text-strong'
+                    : 'rt-text-dim hover:rt-text-muted'
+                }`}
+              >
+                {tab === 'context' ? 'Context' : 'History'}
+              </button>
+            ))}
+          </div>
 
-          <Card className="rt-panel">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg rt-text-strong">Session Detail Viewer</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {loadingHistory ? (
-                <p className="text-sm rt-text-muted">Loading...</p>
-              ) : historyDetail ? (
-                <div className="space-y-3">
-                  <div className="rt-surface rounded-md border p-3">
-                    <p className="text-base font-semibold rt-text-strong">{historyDetail.session.topic}</p>
-                    <p className="mt-1 text-sm rt-text-muted">
-                      status: {historyDetail.session.status} · input:{' '}
-                      {historyDetail.session.usageInputTokens.toLocaleString()} · output:{' '}
-                      {historyDetail.session.usageOutputTokens.toLocaleString()}
+          {/* Tab content */}
+          <div className="min-h-0 flex-1 overflow-y-auto space-y-3 pr-0.5">
+
+            {/* ── Context Tab ── */}
+            {rightTab === 'context' && (
+              <>
+                {/* Visual stage (compact mobile-hybrid mode) */}
+                <RoundTableStage
+                  moderator={stageMod}
+                  moderatorMessage={stageModeratorMessage}
+                  agents={stageAgents}
+                  activeSpeakerId={stageActiveSpeakerId}
+                  phase={stagePhase}
+                  isRunning={isRunning}
+                  stageMode="mobile-hybrid"
+                />
+
+                {/* Web Research */}
+                {research.status !== 'idle' && (
+                  <ResearchPanel status={research.status} sources={research.sources} />
+                )}
+
+                {/* Current minutes */}
+                {currentSummary && (
+                  <Card className="rt-surface-minutes">
+                    <CardHeader className="px-3 pb-1.5 pt-3">
+                      <CardTitle className="text-sm rt-text-strong">Meeting Minutes</CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-3 pb-3">
+                      <div className="rt-surface-glass mb-2 max-h-[200px] overflow-auto rounded-xl border p-3 text-sm">
+                        <MarkdownContent content={currentSummary} />
+                      </div>
+                      <Button
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() =>
+                          downloadMarkdown(
+                            `minutes-${sessionId ?? 'current'}.md`,
+                            currentSummary
+                          )
+                        }
+                      >
+                        Export .md
+                      </Button>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Token usage */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rt-surface rounded-xl border p-2.5">
+                    <div className="mb-1 flex items-center gap-1.5 rt-text-muted">
+                      <Cpu className="h-3.5 w-3.5" />
+                      <p className="text-xs font-semibold">Input</p>
+                    </div>
+                    <p className="font-mono text-xl font-semibold rt-text-strong">
+                      {usageInputTokens.toLocaleString()}
                     </p>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {historySelectedAgentIds.map((agentId) => {
-                        const selection = historyPersonaSelections[agentId];
-                        const preset = selection?.presetId
-                          ? personaPresetMap.get(selection.presetId)
-                          : undefined;
-                        const label = preset
-                          ? preset.label
-                          : selection?.customNote
-                            ? 'Custom persona'
-                            : 'Default persona';
+                    <p className="text-[10px] uppercase tracking-[0.18em] rt-text-muted">
+                      tokens
+                    </p>
+                  </div>
+                  <div className="rt-surface rounded-xl border p-2.5">
+                    <div className="mb-1 flex items-center gap-1.5 rt-text-muted">
+                      <Activity className="h-3.5 w-3.5" />
+                      <p className="text-xs font-semibold">Output</p>
+                    </div>
+                    <p className="font-mono text-xl font-semibold rt-text-strong">
+                      {usageOutputTokens.toLocaleString()}
+                    </p>
+                    <p className="text-[10px] uppercase tracking-[0.18em] rt-text-muted">
+                      tokens
+                    </p>
+                  </div>
+                </div>
+
+                {sessionId && (
+                  <p className="truncate text-[11px] rt-text-dim">Session: {sessionId}</p>
+                )}
+              </>
+            )}
+
+            {/* ── History Tab ── */}
+            {rightTab === 'history' && (
+              <>
+                {/* Session list */}
+                <div>
+                  <div className="mb-2 flex items-center gap-2">
+                    <History className="h-3.5 w-3.5 rt-text-muted" />
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                      Sessions
+                    </p>
+                  </div>
+                  {sessions.length === 0 ? (
+                    <p className="text-sm rt-text-muted">No sessions yet.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {sessions.map((session) => {
+                        const active = session.id === activeHistoryId;
+                        const presetLabels = Object.values(
+                          parsePersonaSelectionMap(session.personaSelections)
+                        )
+                          .map((sel) =>
+                            sel.presetId
+                              ? personaPresetMap.get(sel.presetId)?.label
+                              : sel.customNote
+                                ? 'Custom'
+                                : undefined
+                          )
+                          .filter((l): l is string => Boolean(l));
+                        const uniquePresetLabels = [...new Set(presetLabels)].slice(0, 2);
+
                         return (
-                          <span
-                            key={`${historyDetail.session.id}-${agentId}`}
-                            className="rounded-full border rt-border-soft bg-[color-mix(in_srgb,var(--rt-live-state)_10%,transparent)] px-2 py-1 text-[11px] rt-text-muted"
+                          <div
+                            key={session.id}
+                            className={`rounded-xl border p-2.5 ${active ? 'rt-surface-live' : 'rt-surface'}`}
                           >
-                            {agentId}: {label}
-                          </span>
+                            <button
+                              className="w-full text-left"
+                              onClick={() => void loadHistory(session.id)}
+                            >
+                              <p className="line-clamp-2 text-sm font-semibold rt-text-strong">
+                                {session.topic}
+                              </p>
+                              <p className="mt-0.5 text-[11px] rt-text-muted">
+                                {new Date(session.createdAt).toLocaleString()} · {session.status}
+                              </p>
+                              {uniquePresetLabels.length > 0 && (
+                                <p className="mt-0.5 text-[10px] rt-text-dim">
+                                  {uniquePresetLabels.join(', ')}
+                                </p>
+                              )}
+                            </button>
+                            <div className="mt-1.5 flex items-center justify-between">
+                              <span className="text-[10px] rt-text-dim">
+                                {session.id.slice(0, 8)}
+                              </span>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 px-2 text-[10px] rt-error hover:bg-[color-mix(in_srgb,var(--rt-stage-glow-secondary)_18%,transparent)]"
+                                onClick={() => void deleteHistory(session.id)}
+                              >
+                                Delete
+                              </Button>
+                            </div>
+                          </div>
                         );
                       })}
                     </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    {replay.status === 'playing' ? (
-                      <Button size="sm" onClick={pauseReplay} className="gap-1">
-                        <Pause className="h-3.5 w-3.5" />
-                        Pause Replay
-                      </Button>
-                    ) : (
-                      <Button size="sm" onClick={startReplay} className="gap-1">
-                        <Play className="h-3.5 w-3.5" />
-                        {replay.status === 'idle' ? 'Play Replay' : 'Resume Replay'}
-                      </Button>
-                    )}
-                    <Button size="sm" variant="secondary" onClick={resetReplayCursor} className="gap-1">
-                      <RotateCcw className="h-3.5 w-3.5" />
-                      Reset
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={exitReplay} className="gap-1">
-                      <FastForward className="h-3.5 w-3.5" />
-                      Full Timeline
-                    </Button>
-                    <span className="rt-chip-live rounded-full border px-2 py-1 text-xs">
-                      {replay.status === 'idle'
-                        ? `Replay idle · ${replayableMessages.length} msgs`
-                        : `Replay ${replay.status} · ${Math.min(
-                            replay.cursor + 1,
-                            replayableMessages.length
-                          )}/${replayableMessages.length}`}
-                    </span>
-                  </div>
-
-                  {replayableMessages.length > 0 && (
-                    <div className="rt-surface rounded-md border p-2">
-                      <div className="mb-1 flex items-center justify-between text-xs rt-text-muted">
-                        <span>Jump</span>
-                        <span>
-                          {Math.min(
-                            replay.status === 'idle'
-                              ? replayableMessages.length
-                              : replay.cursor + 1,
-                            replayableMessages.length
-                          )}{' '}
-                          / {replayableMessages.length}
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min={0}
-                        max={Math.max(0, replayableMessages.length - 1)}
-                        value={
-                          replay.status === 'idle'
-                            ? Math.max(0, replayableMessages.length - 1)
-                            : Math.min(replay.cursor, Math.max(0, replayableMessages.length - 1))
-                        }
-                        onChange={(event) => {
-                          setReplayStatus('paused');
-                          setReplayCursor(Number(event.currentTarget.value));
-                        }}
-                        className="h-1.5 w-full accent-[var(--rt-live-state)]"
-                      />
-                    </div>
-                  )}
-
-                  {historyDetail.minutes?.content && (
-                    <div className="rt-surface-minutes rounded-md border p-3">
-                      <div className="mb-2 flex items-center justify-between">
-                        <span className="rt-text-strong text-xs font-semibold uppercase tracking-wide">
-                          Minutes
-                        </span>
-                        <Button
-                          size="sm"
-                          onClick={() =>
-                            downloadMarkdown(
-                              `minutes-${historyDetail.session.id}.md`,
-                              historyDetail.minutes?.content ?? ''
-                            )
-                          }
-                        >
-                          Export
-                        </Button>
-                      </div>
-                      <div className="max-h-[180px] overflow-auto text-sm">
-                        <MarkdownContent content={historyDetail.minutes.content} />
-                      </div>
-                    </div>
-                  )}
-
-                  {ui.autoScroll === 'paused' && (
-                    <div className="flex justify-end">
-                      <Button size="sm" variant="secondary" onClick={() => setAutoScroll('follow')}>
-                        Follow latest
-                      </Button>
-                    </div>
-                  )}
-
-                  <div
-                    ref={detailViewportRef}
-                    onScroll={handleDetailScroll}
-                    className="max-h-[360px] space-y-2 overflow-auto pr-1"
-                  >
-                    {detailMessages.length === 0 ? (
-                      <p className="text-sm rt-text-muted">No messages in this session yet.</p>
-                    ) : (
-                      detailMessages.map((message) => (
-                        <div
-                          key={message.id}
-                          className="rt-surface rounded-md border p-3"
-                        >
-                          <p className="text-[11px] uppercase tracking-wide rt-text-dim">
-                            {message.phase} · {message.displayName || message.role}
-                          </p>
-                          <MarkdownContent content={message.content} className="mt-1 text-sm" />
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <p className="text-sm rt-text-muted">
-                    Choose a session from history to inspect replay and minutes.
-                  </p>
-                  {liveDetailMessages.length > 0 && (
-                    <div className="max-h-[280px] space-y-2 overflow-auto pr-1">
-                      {liveDetailMessages.map((message) => (
-                        <div
-                          key={message.id}
-                          className="rt-surface rounded-md border p-3"
-                        >
-                          <p className="text-[11px] uppercase tracking-wide rt-text-dim">
-                            {message.phase} · {message.displayName || message.role}
-                          </p>
-                          <MarkdownContent content={message.content} className="mt-1 text-sm" />
-                        </div>
-                      ))}
-                    </div>
                   )}
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        </section>
+
+                {/* Loading indicator */}
+                {loadingHistory && (
+                  <p className="text-sm rt-text-muted">Loading session…</p>
+                )}
+
+                {/* Session detail when loaded */}
+                {historyDetail && !loadingHistory && (
+                  <div className="space-y-2">
+                    {/* Meta info */}
+                    <div className="rt-surface rounded-xl border p-2.5">
+                      <p className="line-clamp-2 text-sm font-semibold rt-text-strong">
+                        {historyDetail.session.topic}
+                      </p>
+                      <p className="mt-0.5 text-xs rt-text-muted">
+                        {historyDetail.session.status} ·{' '}
+                        {historyDetail.session.usageInputTokens.toLocaleString()} in ·{' '}
+                        {historyDetail.session.usageOutputTokens.toLocaleString()} out
+                      </p>
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {historySelectedAgentIds.map((agentId) => {
+                          const sel = historyPersonaSelections[agentId];
+                          const preset = sel?.presetId
+                            ? personaPresetMap.get(sel.presetId)
+                            : undefined;
+                          const label = preset
+                            ? preset.label
+                            : sel?.customNote
+                              ? 'Custom'
+                              : 'Default';
+                          return (
+                            <span
+                              key={`${historyDetail.session.id}-${agentId}`}
+                              className="rounded-full border rt-border-soft bg-[color-mix(in_srgb,var(--rt-live-state)_10%,transparent)] px-2 py-0.5 text-[10px] rt-text-muted"
+                            >
+                              {agentId}: {label}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Session minutes */}
+                    {historyDetail.minutes?.content && (
+                      <div className="rt-surface-minutes rounded-xl border p-2.5">
+                        <div className="mb-1.5 flex items-center justify-between">
+                          <span className="text-[11px] font-semibold uppercase tracking-wide rt-text-strong">
+                            Minutes
+                          </span>
+                          <Button
+                            size="sm"
+                            className="h-6 px-2 text-xs"
+                            onClick={() =>
+                              downloadMarkdown(
+                                `minutes-${historyDetail.session.id}.md`,
+                                historyDetail.minutes?.content ?? ''
+                              )
+                            }
+                          >
+                            Export
+                          </Button>
+                        </div>
+                        <div className="max-h-[200px] overflow-auto text-sm">
+                          <MarkdownContent content={historyDetail.minutes.content} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
       </main>
     </div>
   );
