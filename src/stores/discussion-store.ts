@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import type { ResearchSource } from '@/lib/search/types';
+import type { ResearchRunDetail, ResearchSource } from '@/lib/search/types';
+import type { ActionItem, DecisionSummary } from '@/lib/decision/types';
 
 export interface AgentMessage {
   agentId: string;
@@ -11,7 +12,13 @@ export interface AgentMessage {
 export type StageMode = 'desktop-roundtable' | 'mobile-hybrid';
 export type AutoScrollMode = 'follow' | 'paused';
 export type ReplayStatus = 'idle' | 'playing' | 'paused';
-export type ResearchStatus = 'idle' | 'running' | 'complete' | 'skipped';
+export type ResearchStatus =
+  | 'idle'
+  | 'running'
+  | 'completed'
+  | 'partial'
+  | 'skipped'
+  | 'failed';
 
 interface DiscussionState {
   sessionId: string | null;
@@ -23,11 +30,18 @@ interface DiscussionState {
   agentMessages: Map<string, AgentMessage>;
   moderatorMessages: Array<{ content: string; phase: string }>;
   interjections: Array<{ content: string; phase?: string; round?: number }>;
+  decisionSummary: DecisionSummary | null;
+  actionItems: ActionItem[];
+  review: {
+    retrospectiveNote: string;
+    outcomeSummary: string;
+  };
   error: string | null;
   research: {
     status: ResearchStatus;
     sources: ResearchSource[];
     briefText: string;
+    run: ResearchRunDetail | null;
   };
   ui: {
     activeSpeakerId: string | null;
@@ -60,7 +74,11 @@ interface DiscussionState {
   appendModeratorToken: (token: string) => void;
   finalizeModerator: () => void;
   addInterjection: (interjection: { content: string; phase?: string; round?: number }) => void;
+  setDecisionSummary: (decisionSummary: DecisionSummary | null) => void;
+  setActionItems: (actionItems: ActionItem[]) => void;
+  setReview: (review: { retrospectiveNote?: string; outcomeSummary?: string }) => void;
   setResearchStatus: (status: ResearchStatus) => void;
+  setResearchRun: (run: ResearchRunDetail | null) => void;
   addResearchSources: (sources: ResearchSource[]) => void;
   setResearchBriefText: (text: string) => void;
   reset: () => void;
@@ -76,11 +94,18 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
   agentMessages: new Map(),
   moderatorMessages: [],
   interjections: [],
+  decisionSummary: null,
+  actionItems: [],
+  review: {
+    retrospectiveNote: '',
+    outcomeSummary: '',
+  },
   error: null,
   research: {
     status: 'idle',
     sources: [],
     briefText: '',
+    run: null,
   },
   ui: {
     activeSpeakerId: null,
@@ -241,9 +266,31 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
     }));
   },
 
+  setDecisionSummary: (decisionSummary) => set({ decisionSummary }),
+  setActionItems: (actionItems) => set({ actionItems }),
+  setReview: (review) =>
+    set((state) => ({
+      review: {
+        retrospectiveNote:
+          review.retrospectiveNote ?? state.review.retrospectiveNote,
+        outcomeSummary: review.outcomeSummary ?? state.review.outcomeSummary,
+      },
+    })),
+
   setResearchStatus: (status) =>
     set((state) => ({
       research: { ...state.research, status },
+    })),
+
+  setResearchRun: (run) =>
+    set((state) => ({
+      research: {
+        ...state.research,
+        run,
+        status: run?.status ?? state.research.status,
+        sources: run?.sources ?? state.research.sources,
+        briefText: run?.summary ?? state.research.briefText,
+      },
     })),
 
   addResearchSources: (sources) =>
@@ -270,11 +317,18 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
       agentMessages: new Map(),
       moderatorMessages: [],
       interjections: [],
+      decisionSummary: null,
+      actionItems: [],
+      review: {
+        retrospectiveNote: '',
+        outcomeSummary: '',
+      },
       error: null,
       research: {
         status: 'idle',
         sources: [],
         briefText: '',
+        run: null,
       },
       replay: {
         status: 'idle',

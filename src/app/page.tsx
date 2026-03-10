@@ -29,8 +29,44 @@ import { RoundTableStage } from '@/components/discussion/round-table-stage';
 import { ResearchPanel } from '@/components/discussion/research-panel';
 import { MarkdownContent } from '@/components/ui/markdown-content';
 import { DiscussionFeed } from '@/components/discussion/discussion-feed';
+import { DecisionSummaryCard } from '@/components/discussion/decision-summary-card';
 import type { FeedMessage } from '@/components/discussion/discussion-feed';
 import type { PersonaPreset, PersonaSelection } from '@/lib/agents/types';
+import {
+  DECISION_TEMPLATES,
+} from '@/lib/decision/templates';
+import type {
+  ActionItem,
+  ActionItemStatus,
+  DecisionBrief,
+  DecisionControlType,
+  DecisionStatus,
+  DecisionSummary,
+  DiscussionAgenda,
+} from '@/lib/decision/types';
+import {
+  ACTION_ITEM_STATUS_LABELS,
+  ACTION_ITEM_STATUS_OPTIONS,
+  DECISION_CONTROL_LABELS,
+  DECISION_STATUS_OPTIONS,
+  DEFAULT_DECISION_BRIEF,
+  DEFAULT_DISCUSSION_AGENDA,
+  normalizeDecisionBrief,
+  normalizeDiscussionAgenda,
+} from '@/lib/decision/utils';
+import {
+  buildDecisionSummaryMarkdown,
+  buildExecutionChecklistMarkdown,
+  buildTranscriptMarkdown,
+  type TranscriptMessage,
+} from '@/lib/session-artifacts';
+import type { ResearchConfig, ResearchRunDetail } from '@/lib/search/types';
+import {
+  DEFAULT_RESEARCH_CONFIG,
+  normalizeResearchConfig,
+} from '@/lib/search/utils';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -52,9 +88,23 @@ interface SessionRecord {
   id: string;
   topic: string;
   status: string;
+  goal: string;
+  background: string;
+  constraints: string;
+  retrospectiveNote?: string;
+  outcomeSummary?: string;
+  decisionType: string;
+  desiredOutput: string;
+  templateId?: string | null;
+  agendaConfig?: string;
+  researchConfig?: string;
+  parentSessionId?: string | null;
+  decisionStatus: DecisionStatus;
   createdAt: number | string;
   moderatorAgentId: string;
+  maxDebateRounds: number;
   selectedAgentIds?: string;
+  modelSelections?: string;
   personaSelections?: string;
   usageInputTokens: number;
   usageOutputTokens: number;
@@ -72,6 +122,35 @@ interface SessionDetail {
     createdAt: number | string;
   }>;
   minutes: { content: string } | null;
+  decisionSummary: DecisionSummary | null;
+  actionItems: ActionItem[];
+  researchRun: ResearchRunDetail | null;
+  interjections: Array<{
+    id: string;
+    content: string;
+    controlType?: DecisionControlType;
+    phaseHint?: string | null;
+    roundHint?: number | null;
+    createdAt: number | string;
+  }>;
+  parentSession:
+    | {
+        id: string;
+        topic: string;
+        templateId?: string | null;
+        decisionType: string;
+        decisionStatus: DecisionStatus;
+        createdAt: number | string;
+      }
+    | null;
+  childSessions: Array<{
+    id: string;
+    topic: string;
+    templateId?: string | null;
+    decisionType: string;
+    decisionStatus: DecisionStatus;
+    createdAt: number | string;
+  }>;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -107,12 +186,48 @@ function parsePersonaSelectionMap(value?: string | null): Record<string, Persona
   }
 }
 
+function parseModelSelectionMap(value?: string | null): Record<string, string> {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object') return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    );
+  } catch {
+    return {};
+  }
+}
+
+function parseAgendaConfig(value?: string | null): DiscussionAgenda {
+  if (!value) return DEFAULT_DISCUSSION_AGENDA;
+  try {
+    return normalizeDiscussionAgenda(JSON.parse(value) as Partial<DiscussionAgenda>);
+  } catch {
+    return DEFAULT_DISCUSSION_AGENDA;
+  }
+}
+
+function parseResearchConfig(value?: string | null): ResearchConfig {
+  if (!value) return DEFAULT_RESEARCH_CONFIG;
+  try {
+    return normalizeResearchConfig(JSON.parse(value) as Partial<ResearchConfig>);
+  } catch {
+    return DEFAULT_RESEARCH_CONFIG;
+  }
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function HomePage() {
   // ── Local state ──────────────────────────────────────────────────────────
-  const [topic, setTopic] = useState('');
+  const [brief, setBrief] = useState<DecisionBrief>(DEFAULT_DECISION_BRIEF);
+  const [agenda, setAgenda] = useState<DiscussionAgenda>(DEFAULT_DISCUSSION_AGENDA);
+  const [researchConfig, setResearchConfig] =
+    useState<ResearchConfig>(DEFAULT_RESEARCH_CONFIG);
   const [interjection, setInterjection] = useState('');
+  const [interjectionControlType, setInterjectionControlType] =
+    useState<DecisionControlType>('general');
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [selectedAgents, setSelectedAgents] = useState<Set<string>>(new Set());
   const [modelSelections, setModelSelections] = useState<Record<string, string>>({});
@@ -123,11 +238,24 @@ export default function HomePage() {
   const [loadingAgents, setLoadingAgents] = useState(true);
 
   const [rightTab, setRightTab] = useState<'context' | 'history'>('context');
+  const [historyQuery, setHistoryQuery] = useState('');
+  const [historyStatusFilter, setHistoryStatusFilter] = useState<'all' | SessionRecord['status']>('all');
+  const [historyTemplateFilter, setHistoryTemplateFilter] = useState<string>('all');
+  const [historyTimeRange, setHistoryTimeRange] = useState<'all' | '7d' | '30d' | '90d'>('all');
+  const [followUpParentSession, setFollowUpParentSession] = useState<{
+    id: string;
+    topic: string;
+  } | null>(null);
+  const [compareSessionIds, setCompareSessionIds] = useState<string[]>([]);
+  const [compareDetails, setCompareDetails] = useState<SessionDetail[]>([]);
 
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
   const [historyDetail, setHistoryDetail] = useState<SessionDetail | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [researchBusySessionId, setResearchBusySessionId] = useState<string | null>(
+    null
+  );
 
   // ── Store ────────────────────────────────────────────────────────────────
   const {
@@ -140,19 +268,29 @@ export default function HomePage() {
     agentMessages,
     moderatorMessages,
     interjections,
+    decisionSummary,
+    actionItems,
+    review,
     error,
     research,
     ui,
     replay,
     setError,
     setAutoScroll,
+    setActionItems,
+    setReview,
+    setResearchRun,
+    setResearchStatus,
     setReplayStatus,
     setReplayCursor,
     advanceReplayCursor,
     resetReplay,
   } = useDiscussionStore();
 
-  const { startDiscussion, stopDiscussion, sendInterjection } = useDiscussionStream();
+  const { startDiscussion, stopDiscussion, sendStructuredInterjection } =
+    useDiscussionStream();
+
+  // ── Data fetching ────────────────────────────────────────────────────────
 
   // ── Data fetching ────────────────────────────────────────────────────────
 
@@ -259,7 +397,72 @@ export default function HomePage() {
     if (isRunning) setRightTab('context');
   }, [isRunning]);
 
+  useEffect(() => {
+    if (compareSessionIds.length === 0) {
+      setCompareDetails([]);
+      return;
+    }
+
+    void Promise.all(
+      compareSessionIds.map(async (id) => {
+        const response = await fetch(`/api/sessions/${id}`);
+        if (!response.ok) {
+          throw new Error(`Failed to load comparison session ${id}`);
+        }
+        return (await response.json()) as SessionDetail;
+      })
+    )
+      .then(setCompareDetails)
+      .catch((error) =>
+        setError(error instanceof Error ? error.message : String(error))
+      );
+  }, [compareSessionIds, setError]);
+
   // ── Agent config callbacks ───────────────────────────────────────────────
+
+  const updateBrief = useCallback(
+    <K extends keyof DecisionBrief>(key: K, value: DecisionBrief[K]) => {
+      setBrief((prev) => ({ ...prev, [key]: value }));
+    },
+    []
+  );
+
+  const updateAgenda = useCallback(
+    <K extends keyof DiscussionAgenda>(key: K, value: DiscussionAgenda[K]) => {
+      setAgenda((prev) => ({ ...prev, [key]: value }));
+    },
+    []
+  );
+
+  const updateResearchConfig = useCallback(
+    <K extends keyof ResearchConfig>(key: K, value: ResearchConfig[K]) => {
+      setResearchConfig((prev) => ({ ...prev, [key]: value }));
+    },
+    []
+  );
+
+  const applyTemplate = useCallback((templateId: string) => {
+    const template = DECISION_TEMPLATES.find((item) => item.id === templateId);
+    if (!template) {
+      setBrief((prev) => ({ ...prev, templateId: null }));
+      return;
+    }
+
+    setBrief((prev) => ({
+      ...prev,
+      templateId: template.id,
+      goal: prev.goal || template.goal,
+      background: prev.background || template.background,
+      constraints: prev.constraints || template.constraints,
+      decisionType: template.decisionType,
+      desiredOutput: template.desiredOutput,
+    }));
+    setAgenda((prev) => ({
+      ...prev,
+      focalQuestions: prev.focalQuestions || template.focalQuestions,
+      requiredDimensions: prev.requiredDimensions || template.requiredDimensions,
+    }));
+  }, []);
 
   const toggleAgent = useCallback(
     (agentId: string) => {
@@ -298,7 +501,7 @@ export default function HomePage() {
   // ── Session actions ──────────────────────────────────────────────────────
 
   const handleStart = useCallback(() => {
-    if (!topic.trim() || selectedAgents.size < 2) return;
+    if (!brief.topic.trim() || selectedAgents.size < 2) return;
     setHistoryDetail(null);
     setActiveHistoryId(null);
     resetReplay();
@@ -311,34 +514,52 @@ export default function HomePage() {
     }
 
     void startDiscussion({
-      topic: topic.trim(),
+      topic: brief.topic.trim(),
+      brief,
+      agenda,
+      researchConfig,
       agentIds: Array.from(selectedAgents),
       modelSelections,
       personaSelections,
       personas: legacyPersonas,
       moderatorAgentId,
       maxDebateRounds,
+      parentSessionId: followUpParentSession?.id ?? null,
     });
   }, [
+    agenda,
+    brief,
+    followUpParentSession,
     maxDebateRounds,
     modelSelections,
     moderatorAgentId,
     personaSelections,
+    researchConfig,
     resetReplay,
     selectedAgents,
     startDiscussion,
-    topic,
   ]);
 
   const handleInterjection = useCallback(async () => {
     if (!interjection.trim() || !isRunning) return;
     try {
-      await sendInterjection(interjection.trim());
+      await sendStructuredInterjection({
+        content: interjection.trim(),
+        controlType: interjectionControlType,
+      });
       setInterjection('');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [interjection, isRunning, sendInterjection, setError]);
+  }, [
+    interjection,
+    interjectionControlType,
+    isRunning,
+    sendStructuredInterjection,
+    setError,
+  ]);
+
+  // ── Derived data ─────────────────────────────────────────────────────────
 
   // ── Derived data ─────────────────────────────────────────────────────────
 
@@ -377,9 +598,20 @@ export default function HomePage() {
     () => new Map(personaPresets.map((preset) => [preset.id, preset])),
     [personaPresets]
   );
+  const activeTemplate = useMemo(
+    () =>
+      brief.templateId
+        ? DECISION_TEMPLATES.find((template) => template.id === brief.templateId) ?? null
+        : null,
+    [brief.templateId]
+  );
 
   const historyPersonaSelections = useMemo(
     () => parsePersonaSelectionMap(historyDetail?.session.personaSelections),
+    [historyDetail]
+  );
+  const historyModelSelections = useMemo(
+    () => parseModelSelectionMap(historyDetail?.session.modelSelections),
     [historyDetail]
   );
 
@@ -624,6 +856,479 @@ export default function HomePage() {
     accentGlow: stageModerator.accentGlow,
   };
 
+  const historySearchIndex = useCallback(
+    (session: SessionRecord) => {
+      const presetLabels = Object.values(parsePersonaSelectionMap(session.personaSelections))
+        .map((selection) =>
+          selection.presetId
+            ? personaPresetMap.get(selection.presetId)?.label
+            : selection.customNote
+              ? 'Custom'
+              : undefined
+        )
+        .filter((label): label is string => Boolean(label));
+
+      return [
+        session.topic,
+        session.goal,
+        session.constraints,
+        session.outcomeSummary,
+        session.retrospectiveNote,
+        session.id,
+        session.status,
+        session.decisionType,
+        session.templateId,
+        ...presetLabels,
+      ]
+        .join(' ')
+        .toLowerCase();
+    },
+    [personaPresetMap]
+  );
+
+  const filteredSessions = useMemo(() => {
+    const query = historyQuery.trim().toLowerCase();
+    const now = Date.now();
+    return sessions.filter((session) => {
+      const statusMatches =
+        historyStatusFilter === 'all' || session.status === historyStatusFilter;
+      if (!statusMatches) return false;
+      const templateMatches =
+        historyTemplateFilter === 'all' ||
+        (session.templateId ?? 'none') === historyTemplateFilter;
+      if (!templateMatches) return false;
+      if (historyTimeRange !== 'all') {
+        const createdAt = new Date(session.createdAt).getTime();
+        const days =
+          historyTimeRange === '7d' ? 7 : historyTimeRange === '30d' ? 30 : 90;
+        if (now - createdAt > days * 24 * 60 * 60 * 1000) return false;
+      }
+      if (!query) return true;
+      return historySearchIndex(session).includes(query);
+    });
+  }, [
+    historyQuery,
+    historySearchIndex,
+    historyStatusFilter,
+    historyTemplateFilter,
+    historyTimeRange,
+    sessions,
+  ]);
+
+  const historyStatusOptions = useMemo(
+    () =>
+      Array.from(new Set(sessions.map((session) => session.status))).sort() as Array<
+        SessionRecord['status']
+      >,
+    [sessions]
+  );
+
+  const historyTemplateOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          sessions
+            .map((session) => session.templateId)
+            .filter((templateId): templateId is string => Boolean(templateId))
+        )
+      ).sort(),
+    [sessions]
+  );
+
+  const similarSessions = useMemo(() => {
+    if (!historyDetail) return [] as SessionRecord[];
+    return sessions
+      .filter((session) => session.id !== historyDetail.session.id)
+      .filter(
+        (session) =>
+          (historyDetail.session.templateId &&
+            session.templateId === historyDetail.session.templateId) ||
+          session.decisionType === historyDetail.session.decisionType
+      )
+      .slice(0, 3);
+  }, [historyDetail, sessions]);
+
+  const liveTranscriptMessages = useMemo<TranscriptMessage[]>(
+    () =>
+      feedMessages.map((message) => ({
+        role: message.role,
+        phase: message.phase,
+        content: message.content,
+        displayName: message.displayName,
+      })),
+    [feedMessages]
+  );
+
+  const handleExportLiveTranscript = useCallback(() => {
+    const exportedTopic = brief.topic.trim() || 'Live discussion';
+    downloadMarkdown(
+      `transcript-${sessionId ?? 'live'}.md`,
+      buildTranscriptMarkdown({
+        topic: exportedTopic,
+        status: isRunning ? phase || 'running' : 'idle',
+        messages: liveTranscriptMessages,
+      })
+    );
+  }, [brief.topic, isRunning, liveTranscriptMessages, phase, sessionId]);
+
+  const handleExportLiveDecisionCard = useCallback(() => {
+    if (!decisionSummary) return;
+    downloadMarkdown(
+      `decision-${sessionId ?? 'current'}.md`,
+      buildDecisionSummaryMarkdown({
+        topic: brief.topic.trim() || 'Live discussion',
+        status: isRunning ? phase || 'running' : 'completed',
+        decisionSummary,
+      })
+    );
+  }, [brief.topic, decisionSummary, isRunning, phase, sessionId]);
+
+  const handleExportLiveChecklist = useCallback(() => {
+    if (actionItems.length === 0) return;
+    downloadMarkdown(
+      `checklist-${sessionId ?? 'current'}.md`,
+      buildExecutionChecklistMarkdown({
+        topic: brief.topic.trim() || 'Live discussion',
+        status: isRunning ? phase || 'running' : 'completed',
+        actionItems,
+      })
+    );
+  }, [actionItems, brief.topic, isRunning, phase, sessionId]);
+
+  const handleExportHistoryTranscript = useCallback(() => {
+    if (!historyDetail) return;
+    downloadMarkdown(
+      `transcript-${historyDetail.session.id}.md`,
+      buildTranscriptMarkdown({
+        topic: historyDetail.session.topic,
+        status: historyDetail.session.status,
+        messages: historyDetail.messages.map((message) => ({
+          role: message.role,
+          phase: message.phase,
+          content: message.content,
+          displayName: message.displayName ?? message.agentId ?? message.role,
+          createdAt: message.createdAt,
+        })),
+      })
+    );
+  }, [historyDetail]);
+
+  const handleExportHistoryDecisionCard = useCallback(() => {
+    if (!historyDetail?.decisionSummary) return;
+    downloadMarkdown(
+      `decision-${historyDetail.session.id}.md`,
+      buildDecisionSummaryMarkdown({
+        topic: historyDetail.session.topic,
+        status: historyDetail.session.decisionStatus,
+        decisionSummary: historyDetail.decisionSummary,
+      })
+    );
+  }, [historyDetail]);
+
+  const handleExportHistoryChecklist = useCallback(() => {
+    if (!historyDetail || historyDetail.actionItems.length === 0) return;
+    downloadMarkdown(
+      `checklist-${historyDetail.session.id}.md`,
+      buildExecutionChecklistMarkdown({
+        topic: historyDetail.session.topic,
+        status: historyDetail.session.decisionStatus,
+        actionItems: historyDetail.actionItems,
+      })
+    );
+  }, [historyDetail]);
+
+  const handleReuseHistorySetup = useCallback(() => {
+    if (!historyDetail) return;
+
+    const availableAgentIds = new Set(
+      agents.filter((agent) => agent.available).map((agent) => agent.id)
+    );
+    const requestedAgentIds = parseAgentList(historyDetail.session.selectedAgentIds);
+    const reusableAgentIds = requestedAgentIds.filter((agentId) =>
+      availableAgentIds.has(agentId)
+    );
+    const missingAgentIds = requestedAgentIds.filter(
+      (agentId) => !availableAgentIds.has(agentId)
+    );
+
+    const nextModeratorId = availableAgentIds.has(historyDetail.session.moderatorAgentId)
+      ? historyDetail.session.moderatorAgentId
+      : moderatorAgentId;
+    const nextSelectedAgents = new Set(reusableAgentIds);
+    nextSelectedAgents.add(nextModeratorId);
+
+    setBrief(
+      normalizeDecisionBrief({
+        topic: historyDetail.session.topic,
+        goal: historyDetail.session.goal,
+        background: historyDetail.session.background,
+        constraints: historyDetail.session.constraints,
+        decisionType: historyDetail.session.decisionType as DecisionBrief['decisionType'],
+        desiredOutput: historyDetail.session.desiredOutput as DecisionBrief['desiredOutput'],
+        templateId: historyDetail.session.templateId ?? null,
+      })
+    );
+    setAgenda(parseAgendaConfig(historyDetail.session.agendaConfig));
+    setResearchConfig(
+      historyDetail.researchRun?.searchConfig ??
+        parseResearchConfig(historyDetail.session.researchConfig)
+    );
+    setModeratorAgentId(nextModeratorId);
+    setMaxDebateRounds(historyDetail.session.maxDebateRounds ?? 2);
+    setSelectedAgents(nextSelectedAgents);
+    setModelSelections((prev) => ({ ...prev, ...historyModelSelections }));
+    setPersonaSelections((prev) => ({ ...prev, ...historyPersonaSelections }));
+    setRightTab('context');
+    setActiveHistoryId(null);
+    setHistoryDetail(null);
+    setFollowUpParentSession({
+      id: historyDetail.session.id,
+      topic: historyDetail.session.topic,
+    });
+    resetReplay();
+    setAutoScroll('follow');
+
+    if (missingAgentIds.length > 0) {
+      setError(
+        `Loaded setup with available agents only. Missing API keys for: ${missingAgentIds.join(', ')}`
+      );
+      return;
+    }
+
+    setError(null);
+  }, [
+    agents,
+    historyDetail,
+    historyModelSelections,
+    historyPersonaSelections,
+    moderatorAgentId,
+    resetReplay,
+    setAutoScroll,
+    setError,
+  ]);
+
+  const updateLocalActionItems = useCallback(
+    (
+      items: ActionItem[],
+      itemId: string,
+      patch: Partial<Pick<ActionItem, 'status' | 'note'>>
+    ) =>
+      items.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              ...patch,
+            }
+          : item
+      ),
+    []
+  );
+
+  const handleActionItemUpdate = useCallback(
+    async (
+      sessionIdToUpdate: string,
+      itemId: string,
+      patch: { status?: ActionItemStatus; note?: string }
+    ) => {
+      const response = await fetch(
+        `/api/sessions/${sessionIdToUpdate}/action-items/${itemId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        }
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to update action item (${response.status})`);
+      }
+
+      const updated = (await response.json()) as ActionItem;
+
+      setHistoryDetail((prev) =>
+        prev && prev.session.id === sessionIdToUpdate
+          ? {
+              ...prev,
+              actionItems: prev.actionItems.map((item) =>
+                item.id === itemId ? updated : item
+              ),
+            }
+          : prev
+      );
+
+      if (sessionId === sessionIdToUpdate) {
+        setActionItems(
+          useDiscussionStore
+            .getState()
+            .actionItems.map((item) => (item.id === itemId ? updated : item))
+        );
+      }
+
+      await refreshSessions();
+      return updated;
+    },
+    [refreshSessions, sessionId, setActionItems]
+  );
+
+  const handleSessionReviewUpdate = useCallback(
+    async (
+      sessionIdToUpdate: string,
+      patch: {
+        decisionStatus?: DecisionStatus;
+        retrospectiveNote?: string;
+        outcomeSummary?: string;
+      }
+    ) => {
+      const response = await fetch(`/api/sessions/${sessionIdToUpdate}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to update session review (${response.status})`);
+      }
+
+      setHistoryDetail((prev) =>
+        prev && prev.session.id === sessionIdToUpdate
+          ? {
+              ...prev,
+              session: {
+                ...prev.session,
+                ...(patch.decisionStatus
+                  ? { decisionStatus: patch.decisionStatus }
+                  : {}),
+                ...(patch.retrospectiveNote !== undefined
+                  ? { retrospectiveNote: patch.retrospectiveNote }
+                  : {}),
+                ...(patch.outcomeSummary !== undefined
+                  ? { outcomeSummary: patch.outcomeSummary }
+                  : {}),
+              },
+            }
+          : prev
+      );
+
+      if (sessionId === sessionIdToUpdate) {
+        setReview({
+          retrospectiveNote: patch.retrospectiveNote,
+          outcomeSummary: patch.outcomeSummary,
+        });
+      }
+
+      await refreshSessions();
+    },
+    [refreshSessions, sessionId, setReview]
+  );
+
+  const handleResearchRerun = useCallback(
+    async (sessionIdToUpdate: string, config?: ResearchConfig) => {
+      setResearchBusySessionId(sessionIdToUpdate);
+      if (sessionId === sessionIdToUpdate) {
+        setResearchStatus('running');
+      }
+
+      try {
+        const response = await fetch(`/api/sessions/${sessionIdToUpdate}/research`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(
+            config ? { researchConfig: config } : {}
+          ),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to rerun research (${response.status})`);
+        }
+
+        const nextRun = (await response.json()) as ResearchRunDetail | null;
+
+        setHistoryDetail((prev) =>
+          prev && prev.session.id === sessionIdToUpdate
+            ? {
+                ...prev,
+                researchRun: nextRun,
+              }
+            : prev
+        );
+
+        if (sessionId === sessionIdToUpdate) {
+          setResearchRun(nextRun);
+        }
+
+        await refreshSessions();
+      } finally {
+        setResearchBusySessionId(null);
+      }
+    },
+    [refreshSessions, sessionId, setResearchRun, setResearchStatus]
+  );
+
+  const handleResearchSourceSelection = useCallback(
+    async (sessionIdToUpdate: string, sourceId: string, selected: boolean) => {
+      const response = await fetch(
+        `/api/sessions/${sessionIdToUpdate}/research/sources/${sourceId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ selected }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to update research source (${response.status})`);
+      }
+
+      const updated = (await response.json()) as ResearchRunDetail['sources'][number];
+
+      setHistoryDetail((prev) =>
+        prev && prev.session.id === sessionIdToUpdate && prev.researchRun
+          ? {
+              ...prev,
+              researchRun: {
+                ...prev.researchRun,
+                sources: prev.researchRun.sources.map((source) =>
+                  source.id === sourceId ? updated : source
+                ),
+              },
+            }
+          : prev
+      );
+
+      if (sessionId === sessionIdToUpdate) {
+        const currentRun = useDiscussionStore.getState().research.run;
+        if (currentRun) {
+          setResearchRun({
+            ...currentRun,
+            sources: currentRun.sources.map((source) =>
+              source.id === sourceId ? updated : source
+            ),
+          });
+        }
+      }
+    },
+    [sessionId, setResearchRun]
+  );
+
+  const handleDecisionStatusChange = useCallback(
+    async (sessionIdToUpdate: string, nextStatus: DecisionStatus) => {
+      await handleSessionReviewUpdate(sessionIdToUpdate, {
+        decisionStatus: nextStatus,
+      });
+    },
+    [handleSessionReviewUpdate]
+  );
+
+  const toggleCompareSession = useCallback((sessionIdToToggle: string) => {
+    setCompareSessionIds((prev) => {
+      if (prev.includes(sessionIdToToggle)) {
+        return prev.filter((id) => id !== sessionIdToToggle);
+      }
+      if (prev.length >= 2) {
+        return [prev[1], sessionIdToToggle];
+      }
+      return [...prev, sessionIdToToggle];
+    });
+  }, []);
+
   // ─────────────────────────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────────────────────────
@@ -660,19 +1365,338 @@ export default function HomePage() {
           {/* Scrollable config area */}
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-0.5">
 
-            {/* Topic */}
+            {/* Decision brief */}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                  Template
+                </label>
+                <Select
+                  value={brief.templateId ?? 'none'}
+                  onValueChange={(value) => {
+                    if (!value || value === 'none') {
+                      updateBrief('templateId', null);
+                      return;
+                    }
+                    applyTemplate(value);
+                  }}
+                  disabled={isRunning}
+                >
+                  <SelectTrigger className="rt-input h-9 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none" className="text-xs">
+                      Custom
+                    </SelectItem>
+                    {DECISION_TEMPLATES.map((template) => (
+                      <SelectItem key={template.id} value={template.id} className="text-xs">
+                        {template.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                  Decision Type
+                </label>
+                <Select
+                  value={brief.decisionType}
+                  onValueChange={(value) => {
+                    if (!value) return;
+                    updateBrief(
+                      'decisionType',
+                      value as DecisionBrief['decisionType']
+                    );
+                  }}
+                  disabled={isRunning}
+                >
+                  <SelectTrigger className="rt-input h-9 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[
+                      ['general', 'General'],
+                      ['investment', 'Investment'],
+                      ['product', 'Product'],
+                      ['career', 'Career'],
+                      ['life', 'Life'],
+                      ['risk', 'Risk'],
+                    ].map(([value, label]) => (
+                      <SelectItem key={value} value={value} className="text-xs">
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
             <div>
               <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
                 Topic
               </label>
               <Textarea
                 placeholder="输入要讨论的议题"
-                value={topic}
-                onChange={(e) => setTopic(e.target.value)}
+                value={brief.topic}
+                onChange={(e) => updateBrief('topic', e.target.value)}
                 disabled={isRunning}
                 className="rt-input min-h-[80px] text-sm"
               />
             </div>
+
+            <div>
+              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                Goal
+              </label>
+              <Textarea
+                placeholder="这次讨论要帮你做出什么判断？"
+                value={brief.goal}
+                onChange={(e) => updateBrief('goal', e.target.value)}
+                disabled={isRunning}
+                className="rt-input min-h-[56px] text-sm"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                  Desired Output
+                </label>
+                <Select
+                  value={brief.desiredOutput}
+                  onValueChange={(value) => {
+                    if (!value) return;
+                    updateBrief(
+                      'desiredOutput',
+                      value as DecisionBrief['desiredOutput']
+                    );
+                  }}
+                  disabled={isRunning}
+                >
+                  <SelectTrigger className="rt-input h-9 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[
+                      ['recommendation', 'Recommendation'],
+                      ['comparison', 'Comparison'],
+                      ['risk_assessment', 'Risk Assessment'],
+                      ['action_plan', 'Action Plan'],
+                      ['consensus', 'Consensus'],
+                    ].map(([value, label]) => (
+                      <SelectItem key={value} value={value} className="text-xs">
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+                <div className="rounded-xl border rt-border-soft px-3 py-2 text-[11px] rt-text-dim">
+                {activeTemplate
+                  ? activeTemplate.description
+                  : 'Use a template to prefill a repeatable decision workflow.'}
+                </div>
+              </div>
+
+            {activeTemplate && (
+              <div className="rounded-xl border rt-surface p-2.5">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                  Template Guide
+                </p>
+                <div className="mt-2 space-y-1.5 text-[11px] leading-relaxed rt-text-dim">
+                  <p>Goal hint: {activeTemplate.goal}</p>
+                  <p>Background hint: {activeTemplate.background}</p>
+                  <p>Constraint hint: {activeTemplate.constraints}</p>
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                Background
+              </label>
+              <Textarea
+                placeholder="背景、上下文、你已知的情况"
+                value={brief.background}
+                onChange={(e) => updateBrief('background', e.target.value)}
+                disabled={isRunning}
+                className="rt-input min-h-[72px] text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                Constraints
+              </label>
+              <Textarea
+                placeholder="预算、时间、风险边界、不可接受后果"
+                value={brief.constraints}
+                onChange={(e) => updateBrief('constraints', e.target.value)}
+                disabled={isRunning}
+                className="rt-input min-h-[72px] text-sm"
+              />
+            </div>
+
+            <div className="rounded-xl border rt-surface p-2.5">
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                Agenda
+              </p>
+              <div className="space-y-2">
+                <Textarea
+                  placeholder="重点问题"
+                  value={agenda.focalQuestions}
+                  onChange={(e) => updateAgenda('focalQuestions', e.target.value)}
+                  disabled={isRunning}
+                  className="rt-input min-h-[52px] text-xs"
+                />
+                <Textarea
+                  placeholder="必须覆盖的维度"
+                  value={agenda.requiredDimensions}
+                  onChange={(e) => updateAgenda('requiredDimensions', e.target.value)}
+                  disabled={isRunning}
+                  className="rt-input min-h-[52px] text-xs"
+                />
+                <label className="flex items-center gap-2 text-xs rt-text-strong">
+                  <Checkbox
+                    checked={agenda.requireResearch}
+                    onCheckedChange={(checked) =>
+                      updateAgenda('requireResearch', Boolean(checked))
+                    }
+                    disabled={isRunning}
+                  />
+                  Require research
+                </label>
+                <label className="flex items-center gap-2 text-xs rt-text-strong">
+                  <Checkbox
+                    checked={agenda.requestRecommendation}
+                    onCheckedChange={(checked) =>
+                      updateAgenda('requestRecommendation', Boolean(checked))
+                    }
+                    disabled={isRunning}
+                  />
+                  Request final recommendation
+                </label>
+              </div>
+            </div>
+
+            <div className="rounded-xl border rt-surface p-2.5">
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                Research
+              </p>
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-xs rt-text-strong">
+                  <Checkbox
+                    checked={researchConfig.enabled}
+                    onCheckedChange={(checked) =>
+                      updateResearchConfig('enabled', Boolean(checked))
+                    }
+                    disabled={isRunning}
+                  />
+                  Enable research pipeline
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Select
+                    value={researchConfig.mode}
+                    onValueChange={(value) => {
+                      if (!value) return;
+                      updateResearchConfig(
+                        'mode',
+                        value as ResearchConfig['mode']
+                      );
+                    }}
+                    disabled={isRunning || !researchConfig.enabled}
+                  >
+                    <SelectTrigger className="rt-input h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto" className="text-xs">
+                        Auto queries
+                      </SelectItem>
+                      <SelectItem value="guided" className="text-xs">
+                        Guided queries
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={String(researchConfig.maxSources)}
+                    onValueChange={(value) => {
+                      if (!value) return;
+                      updateResearchConfig('maxSources', Number(value));
+                    }}
+                    disabled={isRunning || !researchConfig.enabled}
+                  >
+                    <SelectTrigger className="rt-input h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[4, 6, 8].map((value) => (
+                        <SelectItem key={value} value={String(value)} className="text-xs">
+                          {value} sources
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Textarea
+                  placeholder="Additional queries (one per line)"
+                  value={researchConfig.userQueries.join('\n')}
+                  onChange={(event) =>
+                    updateResearchConfig(
+                      'userQueries',
+                      event.target.value
+                        .split('\n')
+                        .map((item) => item.trim())
+                        .filter(Boolean)
+                    )
+                  }
+                  disabled={
+                    isRunning ||
+                    !researchConfig.enabled ||
+                    researchConfig.mode !== 'guided'
+                  }
+                  className="rt-input min-h-[60px] text-xs"
+                />
+                <Textarea
+                  placeholder="Preferred domains, comma separated"
+                  value={researchConfig.preferredDomains.join(', ')}
+                  onChange={(event) =>
+                    updateResearchConfig(
+                      'preferredDomains',
+                      event.target.value
+                        .split(',')
+                        .map((item) => item.trim())
+                        .filter(Boolean)
+                    )
+                  }
+                  disabled={isRunning || !researchConfig.enabled}
+                  className="rt-input min-h-[52px] text-xs"
+                />
+                <p className="text-[10px] leading-relaxed rt-text-dim">
+                  Auto mode will generate topic, risk, and verification queries.
+                  Guided mode keeps those and appends your custom queries.
+                </p>
+              </div>
+            </div>
+
+            {followUpParentSession && (
+              <div className="rounded-xl border bg-[color-mix(in_srgb,var(--rt-live-state)_10%,transparent)] px-3 py-2 text-xs">
+                <p className="font-semibold rt-text-strong">Follow-up session</p>
+                <p className="mt-1 rt-text-muted">
+                  Continuing from {followUpParentSession.topic}
+                </p>
+                <button
+                  type="button"
+                  className="mt-1 rt-text-dim underline"
+                  onClick={() => setFollowUpParentSession(null)}
+                  disabled={isRunning}
+                >
+                  Clear link
+                </button>
+              </div>
+            )}
 
             {/* Moderator + Debate Rounds (2-column) */}
             <div className="grid grid-cols-2 gap-2">
@@ -709,7 +1733,10 @@ export default function HomePage() {
                 </label>
                 <Select
                   value={String(maxDebateRounds)}
-                  onValueChange={(value) => setMaxDebateRounds(Number(value))}
+                  onValueChange={(value) => {
+                    if (!value) return;
+                    setMaxDebateRounds(Number(value));
+                  }}
                   disabled={isRunning}
                 >
                   <SelectTrigger className="rt-input h-9 text-xs">
@@ -855,7 +1882,7 @@ export default function HomePage() {
             <div className="flex gap-2">
               <Button
                 onClick={handleStart}
-                disabled={isRunning || !topic.trim() || selectedAgents.size < 2}
+                disabled={isRunning || !brief.topic.trim() || selectedAgents.size < 2}
                 className="h-10 flex-1 text-sm"
               >
                 Start Session
@@ -871,8 +1898,26 @@ export default function HomePage() {
             {isRunning && (
               <div className="rt-surface space-y-1.5 rounded-xl border p-2.5">
                 <label className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
-                  Interjection
+                  Runtime Control
                 </label>
+                <Select
+                  value={interjectionControlType}
+                  onValueChange={(value) => {
+                    if (!value) return;
+                    setInterjectionControlType(value as DecisionControlType);
+                  }}
+                >
+                  <SelectTrigger className="rt-input h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(DECISION_CONTROL_LABELS).map(([value, label]) => (
+                      <SelectItem key={value} value={value} className="text-xs">
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Textarea
                   placeholder="每轮开始前注入新要求…"
                   value={interjection}
@@ -888,7 +1933,9 @@ export default function HomePage() {
                   >
                     Send
                   </Button>
-                  <span className="text-xs rt-text-dim">Queued: {interjections.length}</span>
+                  <span className="text-xs rt-text-dim">
+                    Queued: {interjections.length}
+                  </span>
                 </div>
               </div>
             )}
@@ -909,6 +1956,39 @@ export default function HomePage() {
                     ? 'Live Discussion'
                     : 'Discussion Feed'}
               </h2>
+
+              {!historyDetail && feedMessages.length > 0 && (
+                <div className="flex items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 shrink-0 text-xs"
+                    onClick={handleExportLiveTranscript}
+                  >
+                    Export Transcript
+                  </Button>
+                  {decisionSummary && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 shrink-0 text-xs"
+                      onClick={handleExportLiveDecisionCard}
+                    >
+                      Export Decision
+                    </Button>
+                  )}
+                  {actionItems.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 shrink-0 text-xs"
+                      onClick={handleExportLiveChecklist}
+                    >
+                      Export Checklist
+                    </Button>
+                  )}
+                </div>
+              )}
 
               {/* Follow-latest button when auto-scroll is paused */}
               {ui.autoScroll === 'paused' && !historyDetail && (
@@ -1022,7 +2102,39 @@ export default function HomePage() {
               stageMode="mobile-hybrid"
             />
             {research.status !== 'idle' && (
-              <ResearchPanel status={research.status} sources={research.sources} />
+              <ResearchPanel
+                status={research.status}
+                sources={research.sources}
+                researchRun={research.run}
+                busy={researchBusySessionId === sessionId}
+                onRerun={
+                  sessionId
+                    ? () =>
+                        void handleResearchRerun(
+                          sessionId,
+                          research.run?.searchConfig ?? researchConfig
+                        ).catch((error) =>
+                          setError(
+                            error instanceof Error ? error.message : String(error)
+                          )
+                        )
+                    : null
+                }
+                onToggleSourceSelection={
+                  sessionId
+                    ? (sourceId, selected) =>
+                        void handleResearchSourceSelection(
+                          sessionId,
+                          sourceId,
+                          selected
+                        ).catch((error) =>
+                          setError(
+                            error instanceof Error ? error.message : String(error)
+                          )
+                        )
+                    : null
+                }
+              />
             )}
           </div>
         </div>
@@ -1067,7 +2179,43 @@ export default function HomePage() {
 
                 {/* Web Research */}
                 {research.status !== 'idle' && (
-                  <ResearchPanel status={research.status} sources={research.sources} />
+                  <ResearchPanel
+                    status={research.status}
+                    sources={research.sources}
+                    researchRun={research.run}
+                    busy={researchBusySessionId === sessionId}
+                    onRerun={
+                      sessionId
+                        ? () =>
+                            void handleResearchRerun(
+                              sessionId,
+                              research.run?.searchConfig ?? researchConfig
+                            ).catch((error) =>
+                              setError(
+                                error instanceof Error
+                                  ? error.message
+                                  : String(error)
+                              )
+                            )
+                        : null
+                    }
+                    onToggleSourceSelection={
+                      sessionId
+                        ? (sourceId, selected) =>
+                            void handleResearchSourceSelection(
+                              sessionId,
+                              sourceId,
+                              selected
+                            ).catch((error) =>
+                              setError(
+                                error instanceof Error
+                                  ? error.message
+                                  : String(error)
+                              )
+                            )
+                        : null
+                    }
+                  />
                 )}
 
                 {/* Current minutes */}
@@ -1092,6 +2240,187 @@ export default function HomePage() {
                       >
                         Export .md
                       </Button>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {decisionSummary && (
+                  <DecisionSummaryCard
+                    title="Current Decision Card"
+                    decisionSummary={decisionSummary}
+                    researchSources={research.run?.sources ?? research.sources}
+                    researchEvaluation={research.run?.evaluation ?? null}
+                    footer={
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={handleExportLiveDecisionCard}
+                        >
+                          Export decision
+                        </Button>
+                      </div>
+                    }
+                  />
+                )}
+
+                {sessionId && actionItems.length > 0 && (
+                  <Card className="rt-surface">
+                    <CardHeader className="px-3 pb-1.5 pt-3">
+                      <CardTitle className="text-sm rt-text-strong">
+                        Execution Plan
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2 px-3 pb-3">
+                      {actionItems.map((item) => (
+                        <div
+                          key={item.id}
+                          className="rounded-xl border rt-border-soft p-2.5"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="space-y-1">
+                              <p className="text-sm font-medium rt-text-strong">
+                                {item.content}
+                              </p>
+                              <div className="flex flex-wrap gap-1">
+                                <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
+                                  {item.source === 'carried_forward'
+                                    ? 'Carried forward'
+                                    : 'Generated'}
+                                </span>
+                                {item.carriedFromSessionId && (
+                                  <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
+                                    {item.carriedFromSessionId.slice(0, 8)}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <Select
+                              value={item.status}
+                              onValueChange={(value) => {
+                                const nextStatus = value as ActionItemStatus;
+                                setActionItems(
+                                  updateLocalActionItems(actionItems, item.id, {
+                                    status: nextStatus,
+                                  })
+                                );
+                                void handleActionItemUpdate(sessionId, item.id, {
+                                  status: nextStatus,
+                                }).catch((error) =>
+                                  setError(
+                                    error instanceof Error
+                                      ? error.message
+                                      : String(error)
+                                  )
+                                );
+                              }}
+                              disabled={isRunning}
+                            >
+                              <SelectTrigger className="rt-input h-8 w-[150px] text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {ACTION_ITEM_STATUS_OPTIONS.map((status) => (
+                                  <SelectItem
+                                    key={status}
+                                    value={status}
+                                    className="text-xs"
+                                  >
+                                    {ACTION_ITEM_STATUS_LABELS[status]}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <Textarea
+                            value={item.note ?? ''}
+                            onChange={(event) =>
+                              setActionItems(
+                                updateLocalActionItems(actionItems, item.id, {
+                                  note: event.target.value,
+                                })
+                              )
+                            }
+                            onBlur={() =>
+                              void handleActionItemUpdate(sessionId, item.id, {
+                                note:
+                                  useDiscussionStore
+                                    .getState()
+                                    .actionItems.find((entry) => entry.id === item.id)
+                                    ?.note ?? '',
+                              }).catch((error) =>
+                                setError(
+                                  error instanceof Error
+                                    ? error.message
+                                    : String(error)
+                                )
+                              )
+                            }
+                            disabled={isRunning}
+                            placeholder="Execution note, owner, or outcome signal"
+                            className="rt-input mt-2 min-h-[74px] text-xs"
+                          />
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {sessionId && !isRunning && (
+                  <Card className="rt-surface">
+                    <CardHeader className="px-3 pb-1.5 pt-3">
+                      <CardTitle className="text-sm rt-text-strong">
+                        Outcome Review
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2 px-3 pb-3">
+                      <Textarea
+                        value={review.outcomeSummary}
+                        onChange={(event) =>
+                          setReview({ outcomeSummary: event.target.value })
+                        }
+                        placeholder="What happened after this decision?"
+                        className="rt-input min-h-[74px] text-xs"
+                      />
+                      <Textarea
+                        value={review.retrospectiveNote}
+                        onChange={(event) =>
+                          setReview({ retrospectiveNote: event.target.value })
+                        }
+                        placeholder="What would you adjust in the next round?"
+                        className="rt-input min-h-[90px] text-xs"
+                      />
+                      <div className="flex justify-end">
+                        <Button
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() =>
+                            void handleSessionReviewUpdate(sessionId, {
+                              outcomeSummary: useDiscussionStore.getState().review.outcomeSummary,
+                              retrospectiveNote:
+                                useDiscussionStore.getState().review.retrospectiveNote,
+                            }).catch((error) =>
+                              setError(
+                                error instanceof Error
+                                  ? error.message
+                                  : String(error)
+                              )
+                            )
+                          }
+                        >
+                          Save review
+                        </Button>
+                        {actionItems.length > 0 && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="ml-2 h-7 text-xs"
+                            onClick={handleExportLiveChecklist}
+                          >
+                            Export checklist
+                          </Button>
+                        )}
+                      </div>
                     </CardContent>
                   </Card>
                 )}
@@ -1141,11 +2470,97 @@ export default function HomePage() {
                       Sessions
                     </p>
                   </div>
+                  <div className="mb-2 space-y-2">
+                    <Input
+                      value={historyQuery}
+                      onChange={(event) => setHistoryQuery(event.target.value)}
+                      placeholder="Search topic, goal, status, template…"
+                      className="rt-input h-8 text-xs"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <Select
+                        value={historyStatusFilter}
+                        onValueChange={(value) => {
+                          if (!value) return;
+                          setHistoryStatusFilter(value as typeof historyStatusFilter);
+                        }}
+                      >
+                        <SelectTrigger className="rt-input h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all" className="text-xs">
+                            All statuses
+                          </SelectItem>
+                          {historyStatusOptions.map((status) => (
+                            <SelectItem key={status} value={status} className="text-xs">
+                              {status}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Select
+                        value={historyTemplateFilter}
+                        onValueChange={(value) => {
+                          setHistoryTemplateFilter(value ?? 'all');
+                        }}
+                      >
+                        <SelectTrigger className="rt-input h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all" className="text-xs">
+                            All templates
+                          </SelectItem>
+                          {historyTemplateOptions.map((templateId) => (
+                            <SelectItem key={templateId} value={templateId} className="text-xs">
+                              {DECISION_TEMPLATES.find((template) => template.id === templateId)
+                                ?.label ?? templateId}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Select
+                        value={historyTimeRange}
+                        onValueChange={(value) => {
+                          if (!value) return;
+                          setHistoryTimeRange(value as typeof historyTimeRange);
+                        }}
+                      >
+                        <SelectTrigger className="rt-input h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all" className="text-xs">
+                            All time
+                          </SelectItem>
+                          <SelectItem value="7d" className="text-xs">
+                            Last 7 days
+                          </SelectItem>
+                          <SelectItem value="30d" className="text-xs">
+                            Last 30 days
+                          </SelectItem>
+                          <SelectItem value="90d" className="text-xs">
+                            Last 90 days
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <span className="text-[11px] rt-text-dim">
+                        {filteredSessions.length} / {sessions.length}
+                      </span>
+                    </div>
+                  </div>
                   {sessions.length === 0 ? (
                     <p className="text-sm rt-text-muted">No sessions yet.</p>
+                  ) : filteredSessions.length === 0 ? (
+                    <p className="text-sm rt-text-muted">
+                      No sessions match the current filters.
+                    </p>
                   ) : (
                     <div className="space-y-1.5">
-                      {sessions.map((session) => {
+                      {filteredSessions.map((session) => {
                         const active = session.id === activeHistoryId;
                         const presetLabels = Object.values(
                           parsePersonaSelectionMap(session.personaSelections)
@@ -1175,6 +2590,13 @@ export default function HomePage() {
                               <p className="mt-0.5 text-[11px] rt-text-muted">
                                 {new Date(session.createdAt).toLocaleString()} · {session.status}
                               </p>
+                              <p className="mt-0.5 text-[10px] rt-text-dim">
+                                {(DECISION_TEMPLATES.find(
+                                  (template) => template.id === session.templateId
+                                )?.label ?? session.decisionType) || 'General'}
+                                {' · '}
+                                {session.decisionStatus}
+                              </p>
                               {uniquePresetLabels.length > 0 && (
                                 <p className="mt-0.5 text-[10px] rt-text-dim">
                                   {uniquePresetLabels.join(', ')}
@@ -1182,9 +2604,22 @@ export default function HomePage() {
                               )}
                             </button>
                             <div className="mt-1.5 flex items-center justify-between">
-                              <span className="text-[10px] rt-text-dim">
-                                {session.id.slice(0, 8)}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] rt-text-dim">
+                                  {session.id.slice(0, 8)}
+                                </span>
+                                <button
+                                  type="button"
+                                  className={`rounded-full border px-2 py-0.5 text-[10px] ${
+                                    compareSessionIds.includes(session.id)
+                                      ? 'rt-border-strong rt-text-strong'
+                                      : 'rt-text-dim'
+                                  }`}
+                                  onClick={() => toggleCompareSession(session.id)}
+                                >
+                                  Compare
+                                </button>
+                              </div>
                               <Button
                                 size="sm"
                                 variant="ghost"
@@ -1219,6 +2654,16 @@ export default function HomePage() {
                         {historyDetail.session.usageInputTokens.toLocaleString()} in ·{' '}
                         {historyDetail.session.usageOutputTokens.toLocaleString()} out
                       </p>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
+                          {(DECISION_TEMPLATES.find(
+                            (template) => template.id === historyDetail.session.templateId
+                          )?.label ?? historyDetail.session.decisionType) || 'General'}
+                        </span>
+                        <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
+                          {historyDetail.session.desiredOutput}
+                        </span>
+                      </div>
                       <div className="mt-1.5 flex flex-wrap gap-1">
                         {historySelectedAgentIds.map((agentId) => {
                           const sel = historyPersonaSelections[agentId];
@@ -1239,6 +2684,320 @@ export default function HomePage() {
                             </span>
                           );
                         })}
+                      </div>
+                      <div className="mt-2">
+                        <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                          Decision status
+                        </label>
+                        <Select
+                          value={historyDetail.session.decisionStatus}
+                          onValueChange={(value) => {
+                            if (!value) return;
+                            void handleDecisionStatusChange(
+                              historyDetail.session.id,
+                              value as DecisionStatus
+                            ).catch((error) =>
+                              setError(error instanceof Error ? error.message : String(error))
+                            );
+                          }}
+                        >
+                          <SelectTrigger className="rt-input h-8 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {DECISION_STATUS_OPTIONS.map((status) => (
+                              <SelectItem key={status} value={status} className="text-xs">
+                                {status}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="mt-2 space-y-1.5 text-xs">
+                        {historyDetail.session.goal && (
+                          <p className="rt-text-muted">Goal: {historyDetail.session.goal}</p>
+                        )}
+                        {historyDetail.session.constraints && (
+                          <p className="rt-text-muted">
+                            Constraints: {historyDetail.session.constraints}
+                          </p>
+                        )}
+                      </div>
+                      {historyDetail.parentSession && (
+                        <button
+                          type="button"
+                          className="mt-2 block text-left text-[11px] underline rt-text-dim"
+                          onClick={() => void loadHistory(historyDetail.parentSession!.id)}
+                        >
+                          Parent session: {historyDetail.parentSession.topic}
+                        </button>
+                      )}
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        <Button
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          onClick={handleReuseHistorySetup}
+                        >
+                          Use setup
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 text-xs"
+                          onClick={handleExportHistoryTranscript}
+                        >
+                          Export transcript
+                        </Button>
+                        {historyDetail.decisionSummary && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-xs"
+                            onClick={handleExportHistoryDecisionCard}
+                          >
+                            Export decision
+                          </Button>
+                        )}
+                        {historyDetail.actionItems.length > 0 && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-xs"
+                            onClick={handleExportHistoryChecklist}
+                          >
+                            Export checklist
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+
+                    {historyDetail.decisionSummary && (
+                      <DecisionSummaryCard
+                        title="Decision Card"
+                        decisionSummary={historyDetail.decisionSummary}
+                        researchSources={historyDetail.researchRun?.sources ?? []}
+                        researchEvaluation={historyDetail.researchRun?.evaluation ?? null}
+                      />
+                    )}
+
+                    {historyDetail.researchRun && (
+                      <ResearchPanel
+                        status={historyDetail.researchRun.status}
+                        sources={historyDetail.researchRun.sources}
+                        researchRun={historyDetail.researchRun}
+                        busy={researchBusySessionId === historyDetail.session.id}
+                        onRerun={() =>
+                          void handleResearchRerun(historyDetail.session.id).catch(
+                            (error) =>
+                              setError(
+                                error instanceof Error
+                                  ? error.message
+                                  : String(error)
+                              )
+                          )
+                        }
+                        onToggleSourceSelection={(sourceId, selected) =>
+                          void handleResearchSourceSelection(
+                            historyDetail.session.id,
+                            sourceId,
+                            selected
+                          ).catch((error) =>
+                            setError(
+                              error instanceof Error
+                                ? error.message
+                                : String(error)
+                            )
+                          )
+                        }
+                      />
+                    )}
+
+                    {historyDetail.actionItems.length > 0 && (
+                      <div className="rounded-xl border rt-surface p-2.5">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                            Execution Plan
+                          </p>
+                          <span className="text-[10px] rt-text-dim">
+                            {historyDetail.actionItems.length} items
+                          </span>
+                        </div>
+                        <div className="space-y-2">
+                          {historyDetail.actionItems.map((item) => (
+                            <div
+                              key={item.id}
+                              className="rounded-xl border rt-border-soft p-2.5"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="space-y-1">
+                                  <p className="text-sm font-medium rt-text-strong">
+                                    {item.content}
+                                  </p>
+                                  <div className="flex flex-wrap gap-1">
+                                    <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
+                                      {item.source === 'carried_forward'
+                                        ? 'Carried forward'
+                                        : 'Generated'}
+                                    </span>
+                                    {item.carriedFromSessionId && (
+                                      <button
+                                        type="button"
+                                        className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] underline rt-text-dim"
+                                        onClick={() =>
+                                          void loadHistory(item.carriedFromSessionId!)
+                                        }
+                                      >
+                                        From {item.carriedFromSessionId.slice(0, 8)}
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                                <Select
+                                  value={item.status}
+                                  onValueChange={(value) => {
+                                    const nextStatus = value as ActionItemStatus;
+                                    setHistoryDetail((prev) =>
+                                      prev && prev.session.id === historyDetail.session.id
+                                        ? {
+                                            ...prev,
+                                            actionItems: updateLocalActionItems(
+                                              prev.actionItems,
+                                              item.id,
+                                              { status: nextStatus }
+                                            ),
+                                          }
+                                        : prev
+                                    );
+                                    void handleActionItemUpdate(
+                                      historyDetail.session.id,
+                                      item.id,
+                                      { status: nextStatus }
+                                    ).catch((error) =>
+                                      setError(
+                                        error instanceof Error
+                                          ? error.message
+                                          : String(error)
+                                      )
+                                    );
+                                  }}
+                                >
+                                  <SelectTrigger className="rt-input h-8 w-[150px] text-xs">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {ACTION_ITEM_STATUS_OPTIONS.map((status) => (
+                                      <SelectItem
+                                        key={status}
+                                        value={status}
+                                        className="text-xs"
+                                      >
+                                        {ACTION_ITEM_STATUS_LABELS[status]}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <Textarea
+                                value={item.note ?? ''}
+                                onChange={(event) =>
+                                  setHistoryDetail((prev) =>
+                                    prev && prev.session.id === historyDetail.session.id
+                                      ? {
+                                          ...prev,
+                                          actionItems: updateLocalActionItems(
+                                            prev.actionItems,
+                                            item.id,
+                                            { note: event.target.value }
+                                          ),
+                                        }
+                                      : prev
+                                  )
+                                }
+                                onBlur={(event) =>
+                                  void handleActionItemUpdate(
+                                    historyDetail.session.id,
+                                    item.id,
+                                    { note: event.target.value }
+                                  ).catch((error) =>
+                                    setError(
+                                      error instanceof Error
+                                        ? error.message
+                                        : String(error)
+                                    )
+                                  )
+                                }
+                                placeholder="Execution note, result, or owner"
+                                className="rt-input mt-2 min-h-[74px] text-xs"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="rounded-xl border rt-surface p-2.5">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                        Outcome Review
+                      </p>
+                      <div className="mt-2 space-y-2">
+                        <Textarea
+                          value={historyDetail.session.outcomeSummary ?? ''}
+                          onChange={(event) =>
+                            setHistoryDetail((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    session: {
+                                      ...prev.session,
+                                      outcomeSummary: event.target.value,
+                                    },
+                                  }
+                                : prev
+                            )
+                          }
+                          placeholder="What happened after this decision?"
+                          className="rt-input min-h-[74px] text-xs"
+                        />
+                        <Textarea
+                          value={historyDetail.session.retrospectiveNote ?? ''}
+                          onChange={(event) =>
+                            setHistoryDetail((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    session: {
+                                      ...prev.session,
+                                      retrospectiveNote: event.target.value,
+                                    },
+                                  }
+                                : prev
+                            )
+                          }
+                          placeholder="What would you change in the next follow-up?"
+                          className="rt-input min-h-[90px] text-xs"
+                        />
+                        <div className="flex justify-end">
+                          <Button
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() =>
+                              void handleSessionReviewUpdate(historyDetail.session.id, {
+                                outcomeSummary:
+                                  historyDetail.session.outcomeSummary ?? '',
+                                retrospectiveNote:
+                                  historyDetail.session.retrospectiveNote ?? '',
+                              }).catch((error) =>
+                                setError(
+                                  error instanceof Error
+                                    ? error.message
+                                    : String(error)
+                                )
+                              )
+                            }
+                          >
+                            Save review
+                          </Button>
+                        </div>
                       </div>
                     </div>
 
@@ -1267,6 +3026,105 @@ export default function HomePage() {
                         </div>
                       </div>
                     )}
+
+                    {historyDetail.childSessions.length > 0 && (
+                      <div className="rounded-xl border rt-surface p-2.5">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                          Follow-up Sessions
+                        </p>
+                        <div className="mt-2 space-y-1.5">
+                          {historyDetail.childSessions.map((session) => (
+                            <button
+                              key={session.id}
+                              type="button"
+                              className="block w-full rounded-lg border rt-border-soft px-2 py-1.5 text-left text-xs rt-text-strong"
+                              onClick={() => void loadHistory(session.id)}
+                            >
+                              {session.topic}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {similarSessions.length > 0 && (
+                      <div className="rounded-xl border rt-surface p-2.5">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                          Similar Sessions
+                        </p>
+                        <div className="mt-2 space-y-1.5">
+                          {similarSessions.map((session) => (
+                            <button
+                              key={session.id}
+                              type="button"
+                              className="block w-full rounded-lg border rt-border-soft px-2 py-1.5 text-left text-xs rt-text-strong"
+                              onClick={() => void loadHistory(session.id)}
+                            >
+                              {session.topic}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {compareDetails.length === 2 && (
+                  <div className="rounded-xl border rt-surface p-2.5">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                      Compare Sessions
+                    </p>
+                    <div className="mt-2 grid gap-2">
+                      {compareDetails.map((detail) => (
+                        <div
+                          key={detail.session.id}
+                          className="rounded-lg border rt-border-soft p-2"
+                        >
+                          <p className="text-sm font-semibold rt-text-strong">
+                            {detail.session.topic}
+                          </p>
+                          <p className="mt-1 text-[11px] rt-text-muted">
+                            {detail.session.decisionStatus} · {detail.session.decisionType}
+                          </p>
+                          <div className="mt-2 space-y-2">
+                            <div>
+                              <p className="text-[10px] uppercase tracking-[0.18em] rt-text-muted">
+                                Recommendation
+                              </p>
+                              <p className="mt-1 text-xs rt-text-dim">
+                                {detail.decisionSummary?.recommendedOption ??
+                                  'No decision card'}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase tracking-[0.18em] rt-text-muted">
+                                Risks
+                              </p>
+                              <p className="mt-1 text-xs rt-text-dim">
+                                {detail.decisionSummary?.risks.join(' · ') || 'None'}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase tracking-[0.18em] rt-text-muted">
+                                Research gaps
+                              </p>
+                              <p className="mt-1 text-xs rt-text-dim">
+                                {detail.researchRun?.evaluation?.gaps.join(' · ') || 'None'}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase tracking-[0.18em] rt-text-muted">
+                                Action items
+                              </p>
+                              <p className="mt-1 text-xs rt-text-dim">
+                                {detail.actionItems.map((item) => item.content).join(' · ') ||
+                                  'None'}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </>

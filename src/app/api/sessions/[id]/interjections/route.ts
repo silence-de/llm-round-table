@@ -12,6 +12,12 @@ export async function POST(
   const { id } = await params;
   const body = (await req.json()) as {
     content?: string;
+    controlType?:
+      | 'general'
+      | 'add_constraint'
+      | 'ask_comparison'
+      | 'force_converge'
+      | 'continue_debate';
     phase?: string;
     round?: number;
   };
@@ -22,9 +28,13 @@ export async function POST(
   }
 
   const status = await getSessionStatus(id);
+  if (!status) {
+    return NextResponse.json({ error: 'session not found' }, { status: 404 });
+  }
+
   if (status !== 'running') {
     return NextResponse.json(
-      { error: `session is not running (current: ${status ?? 'not_found'})` },
+      { error: `session is not running (current: ${status})` },
       { status: 409 }
     );
   }
@@ -32,6 +42,7 @@ export async function POST(
   const interjection = enqueueInterjection({
     sessionId: id,
     content,
+    controlType: body.controlType,
     phaseHint: body.phase ?? undefined,
     roundHint: body.round,
   });
@@ -46,5 +57,9 @@ export async function POST(
   });
 
   const interjectionId = await interjection;
-  return NextResponse.json({ ok: true, interjectionId });
+  return NextResponse.json({
+    ok: true,
+    interjectionId,
+    controlType: body.controlType ?? 'general',
+  });
 }

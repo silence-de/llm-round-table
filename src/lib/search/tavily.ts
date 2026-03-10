@@ -6,6 +6,7 @@ export interface TavilySearchOptions {
   query: string;
   maxResults?: number;
   searchDepth?: 'basic' | 'advanced';
+  includeDomains?: string[];
 }
 
 export interface TavilySearchResponse {
@@ -30,6 +31,10 @@ export async function tavilySearch(
       query: options.query,
       max_results: options.maxResults ?? 5,
       search_depth: options.searchDepth ?? 'basic',
+      include_domains:
+        options.includeDomains && options.includeDomains.length > 0
+          ? options.includeDomains
+          : undefined,
     }),
     signal: AbortSignal.timeout(15_000),
   });

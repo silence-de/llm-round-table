@@ -14,10 +14,14 @@ import {
   buildAgentSystemPrompt,
   buildAnalysisPrompt,
   buildDebatePrompt,
+  buildDecisionSummaryPrompt,
   buildSummaryPrompt,
+  parseDecisionSummaryContent,
   parseAnalysis,
 } from './moderator';
 import { conductResearch } from '../search/research';
+import type { ResearchRunStatus, ResearchSource } from '../search/types';
+import { formatControlInstruction } from '../decision/utils';
 
 export class DiscussionOrchestrator {
   private config: DiscussionConfig;
@@ -32,6 +36,7 @@ export class DiscussionOrchestrator {
   private interjectionContext: string[] = [];
   private stopState = { checkedAt: 0, value: false };
   private researchBrief: string | null = null;
+  private researchSources: ResearchSource[] = [];
 
   constructor(config: DiscussionConfig) {
     this.config = config;
@@ -106,6 +111,11 @@ export class DiscussionOrchestrator {
       return;
     }
     yield* this.phaseSummary();
+    if (await this.shouldStop()) {
+      yield* this.emitStopped();
+      return;
+    }
+    await this.generateDecisionSummary();
 
     yield {
       type: 'phase_change',
@@ -124,11 +134,15 @@ export class DiscussionOrchestrator {
       : [];
 
     for (const interjection of queue) {
-      this.interjectionContext.push(interjection.content);
+      const normalizedContent = formatControlInstruction(
+        interjection.controlType,
+        interjection.content
+      );
+      this.interjectionContext.push(normalizedContent);
       this.allMessages.push({
         agentId: 'user',
         displayName: 'User',
-        content: interjection.content,
+        content: normalizedContent,
         phase,
       });
 
@@ -137,7 +151,7 @@ export class DiscussionOrchestrator {
         agentId: 'user',
         phase,
         round,
-        content: interjection.content,
+        content: normalizedContent,
         timestamp: Date.now(),
       };
     }
@@ -188,8 +202,26 @@ export class DiscussionOrchestrator {
   }
 
   private async *phaseResearch(): AsyncIterable<SSEEvent> {
+    if (!this.config.agenda.requireResearch || !this.config.researchConfig.enabled) {
+      await this.persistResearchRun({
+        status: 'skipped',
+        queryPlan: [],
+        summary: '',
+        evaluation: null,
+      });
+      yield { type: 'research_start', timestamp: Date.now() };
+      yield { type: 'research_complete', content: '', timestamp: Date.now() };
+      return;
+    }
+
     // Skip gracefully when TAVILY_API_KEY is not configured
     if (!process.env.TAVILY_API_KEY) {
+      await this.persistResearchRun({
+        status: 'skipped',
+        queryPlan: [],
+        summary: '',
+        evaluation: null,
+      });
       yield { type: 'research_start', timestamp: Date.now() };
       yield { type: 'research_complete', content: '', timestamp: Date.now() };
       return;
@@ -203,25 +235,69 @@ export class DiscussionOrchestrator {
     yield { type: 'research_start', timestamp: Date.now() };
 
     try {
-      const brief = await conductResearch(this.config.topic);
-      this.researchBrief = brief.briefText;
+      await this.persistResearchRun({
+        status: 'running',
+        queryPlan: [],
+        summary: '',
+        evaluation: null,
+      });
+      const result = await conductResearch({
+        brief: this.config.brief,
+        config: this.config.researchConfig,
+      });
+      this.researchBrief = result.summary;
+      this.researchSources = result.sources;
+      await this.persistResearchRun({
+        status: result.status,
+        queryPlan: result.queryPlan,
+        summary: result.summary,
+        evaluation: result.evaluation,
+      });
+      if (this.config.onResearchSourcesPersist) {
+        await this.config.onResearchSourcesPersist(this.config.sessionId, result.sources);
+      }
 
       // Emit sources as JSON-encoded content for the client to display
       yield {
         type: 'research_result',
-        content: JSON.stringify(brief.sources),
+        content: JSON.stringify(result.sources),
         timestamp: Date.now(),
       };
 
+      if (result.status === 'failed') {
+        yield {
+          type: 'research_failed',
+          content: result.evaluation?.gaps.join('\n') || 'Research failed.',
+          timestamp: Date.now(),
+        };
+        return;
+      }
+
       yield {
         type: 'research_complete',
-        content: brief.briefText,
+        content: result.summary,
         timestamp: Date.now(),
       };
     } catch (err) {
       // Non-fatal: log and continue without research
       console.error('[Research] Failed, continuing without research brief:', err);
-      yield { type: 'research_complete', content: '', timestamp: Date.now() };
+      await this.persistResearchRun({
+        status: 'failed',
+        queryPlan: [],
+        summary: '',
+        evaluation: {
+          coverageScore: 0,
+          recencyScore: 0,
+          diversityScore: 0,
+          overallConfidence: 0,
+          gaps: [err instanceof Error ? err.message : String(err)],
+        },
+      });
+      yield {
+        type: 'research_failed',
+        content: err instanceof Error ? err.message : String(err),
+        timestamp: Date.now(),
+      };
     }
   }
 
@@ -244,9 +320,11 @@ export class DiscussionOrchestrator {
       .map((a) => a.definition.displayName);
 
     const prompt = buildOpeningPrompt(
-      this.config.topic,
+      this.config.brief,
       agentNames,
-      this.researchBrief ?? undefined
+      this.config.agenda,
+      this.researchBrief ?? undefined,
+      this.config.parentContext
     );
     await this.persistUsage({ inputTokens: this.estimateTokens(prompt) });
     if (await this.shouldStop()) {
@@ -315,7 +393,8 @@ export class DiscussionOrchestrator {
       const provider = getProvider(agent.definition.provider);
       const modelId = getModelId(agent.definition, agent.selectedModelId);
       const systemPrompt = buildAgentSystemPrompt(
-        this.config.topic,
+        this.config.brief,
+        this.config.agenda,
         agent.persona,
         this.interjectionContext,
         this.researchBrief ?? undefined
@@ -413,7 +492,13 @@ export class DiscussionOrchestrator {
     const modelId = getModelId(moderator.definition, moderator.selectedModelId);
     const responses = Array.from(this.agentResponses.values());
 
-    const prompt = buildAnalysisPrompt(this.config.topic, responses, this.interjectionContext);
+    const prompt = buildAnalysisPrompt(
+      this.config.brief,
+      this.config.agenda,
+      responses,
+      this.interjectionContext,
+      this.config.parentContext
+    );
     if (await this.shouldStop()) {
       return;
     }
@@ -498,7 +583,8 @@ export class DiscussionOrchestrator {
               {
                 role: 'user',
                 content: buildDebatePrompt(
-                  this.config.topic,
+                  this.config.brief,
+                  this.config.agenda,
                   agent.definition.id,
                   previousResponse?.content ?? '',
                   disagreement.point,
@@ -508,7 +594,8 @@ export class DiscussionOrchestrator {
               },
             ],
             systemPrompt: buildAgentSystemPrompt(
-              this.config.topic,
+              this.config.brief,
+              this.config.agenda,
               agent.persona,
               this.interjectionContext,
               this.researchBrief ?? undefined
@@ -575,7 +662,12 @@ export class DiscussionOrchestrator {
     const provider = getProvider(moderator.definition.provider);
     const modelId = getModelId(moderator.definition, moderator.selectedModelId);
 
-    const prompt = buildSummaryPrompt(this.config.topic, this.allMessages);
+    const prompt = buildSummaryPrompt(
+      this.config.brief,
+      this.config.agenda,
+      this.allMessages,
+      this.config.parentContext
+    );
     await this.persistUsage({ inputTokens: this.estimateTokens(prompt) });
     if (await this.shouldStop()) {
       return;
@@ -624,5 +716,77 @@ export class DiscussionOrchestrator {
     if (this.config.onSummaryPersist) {
       await this.config.onSummaryPersist(fullContent);
     }
+  }
+
+  private async generateDecisionSummary() {
+    if (!this.config.onDecisionSummaryPersist) return;
+
+    const moderator = this.config.agents.find(
+      (agent) => agent.definition.id === this.config.moderatorAgentId
+    );
+    if (!moderator) return;
+
+    const minutes = this.allMessages
+      .filter((message) => message.phase === DiscussionPhase.SUMMARY)
+      .at(-1)?.content;
+    if (!minutes) return;
+
+    const provider = getProvider(moderator.definition.provider);
+    const modelId = getModelId(moderator.definition, moderator.selectedModelId);
+    const prompt = buildDecisionSummaryPrompt({
+      brief: this.config.brief,
+      agenda: this.config.agenda,
+      allMessages: this.allMessages,
+      minutes,
+      researchSources: this.researchSources,
+    });
+    try {
+      const result = await provider.chat({
+        model: modelId,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.2,
+        maxTokens: 1800,
+        timeoutMs: 45_000,
+      });
+
+      await this.persistUsage({
+        inputTokens: result.usage?.inputTokens ?? this.estimateTokens(prompt),
+        outputTokens: result.usage?.outputTokens ?? this.estimateTokens(result.content),
+      });
+
+      await this.config.onDecisionSummaryPersist(
+        parseDecisionSummaryContent(result.content, minutes, this.researchSources)
+      );
+    } catch {
+      await this.config.onDecisionSummaryPersist(
+        parseDecisionSummaryContent('', minutes, this.researchSources)
+      );
+    }
+  }
+
+  private async persistResearchRun(input: {
+    status: ResearchRunStatus;
+    queryPlan: string[];
+    summary: string;
+    evaluation: {
+      coverageScore: number;
+      recencyScore: number;
+      diversityScore: number;
+      overallConfidence: number;
+      gaps: string[];
+    } | null;
+  }) {
+    if (!this.config.onResearchRunPersist) return;
+    await this.config.onResearchRunPersist({
+      id: this.config.sessionId,
+      sessionId: this.config.sessionId,
+      status: input.status,
+      queryPlan: input.queryPlan,
+      searchConfig: this.config.researchConfig,
+      summary: input.summary,
+      evaluation: input.evaluation,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
   }
 }
