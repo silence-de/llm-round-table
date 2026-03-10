@@ -50,54 +50,54 @@
 :root {
   /* ── HappyHues #6 source palette (5 base colors) ──────────────────────────
      All colors in this file MUST be derivable from these five.
-     Primary purple : #6246ea
-     Lavender       : #d1d1e9
-     Coral red      : #e45858
-     Charcoal dark  : #2b2c34   ← dark backgrounds derive from this
-     Off-white      : #fffffe
+     Page background : #d1d1e9   ← HSL(240° 35% 87%) — dark bg scale derives from this hue
+     Card background : #fffffe
+     Primary purple  : #6246ea
+     Coral red       : #e45858
+     Charcoal dark   : #2b2c34   (text / headline color — NOT the bg derivation source)
   ── */
 
   /* Source tokens (never used directly in components, only as derivation
      reference — components use the semantic tokens below) */
   --rt-hh6-primary:    #6246ea;
-  --rt-hh6-lavender:   #d1d1e9;
+  --rt-hh6-lavender:   #d1d1e9;   /* page background — H=240° */
   --rt-hh6-coral:      #e45858;
-  --rt-hh6-charcoal:   #2b2c34;
-  --rt-hh6-offwhite:   #fffffe;
+  --rt-hh6-charcoal:   #2b2c34;   /* text / headline */
+  --rt-hh6-offwhite:   #fffffe;   /* card background */
   /* Keep legacy names for any external reference */
   --rt-hh6-secondary:  #d1d1e9;
   --rt-hh6-tertiary:   #e45858;
   --rt-hh6-headline:   #2b2c34;
-  --rt-hh6-background: #fffffe;
+  --rt-hh6-background: #d1d1e9;   /* ← correct: HH6 page background, not #fffffe */
 
   /* ── Dark background scale ─────────────────────────────────────────────────
-     Derived by darkening #2b2c34 (hsl ≈ 235° 9% 19%) while preserving
-     its warm-charcoal character and adding a hair of purple depth.
-     Each step is roughly –3 to –5 percentage points of lightness.
+     Derived by darkening #d1d1e9 (hsl = 240° 35% 87%) while preserving
+     its pure H=240° hue character (R=G channels — no warm/green drift).
+     Saturation is clamped to ~19-25% to stay in-gamut at low lightness.
      Level 0 (darkest) → Level 5 (most elevated)
   */
-  --rt-bg-0:  #0f1018;   /* near-black shell underlay   (L ≈  7%) */
-  --rt-bg-1:  #14151e;   /* page background             (L ≈  9%) */
-  --rt-bg-2:  #1a1b28;   /* panel / sidebar             (L ≈ 12%) */
-  --rt-bg-3:  #202134;   /* surface / card              (L ≈ 16%) */
-  --rt-bg-4:  #272840;   /* elevated surface            (L ≈ 19%, ≈ HH6 charcoal) */
-  --rt-bg-5:  #31334f;   /* hover / accent surface      (L ≈ 24%) */
+  --rt-bg-0:  #0f0f17;   /* near-black shell underlay   (H=240° S=21% L≈7%) */
+  --rt-bg-1:  #13131c;   /* page background             (H=240° S=19% L≈9%) */
+  --rt-bg-2:  #1a1a28;   /* panel / sidebar             (H=240° S=21% L≈13%) */
+  --rt-bg-3:  #212133;   /* surface / card              (H=240° S=22% L≈16%) */
+  --rt-bg-4:  #282840;   /* elevated surface            (H=240° S=23% L≈20%) */
+  --rt-bg-5:  #31314e;   /* hover / accent surface      (H=240° S=23% L≈25%) */
 
   /* ── Gradient anchors ──────────────────────────────────────────────────── */
-  --rt-shell-grad-a:        var(--rt-bg-1);      /* #14151e */
-  --rt-shell-grad-b:        var(--rt-bg-2);      /* #1a1b28 */
+  --rt-shell-grad-a:        var(--rt-bg-1);      /* #13131c */
+  --rt-shell-grad-b:        var(--rt-bg-2);      /* #1a1a28 */
   --rt-shell-grad-c:        #321b5e;             /* HH6 purple #6246ea @ 23% lightness */
   --rt-stage-grad-a:        var(--rt-bg-1);
   --rt-stage-grad-b:        var(--rt-bg-2);
-  --rt-stage-mobile-grad-a: var(--rt-bg-0);      /* #0f1018 */
-  --rt-stage-mobile-grad-b: #181928;             /* between bg-0 and bg-2 */
+  --rt-stage-mobile-grad-a: var(--rt-bg-0);      /* #0f0f17 */
+  --rt-stage-mobile-grad-b: #151520;             /* between bg-0 and bg-2, H=240° */
   --rt-grid-line: #ffffff1a;
 
   /* ── Panel / surface semantic tokens ──────────────────────────────────── */
-  --rt-panel-bg:        var(--rt-bg-2);   /* #1a1b28 */
-  --rt-panel-bg-strong: var(--rt-bg-0);   /* #0f1018 */
-  --rt-surface-bg:      var(--rt-bg-3);   /* #202134 */
-  --rt-surface-overlay: var(--rt-bg-0);   /* #0f1018 */
+  --rt-panel-bg:        var(--rt-bg-2);   /* #1a1a28 */
+  --rt-panel-bg-strong: var(--rt-bg-0);   /* #0f0f17 */
+  --rt-surface-bg:      var(--rt-bg-3);   /* #212133 */
+  --rt-surface-overlay: var(--rt-bg-0);   /* #0f0f17 */
 
   /* Meeting-minutes surface: HH6 lavender (#d1d1e9) darkened to bg-3 depth */
   --rt-surface-minutes: #242545;
@@ -140,17 +140,17 @@
   /* ── shadcn/ui semantic tokens ──────────────────────────────────────────
      All derived from HH6 palette.
   */
-  --background:          #14151e;   /* bg-1: HH6 charcoal → dark */
+  --background:          #13131c;   /* bg-1: derived from #d1d1e9 H=240° */
   --foreground:          #fffffe;   /* HH6 off-white */
-  --card:                #202134;   /* bg-3 */
+  --card:                #212133;   /* bg-3 */
   --card-foreground:     #fffffe;
-  --popover:             #1c1d2c;   /* between bg-2 and bg-3 */
+  --popover:             #1d1d2d;   /* between bg-2 and bg-3, H=240° */
   --popover-foreground:  #fffffe;
   --primary:             #6246ea;   /* HH6 primary exact */
   --primary-foreground:  #fffffe;
   --secondary:           #2b2c34;   /* HH6 charcoal exact */
   --secondary-foreground: #fffffe;
-  --muted:               #262740;   /* bg-4 area, lavender-tinted */
+  --muted:               #272740;   /* near bg-4, H=240° */
   --muted-foreground:    #b8b9d0;   /* rt-label */
   --accent:              #e45858;   /* HH6 coral exact */
   --accent-foreground:   #fffffe;
@@ -168,11 +168,11 @@
 
   --radius: 0.625rem;
 
-  --sidebar:                    #1a1b28;   /* bg-2 */
+  --sidebar:                    #1a1a28;   /* bg-2, H=240° */
   --sidebar-foreground:         #fffffe;
   --sidebar-primary:            #6246ea;
   --sidebar-primary-foreground: #fffffe;
-  --sidebar-accent:             #272840;   /* bg-4 */
+  --sidebar-accent:             #282840;   /* bg-4, H=240° */
   --sidebar-accent-foreground:  #fffffe;
   --sidebar-border:             #d1d1e930;
   --sidebar-ring:               #8a78f5;
@@ -180,17 +180,17 @@
 
 .dark {
   /* Same as :root — app is dark-only; no light variant */
-  --background:          #14151e;
+  --background:          #13131c;
   --foreground:          #fffffe;
-  --card:                #202134;
+  --card:                #212133;
   --card-foreground:     #fffffe;
-  --popover:             #1c1d2c;
+  --popover:             #1d1d2d;
   --popover-foreground:  #fffffe;
   --primary:             #6246ea;
   --primary-foreground:  #fffffe;
   --secondary:           #2b2c34;
   --secondary-foreground: #fffffe;
-  --muted:               #262740;
+  --muted:               #272740;
   --muted-foreground:    #b8b9d0;
   --accent:              #e45858;
   --accent-foreground:   #fffffe;
@@ -203,11 +203,11 @@
   --chart-3: #8a78f5;
   --chart-4: #b8acff;
   --chart-5: #e45858;
-  --sidebar:                    #1a1b28;
+  --sidebar:                    #1a1a28;
   --sidebar-foreground:         #fffffe;
   --sidebar-primary:            #6246ea;
   --sidebar-primary-foreground: #fffffe;
-  --sidebar-accent:             #272840;
+  --sidebar-accent:             #282840;
   --sidebar-accent-foreground:  #fffffe;
   --sidebar-border:             #d1d1e930;
   --sidebar-ring:               #8a78f5;
