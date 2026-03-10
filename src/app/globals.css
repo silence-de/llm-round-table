@@ -48,106 +48,169 @@
 }
 
 :root {
-  --rt-hh6-primary: #6246ea;
-  --rt-hh6-secondary: #d1d1e9;
-  --rt-hh6-tertiary: #e45858;
-  --rt-hh6-headline: #2b2c34;
+  /* ── HappyHues #6 source palette (5 base colors) ──────────────────────────
+     All colors in this file MUST be derivable from these five.
+     Primary purple : #6246ea
+     Lavender       : #d1d1e9
+     Coral red      : #e45858
+     Charcoal dark  : #2b2c34   ← dark backgrounds derive from this
+     Off-white      : #fffffe
+  ── */
+
+  /* Source tokens (never used directly in components, only as derivation
+     reference — components use the semantic tokens below) */
+  --rt-hh6-primary:    #6246ea;
+  --rt-hh6-lavender:   #d1d1e9;
+  --rt-hh6-coral:      #e45858;
+  --rt-hh6-charcoal:   #2b2c34;
+  --rt-hh6-offwhite:   #fffffe;
+  /* Keep legacy names for any external reference */
+  --rt-hh6-secondary:  #d1d1e9;
+  --rt-hh6-tertiary:   #e45858;
+  --rt-hh6-headline:   #2b2c34;
   --rt-hh6-background: #fffffe;
-  --rt-shell-grad-a: #121629;
-  --rt-shell-grad-b: #1f2140;
-  --rt-shell-grad-c: #522d58;
-  --rt-stage-grad-a: #121629;
-  --rt-stage-grad-b: #1d2142;
-  --rt-stage-mobile-grad-a: #101021;
-  --rt-stage-mobile-grad-b: #191b38;
+
+  /* ── Dark background scale ─────────────────────────────────────────────────
+     Derived by darkening #2b2c34 (hsl ≈ 235° 9% 19%) while preserving
+     its warm-charcoal character and adding a hair of purple depth.
+     Each step is roughly –3 to –5 percentage points of lightness.
+     Level 0 (darkest) → Level 5 (most elevated)
+  */
+  --rt-bg-0:  #0f1018;   /* near-black shell underlay   (L ≈  7%) */
+  --rt-bg-1:  #14151e;   /* page background             (L ≈  9%) */
+  --rt-bg-2:  #1a1b28;   /* panel / sidebar             (L ≈ 12%) */
+  --rt-bg-3:  #202134;   /* surface / card              (L ≈ 16%) */
+  --rt-bg-4:  #272840;   /* elevated surface            (L ≈ 19%, ≈ HH6 charcoal) */
+  --rt-bg-5:  #31334f;   /* hover / accent surface      (L ≈ 24%) */
+
+  /* ── Gradient anchors ──────────────────────────────────────────────────── */
+  --rt-shell-grad-a:        var(--rt-bg-1);      /* #14151e */
+  --rt-shell-grad-b:        var(--rt-bg-2);      /* #1a1b28 */
+  --rt-shell-grad-c:        #321b5e;             /* HH6 purple #6246ea @ 23% lightness */
+  --rt-stage-grad-a:        var(--rt-bg-1);
+  --rt-stage-grad-b:        var(--rt-bg-2);
+  --rt-stage-mobile-grad-a: var(--rt-bg-0);      /* #0f1018 */
+  --rt-stage-mobile-grad-b: #181928;             /* between bg-0 and bg-2 */
   --rt-grid-line: #ffffff1a;
-  --rt-panel-bg: #11152c;
-  --rt-panel-bg-strong: #0b1025;
-  --rt-surface-bg: #151a35;
-  --rt-surface-overlay: #0d1228;
-  --rt-surface-live: #7f5af0;
-  --rt-surface-minutes: #2a3a33;
-  --rt-border-soft: #d1d1e933;
-  --rt-border-strong: #d1d1e966;
-  --rt-text-strong: #fffffe;
-  --rt-text-muted: #d1d1e9;
-  --rt-text-dim: #a7abcf;
-  --rt-label: #c7c8df;
-  --rt-stage-glow-primary: #6246ea;
+
+  /* ── Panel / surface semantic tokens ──────────────────────────────────── */
+  --rt-panel-bg:        var(--rt-bg-2);   /* #1a1b28 */
+  --rt-panel-bg-strong: var(--rt-bg-0);   /* #0f1018 */
+  --rt-surface-bg:      var(--rt-bg-3);   /* #202134 */
+  --rt-surface-overlay: var(--rt-bg-0);   /* #0f1018 */
+
+  /* Meeting-minutes surface: HH6 lavender (#d1d1e9) darkened to bg-3 depth */
+  --rt-surface-minutes: #242545;
+
+  /* ── Accent / state colors ──────────────────────────────────────────────
+     All derived from HH6 primary (#6246ea) or coral (#e45858).
+  */
+  /* Live / streaming: HH6 purple brightened +15% for dark-bg legibility */
+  --rt-surface-live:        #7357f5;
+  --rt-live-state:          #7357f5;
+
+  /* Stage glow: exact HH6 colors */
+  --rt-stage-glow-primary:   #6246ea;
   --rt-stage-glow-secondary: #e45858;
-  --rt-live-state: #7f5af0;
-  --rt-warning-state: #f09c7f;
-  --rt-error-state: #ff9090;
-  --rt-moderator-ring: #f2a5b9;
-  --rt-moderator-core: #f0c7d2;
+
+  /* Warning: HH6 coral (#e45858) hue shifted +20° toward amber-orange */
+  --rt-warning-state: #f09058;
+
+  /* Error: HH6 coral (#e45858) brightened slightly */
+  --rt-error-state: #f06868;
+
+  /* Moderator avatar: warm coral palette (from HH6 coral, progressively lightened) */
+  --rt-moderator-ring: #f0aeae;   /* coral + 40% white */
+  --rt-moderator-core: #f8d0d0;   /* coral + 65% white */
+
+  /* ── Text scale (from HH6 lavender + off-white) ──────────────────────── */
+  --rt-text-strong: #fffffe;   /* HH6 off-white exact */
+  --rt-text-muted:  #d1d1e9;   /* HH6 lavender exact */
+  --rt-text-dim:    #9496b4;   /* HH6 lavender @ 60% saturation + –30% lightness */
+  --rt-label:       #b8b9d0;   /* HH6 lavender @ –12% lightness */
+
+  /* ── Borders (HH6 lavender with opacity) ─────────────────────────────── */
+  --rt-border-soft:   #d1d1e930;
+  --rt-border-strong: #d1d1e965;
+
+  /* ── Typography ─────────────────────────────────────────────────────────── */
   --rt-font-sans: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
   --rt-font-mono: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  --background: #0f1020;
-  --foreground: #fffffe;
-  --card: #161a34;
-  --card-foreground: #fffffe;
-  --popover: #151933;
-  --popover-foreground: #fffffe;
-  --primary: #6246ea;
-  --primary-foreground: #fffffe;
-  --secondary: #2b2c34;
+
+  /* ── shadcn/ui semantic tokens ──────────────────────────────────────────
+     All derived from HH6 palette.
+  */
+  --background:          #14151e;   /* bg-1: HH6 charcoal → dark */
+  --foreground:          #fffffe;   /* HH6 off-white */
+  --card:                #202134;   /* bg-3 */
+  --card-foreground:     #fffffe;
+  --popover:             #1c1d2c;   /* between bg-2 and bg-3 */
+  --popover-foreground:  #fffffe;
+  --primary:             #6246ea;   /* HH6 primary exact */
+  --primary-foreground:  #fffffe;
+  --secondary:           #2b2c34;   /* HH6 charcoal exact */
   --secondary-foreground: #fffffe;
-  --muted: #222542;
-  --muted-foreground: #c5c8e4;
-  --accent: #e45858;
-  --accent-foreground: #fffffe;
-  --destructive: #ff8e8e;
-  --border: #d1d1e933;
-  --input: #d1d1e926;
-  --ring: #9c89f5;
-  --chart-1: #6246ea;
-  --chart-2: #7f5af0;
-  --chart-3: #8a6ff0;
-  --chart-4: #b29bff;
-  --chart-5: #e45858;
+  --muted:               #262740;   /* bg-4 area, lavender-tinted */
+  --muted-foreground:    #b8b9d0;   /* rt-label */
+  --accent:              #e45858;   /* HH6 coral exact */
+  --accent-foreground:   #fffffe;
+  --destructive:         #f06868;   /* rt-error-state */
+  --border:              #d1d1e930; /* rt-border-soft */
+  --input:               #d1d1e920; /* lavender, very transparent */
+  --ring:                #8a78f5;   /* HH6 purple + 25% brightness */
+
+  /* Charts: purple → lavender → coral ramp (all HH6-derived) */
+  --chart-1: #6246ea;   /* HH6 primary */
+  --chart-2: #7357f5;   /* primary +15% */
+  --chart-3: #8a78f5;   /* primary +25% */
+  --chart-4: #b8acff;   /* primary +42% (tint) */
+  --chart-5: #e45858;   /* HH6 coral */
+
   --radius: 0.625rem;
-  --sidebar: #11152c;
-  --sidebar-foreground: #fffffe;
-  --sidebar-primary: #6246ea;
+
+  --sidebar:                    #1a1b28;   /* bg-2 */
+  --sidebar-foreground:         #fffffe;
+  --sidebar-primary:            #6246ea;
   --sidebar-primary-foreground: #fffffe;
-  --sidebar-accent: #242744;
-  --sidebar-accent-foreground: #fffffe;
-  --sidebar-border: #d1d1e933;
-  --sidebar-ring: #9c89f5;
+  --sidebar-accent:             #272840;   /* bg-4 */
+  --sidebar-accent-foreground:  #fffffe;
+  --sidebar-border:             #d1d1e930;
+  --sidebar-ring:               #8a78f5;
 }
 
 .dark {
-  --background: #0f1020;
-  --foreground: #fffffe;
-  --card: #161a34;
-  --card-foreground: #fffffe;
-  --popover: #151933;
-  --popover-foreground: #fffffe;
-  --primary: #6246ea;
-  --primary-foreground: #fffffe;
-  --secondary: #2b2c34;
+  /* Same as :root — app is dark-only; no light variant */
+  --background:          #14151e;
+  --foreground:          #fffffe;
+  --card:                #202134;
+  --card-foreground:     #fffffe;
+  --popover:             #1c1d2c;
+  --popover-foreground:  #fffffe;
+  --primary:             #6246ea;
+  --primary-foreground:  #fffffe;
+  --secondary:           #2b2c34;
   --secondary-foreground: #fffffe;
-  --muted: #222542;
-  --muted-foreground: #c5c8e4;
-  --accent: #e45858;
-  --accent-foreground: #fffffe;
-  --destructive: #ff8e8e;
-  --border: #d1d1e933;
-  --input: #d1d1e926;
-  --ring: #9c89f5;
+  --muted:               #262740;
+  --muted-foreground:    #b8b9d0;
+  --accent:              #e45858;
+  --accent-foreground:   #fffffe;
+  --destructive:         #f06868;
+  --border:              #d1d1e930;
+  --input:               #d1d1e920;
+  --ring:                #8a78f5;
   --chart-1: #6246ea;
-  --chart-2: #7f5af0;
-  --chart-3: #8a6ff0;
-  --chart-4: #b29bff;
+  --chart-2: #7357f5;
+  --chart-3: #8a78f5;
+  --chart-4: #b8acff;
   --chart-5: #e45858;
-  --sidebar: #11152c;
-  --sidebar-foreground: #fffffe;
-  --sidebar-primary: #6246ea;
+  --sidebar:                    #1a1b28;
+  --sidebar-foreground:         #fffffe;
+  --sidebar-primary:            #6246ea;
   --sidebar-primary-foreground: #fffffe;
-  --sidebar-accent: #242744;
-  --sidebar-accent-foreground: #fffffe;
-  --sidebar-border: #d1d1e933;
-  --sidebar-ring: #9c89f5;
+  --sidebar-accent:             #272840;
+  --sidebar-accent-foreground:  #fffffe;
+  --sidebar-border:             #d1d1e930;
+  --sidebar-ring:               #8a78f5;
 }
 
 @layer base {
