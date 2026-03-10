@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { AgentMessage } from '@/stores/discussion-store';
 import { PixelAgentAvatar } from '@/components/discussion/pixel-agent-avatar';
+import { MarkdownContent } from '@/components/ui/markdown-content';
 
 interface AgentCardProps {
   agentId: string;
@@ -79,12 +80,11 @@ export function AgentCard({
         <CardContent className="flex-1 px-4 pb-3">
           <div ref={viewportRef} className="h-full max-h-[320px] overflow-auto pr-1">
             {message ? (
-              <div className="whitespace-pre-wrap text-sm leading-7 rt-text-strong">
-                {message.content}
-                {message.isStreaming && (
-                  <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-foreground/70" />
-                )}
-              </div>
+              <MarkdownContent
+                content={message.content}
+                streaming={message.isStreaming}
+                className="text-sm"
+              />
             ) : (
               <div className="text-sm italic rt-text-dim">等待发言...</div>
             )}

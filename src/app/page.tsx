@@ -33,6 +33,7 @@ import { AgentCard } from '@/components/discussion/agent-card';
 import { ModeratorPanel } from '@/components/discussion/moderator-panel';
 import { RoundTableStage } from '@/components/discussion/round-table-stage';
 import { ResearchPanel } from '@/components/discussion/research-panel';
+import { MarkdownContent } from '@/components/ui/markdown-content';
 import type { PersonaPreset, PersonaSelection } from '@/lib/agents/types';
 
 interface AgentInfo {
@@ -1125,8 +1126,8 @@ export default function HomePage() {
                 <CardTitle className="rt-text-strong text-base">Current Minutes</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="rt-surface-glass rt-text-strong mb-3 max-h-[200px] overflow-auto whitespace-pre-wrap rounded-md border p-3 text-sm leading-relaxed">
-                  {currentSummary}
+                <div className="rt-surface-glass mb-3 max-h-[200px] overflow-auto rounded-md border p-3 text-sm">
+                  <MarkdownContent content={currentSummary} />
                 </div>
                 <Button
                   size="sm"
@@ -1261,8 +1262,8 @@ export default function HomePage() {
                           Export
                         </Button>
                       </div>
-                      <div className="rt-text-strong max-h-[180px] overflow-auto whitespace-pre-wrap text-sm leading-relaxed">
-                        {historyDetail.minutes.content}
+                      <div className="max-h-[180px] overflow-auto text-sm">
+                        <MarkdownContent content={historyDetail.minutes.content} />
                       </div>
                     </div>
                   )}
@@ -1291,9 +1292,7 @@ export default function HomePage() {
                           <p className="text-[11px] uppercase tracking-wide rt-text-dim">
                             {message.phase} · {message.displayName || message.role}
                           </p>
-                          <p className="rt-text-strong mt-1 whitespace-pre-wrap text-sm leading-relaxed">
-                            {message.content}
-                          </p>
+                          <MarkdownContent content={message.content} className="mt-1 text-sm" />
                         </div>
                       ))
                     )}
@@ -1314,9 +1313,7 @@ export default function HomePage() {
                           <p className="text-[11px] uppercase tracking-wide rt-text-dim">
                             {message.phase} · {message.displayName || message.role}
                           </p>
-                          <p className="rt-text-strong mt-1 whitespace-pre-wrap text-sm leading-relaxed">
-                            {message.content}
-                          </p>
+                          <MarkdownContent content={message.content} className="mt-1 text-sm" />
                         </div>
                       ))}
                     </div>

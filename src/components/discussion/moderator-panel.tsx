@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { PixelAgentAvatar } from '@/components/discussion/pixel-agent-avatar';
+import { MarkdownContent } from '@/components/ui/markdown-content';
 
 interface ModeratorMessage {
   content: string;
@@ -46,14 +47,13 @@ export function ModeratorPanel({
                   {PHASE_LABELS[msg.phase] ?? msg.phase}
                 </span>
               </div>
-              <div className="text-sm whitespace-pre-wrap leading-relaxed">
-                {msg.content}
-                {i === messages.length - 1 &&
-                  msg.content.length > 0 &&
-                  !msg.content.endsWith('\n') && (
-                    <span className="inline-block w-1.5 h-4 bg-foreground/70 animate-pulse ml-0.5" />
-                  )}
-              </div>
+              <MarkdownContent
+                content={msg.content}
+                streaming={
+                  i === messages.length - 1 && msg.content.length > 0
+                }
+                className="text-sm"
+              />
             </div>
           ))}
         </ScrollArea>
