@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildDecisionSummaryMarkdown,
+  buildExecutionChecklistMarkdown,
   buildTranscriptMarkdown,
 } from '@/lib/session-artifacts';
 
@@ -67,4 +68,37 @@ test('buildDecisionSummaryMarkdown renders structured decision card sections', (
   assert.match(markdown, /先补 brief、decision card 和历史决策链。/);
   assert.match(markdown, /## Evidence Links/);
   assert.match(markdown, /R1, R2/);
+});
+
+test('buildExecutionChecklistMarkdown renders status and notes', () => {
+  const markdown = buildExecutionChecklistMarkdown({
+    topic: '执行闭环',
+    status: 'needs_follow_up',
+    actionItems: [
+      {
+        id: 'a1',
+        content: 'Ship review panel',
+        status: 'verified',
+        source: 'generated',
+        carriedFromSessionId: null,
+        note: 'Completed on March 10, 2026.',
+        sortOrder: 0,
+      },
+      {
+        id: 'a2',
+        content: 'Carry unresolved risks',
+        status: 'in_progress',
+        source: 'carried_forward',
+        carriedFromSessionId: 'session-1',
+        note: '',
+        sortOrder: 1,
+      },
+    ],
+  });
+
+  assert.match(markdown, /# Round Table Execution Checklist/);
+  assert.match(markdown, /- Status: needs_follow_up/);
+  assert.match(markdown, /\[x\] Ship review panel/);
+  assert.match(markdown, /source=carried_forward/);
+  assert.match(markdown, /Completed on March 10, 2026/);
 });

@@ -29,6 +29,20 @@ test('store reset clears live and replay state while preserving stage mode', () 
     confidence: 70,
     evidence: [],
   });
+  store.setActionItems([
+    {
+      id: 'item-1',
+      content: 'Ship follow-up',
+      status: 'pending',
+      source: 'generated',
+      note: 'owner: PM',
+      sortOrder: 0,
+    },
+  ]);
+  store.setReview({
+    outcomeSummary: 'The team executed on the decision.',
+    retrospectiveNote: 'Need faster risk review next time.',
+  });
   store.setResearchStatus('completed');
   store.setResearchBriefText('brief');
   store.setResearchRun({
@@ -60,6 +74,9 @@ test('store reset clears live and replay state while preserving stage mode', () 
   assert.equal(next.moderatorMessages.length, 0);
   assert.equal(next.interjections.length, 0);
   assert.equal(next.decisionSummary, null);
+  assert.equal(next.actionItems.length, 0);
+  assert.equal(next.review.outcomeSummary, '');
+  assert.equal(next.review.retrospectiveNote, '');
   assert.equal(next.research.status, 'idle');
   assert.equal(next.research.run, null);
   assert.equal(next.replay.status, 'idle');

@@ -7,10 +7,17 @@ import {
   DELETE as deleteSessionRoute,
   PATCH as patchSessionRoute,
 } from '@/app/api/sessions/[id]/route';
+import { PATCH as patchActionItemRoute } from '@/app/api/sessions/[id]/action-items/[itemId]/route';
+import { POST as rerunResearchRoute } from '@/app/api/sessions/[id]/research/route';
+import { PATCH as patchResearchSourceRoute } from '@/app/api/sessions/[id]/research/sources/[sourceId]/route';
 import { POST as startSessionRoute } from '@/app/api/sessions/[id]/start/route';
 import { POST as stopSessionRoute } from '@/app/api/sessions/[id]/stop/route';
 import { POST as interjectionRoute } from '@/app/api/sessions/[id]/interjections/route';
-import { createSession, getSessionStatus } from '@/lib/db/repository';
+import {
+  createSession,
+  getSessionStatus,
+  upsertDecisionSummary,
+} from '@/lib/db/repository';
 import {
   FakeProvider,
   cleanupTestDatabaseFile,
@@ -208,6 +215,10 @@ test('start route streams a completed discussion and persists history', async ()
   assert.ok(detail.messages.length >= 3);
   assert.match(detail.minutes.content, /圆桌讨论纪要/);
   assert.equal(detail.decisionSummary.recommendedOption, '先完成 brief 和 decision card。');
+  assert.deepEqual(
+    detail.actionItems.map((item: { content: string }) => item.content),
+    ['扩 schema', '补 UI']
+  );
   assert.equal(detail.researchRun.status, 'skipped');
 });
 
@@ -333,6 +344,92 @@ test('start route persists research run, sources, and source-backed evidence', a
   );
 });
 
+test('research rerun route refreshes sources and source selection persists', async () => {
+  process.env.TAVILY_API_KEY = 'test-tavily';
+
+  await createSession({
+    id: 'research-rerun-session',
+    topic: 'research rerun',
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 2,
+    selectedAgentIds: ['claude', 'gpt'],
+    modelSelections: {},
+    personaSelections: {},
+    personas: {},
+    researchConfig: {
+      enabled: true,
+      mode: 'guided',
+      userQueries: ['research rerun manual query'],
+      preferredDomains: ['example.com'],
+      maxSources: 4,
+    },
+  });
+
+  await withMockedTavilyResults(
+    [
+      {
+        title: 'Official update',
+        url: 'https://docs.example.com/a',
+        content: 'Documentation update for validation and rollout.',
+        score: 0.88,
+        published_date: '2026-03-08',
+      },
+      {
+        title: 'Market news',
+        url: 'https://news.example.com/b',
+        content: 'News coverage on the main downside risk.',
+        score: 0.79,
+        published_date: '2026-03-05',
+      },
+    ],
+    async () => {
+      const rerunResponse = await rerunResearchRoute(
+        new Request('http://localhost/api/sessions/research-rerun-session/research', {
+          method: 'POST',
+          body: JSON.stringify({}),
+          headers: { 'Content-Type': 'application/json' },
+        }),
+        { params: Promise.resolve({ id: 'research-rerun-session' }) }
+      );
+
+      assert.equal(rerunResponse.status, 200);
+      const rerunPayload = await rerunResponse.json();
+      assert.equal(rerunPayload.status, 'completed');
+      assert.equal(rerunPayload.sources.length, 2);
+
+      const sourceResponse = await patchResearchSourceRoute(
+        new Request(
+          `http://localhost/api/sessions/research-rerun-session/research/sources/${rerunPayload.sources[0].id}`,
+          {
+            method: 'PATCH',
+            body: JSON.stringify({ selected: false }),
+            headers: { 'Content-Type': 'application/json' },
+          }
+        ),
+        {
+          params: Promise.resolve({
+            id: 'research-rerun-session',
+            sourceId: rerunPayload.sources[0].id,
+          }),
+        }
+      );
+
+      assert.equal(sourceResponse.status, 200);
+      const sourcePayload = await sourceResponse.json();
+      assert.equal(sourcePayload.selected, false);
+    }
+  );
+
+  const detailResponse = await getSessionRoute(
+    new Request('http://localhost/api/sessions/research-rerun-session'),
+    { params: Promise.resolve({ id: 'research-rerun-session' }) }
+  );
+  const detail = await detailResponse.json();
+
+  assert.equal(detail.researchRun.sources[0].selected, false);
+  assert.equal(detail.researchRun.queryPlan.length >= 3, true);
+});
+
 test('stop and interjection routes handle running, completed, and missing sessions', async () => {
   await createSession({
     id: 'running-session',
@@ -401,6 +498,163 @@ test('stop and interjection routes handle running, completed, and missing sessio
     { params: Promise.resolve({ id: 'completed-session' }) }
   );
   assert.equal(completedStopResponse.status, 200);
+});
+
+test('follow-up sessions carry forward unfinished action items', async () => {
+  await createSession({
+    id: 'parent-session',
+    topic: 'parent',
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 2,
+    selectedAgentIds: ['claude', 'gpt'],
+    modelSelections: {},
+    personaSelections: {},
+    personas: {},
+  });
+
+  await upsertDecisionSummary('parent-session', {
+    summary: 'summary',
+    recommendedOption: 'option',
+    why: [],
+    risks: [],
+    openQuestions: [],
+    nextActions: ['Validate demand', 'Prepare launch checklist'],
+    confidence: 72,
+    evidence: [],
+  });
+
+  const parentDetailResponse = await getSessionRoute(
+    new Request('http://localhost/api/sessions/parent-session'),
+    { params: Promise.resolve({ id: 'parent-session' }) }
+  );
+  const parentDetail = await parentDetailResponse.json();
+  const firstItemId = parentDetail.actionItems[0].id as string;
+
+  await patchActionItemRoute(
+    new Request(`http://localhost/api/sessions/parent-session/action-items/${firstItemId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        status: 'in_progress',
+        note: 'Owner: PM',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    }),
+    { params: Promise.resolve({ id: 'parent-session', itemId: firstItemId }) }
+  );
+
+  const secondItemId = parentDetail.actionItems[1].id as string;
+  await patchActionItemRoute(
+    new Request(`http://localhost/api/sessions/parent-session/action-items/${secondItemId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        status: 'verified',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    }),
+    { params: Promise.resolve({ id: 'parent-session', itemId: secondItemId }) }
+  );
+
+  await createSession({
+    id: 'child-session',
+    topic: 'child',
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 2,
+    selectedAgentIds: ['claude', 'gpt'],
+    modelSelections: {},
+    personaSelections: {},
+    personas: {},
+    parentSessionId: 'parent-session',
+  });
+
+  const childDetailResponse = await getSessionRoute(
+    new Request('http://localhost/api/sessions/child-session'),
+    { params: Promise.resolve({ id: 'child-session' }) }
+  );
+  const childDetail = await childDetailResponse.json();
+
+  assert.equal(childDetail.parentSession.id, 'parent-session');
+  assert.equal(childDetail.actionItems.length, 1);
+  assert.equal(childDetail.actionItems[0].content, 'Validate demand');
+  assert.equal(childDetail.actionItems[0].source, 'carried_forward');
+  assert.equal(childDetail.actionItems[0].status, 'in_progress');
+  assert.equal(childDetail.actionItems[0].carriedFromSessionId, 'parent-session');
+  assert.equal(childDetail.actionItems[0].note, 'Owner: PM');
+});
+
+test('session patch route persists review fields and action item route updates execution items', async () => {
+  await createSession({
+    id: 'review-session',
+    topic: 'history',
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 2,
+    selectedAgentIds: ['claude', 'gpt'],
+    modelSelections: {},
+    personaSelections: {},
+    personas: {},
+  });
+
+  await upsertDecisionSummary('review-session', {
+    summary: 'summary',
+    recommendedOption: 'option',
+    why: [],
+    risks: [],
+    openQuestions: [],
+    nextActions: ['Ship decision log'],
+    confidence: 70,
+    evidence: [],
+  });
+
+  const patchResponse = await patchSessionRoute(
+    new Request('http://localhost/api/sessions/review-session', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        decisionStatus: 'needs_follow_up',
+        outcomeSummary: 'Initial rollout completed.',
+        retrospectiveNote: 'Need stronger ownership mapping.',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    }),
+    { params: Promise.resolve({ id: 'review-session' }) }
+  );
+  assert.equal(patchResponse.status, 200);
+
+  const detailResponse = await getSessionRoute(
+    new Request('http://localhost/api/sessions/review-session'),
+    { params: Promise.resolve({ id: 'review-session' }) }
+  );
+  const detail = await detailResponse.json();
+  const itemId = detail.actionItems[0].id as string;
+
+  const actionItemResponse = await patchActionItemRoute(
+    new Request(`http://localhost/api/sessions/review-session/action-items/${itemId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        status: 'verified',
+        note: 'Closed on March 10, 2026.',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    }),
+    { params: Promise.resolve({ id: 'review-session', itemId }) }
+  );
+  assert.equal(actionItemResponse.status, 200);
+  const updatedItem = await actionItemResponse.json();
+  assert.equal(updatedItem.status, 'verified');
+  assert.equal(updatedItem.note, 'Closed on March 10, 2026.');
+
+  const refreshedResponse = await getSessionRoute(
+    new Request('http://localhost/api/sessions/review-session'),
+    { params: Promise.resolve({ id: 'review-session' }) }
+  );
+  const refreshed = await refreshedResponse.json();
+
+  assert.equal(refreshed.session.decisionStatus, 'needs_follow_up');
+  assert.equal(refreshed.session.outcomeSummary, 'Initial rollout completed.');
+  assert.equal(
+    refreshed.session.retrospectiveNote,
+    'Need stronger ownership mapping.'
+  );
+  assert.equal(refreshed.actionItems[0].status, 'verified');
+  assert.equal(refreshed.actionItems[0].note, 'Closed on March 10, 2026.');
 });
 
 test('session detail and delete routes cover found and missing history', async () => {
