@@ -48,106 +48,211 @@
 }
 
 :root {
-  --rt-hh6-primary: #6246ea;
-  --rt-hh6-secondary: #d1d1e9;
-  --rt-hh6-tertiary: #e45858;
-  --rt-hh6-headline: #2b2c34;
-  --rt-hh6-background: #fffffe;
-  --rt-shell-grad-a: #121629;
-  --rt-shell-grad-b: #1f2140;
-  --rt-shell-grad-c: #522d58;
-  --rt-stage-grad-a: #121629;
-  --rt-stage-grad-b: #1d2142;
-  --rt-stage-mobile-grad-a: #101021;
-  --rt-stage-mobile-grad-b: #191b38;
-  --rt-grid-line: #ffffff1a;
-  --rt-panel-bg: #11152c;
-  --rt-panel-bg-strong: #0b1025;
-  --rt-surface-bg: #151a35;
-  --rt-surface-overlay: #0d1228;
-  --rt-surface-live: #7f5af0;
-  --rt-surface-minutes: #2a3a33;
-  --rt-border-soft: #d1d1e933;
-  --rt-border-strong: #d1d1e966;
-  --rt-text-strong: #fffffe;
-  --rt-text-muted: #d1d1e9;
-  --rt-text-dim: #a7abcf;
-  --rt-label: #c7c8df;
-  --rt-stage-glow-primary: #6246ea;
+  /* ── HappyHues #6 source palette (5 base colors) ──────────────────────────
+     All colors in this file MUST be derivable from these five.
+     Page background : #d1d1e9   ← HSL(240° 35% 87%) — light mode bg & dark hue source
+     Card background : #fffffe
+     Primary purple  : #6246ea
+     Coral red       : #e45858
+     Charcoal dark   : #2b2c34   (text / headline color)
+  ── */
+
+  /* Source tokens — never used directly in components */
+  --rt-hh6-primary:    #6246ea;
+  --rt-hh6-lavender:   #d1d1e9;   /* page background — H=240° */
+  --rt-hh6-coral:      #e45858;
+  --rt-hh6-charcoal:   #2b2c34;   /* text / headline */
+  --rt-hh6-offwhite:   #fffffe;   /* card background */
+  --rt-hh6-secondary:  #d1d1e9;
+  --rt-hh6-tertiary:   #e45858;
+  --rt-hh6-headline:   #2b2c34;
+  --rt-hh6-background: #d1d1e9;
+
+  /* ── Light background scale (H=240°, lavender → white) ─────────────────
+     Level 0 (deepest shadow) → Level 5 (highest card elevation)
+  */
+  --rt-bg-0:  #c4c4e0;   /* deep lavender shadow          (H=240° S=32% L=76%) */
+  --rt-bg-1:  #d1d1e9;   /* page background  — HH6 exact  (H=240° S=35% L=87%) */
+  --rt-bg-2:  #e4e4f4;   /* panel / sidebar tint           (H=240° S=42% L=93%) */
+  --rt-bg-3:  #f0f0fb;   /* surface / card                 (H=240° S=70% L=97%) */
+  --rt-bg-4:  #f6f6fd;   /* elevated surface               (H=240° S=80% L=98%) */
+  --rt-bg-5:  #fffffe;   /* highest elevation — HH6 exact  (off-white) */
+
+  /* ── Gradient anchors ──────────────────────────────────────────────────── */
+  --rt-shell-grad-a:        var(--rt-bg-1);      /* #d1d1e9 lavender */
+  --rt-shell-grad-b:        var(--rt-bg-0);      /* #c4c4e0 deep lavender */
+  --rt-shell-grad-c:        #c8b8fc;             /* HH6 purple tint (light) */
+  --rt-stage-grad-a:        var(--rt-bg-1);
+  --rt-stage-grad-b:        var(--rt-bg-2);
+  --rt-stage-mobile-grad-a: var(--rt-bg-1);
+  --rt-stage-mobile-grad-b: var(--rt-bg-2);
+  --rt-grid-line: #2b2c3410;
+
+  /* ── Panel / surface semantic tokens ──────────────────────────────────── */
+  --rt-panel-bg:        var(--rt-bg-5);   /* white panels on lavender bg */
+  --rt-panel-bg-strong: var(--rt-bg-0);   /* deep lavender for strong contrast */
+  --rt-surface-bg:      var(--rt-bg-5);   /* white surfaces */
+  --rt-surface-overlay: var(--rt-bg-3);   /* near-white overlay */
+
+  /* Meeting-minutes surface: lavender tint */
+  --rt-surface-minutes: #eaeaf8;
+
+  /* ── Accent / state colors ──────────────────────────────────────────────
+     Adjusted for legibility on light lavender background.
+  */
+  --rt-surface-live:         #6246ea;   /* exact HH6 primary */
+  --rt-live-state:           #6246ea;
+
+  --rt-stage-glow-primary:   #6246ea;
   --rt-stage-glow-secondary: #e45858;
-  --rt-live-state: #7f5af0;
-  --rt-warning-state: #f09c7f;
-  --rt-error-state: #ff9090;
-  --rt-moderator-ring: #f2a5b9;
-  --rt-moderator-core: #f0c7d2;
+
+  /* Warning: darkened amber for light-bg contrast */
+  --rt-warning-state: #b96010;
+
+  /* Error: darkened coral for light-bg contrast */
+  --rt-error-state: #c83838;
+
+  /* Moderator avatar */
+  --rt-moderator-ring: #f0aeae;
+  --rt-moderator-core: #f8d0d0;
+
+  /* ── Text scale (HH6 charcoal → muted) ───────────────────────────────── */
+  --rt-text-strong: #2b2c34;   /* HH6 charcoal exact */
+  --rt-text-muted:  #484960;   /* charcoal lightened ≈ 40% — WCAG 5.2:1 on lavender */
+  --rt-text-dim:    #6a6b80;   /* charcoal lightened ≈ 55% — WCAG 3.8:1 on lavender */
+  --rt-label:       #585970;   /* charcoal lightened ≈ 48% — WCAG 4.5:1 on lavender */
+
+  /* ── Borders (HH6 charcoal with opacity) ─────────────────────────────── */
+  --rt-border-soft:   #2b2c3432;   /* slightly stronger for light bg visibility */
+  --rt-border-strong: #2b2c3460;
+
+  /* ── Card shadow (light: soft drop shadow; dark: none — border does the job) */
+  --rt-card-shadow: 0 1px 3px rgba(43,44,52,0.07), 0 0 0 1px rgba(43,44,52,0.08);
+
+  /* ── Typography ─────────────────────────────────────────────────────────── */
   --rt-font-sans: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
   --rt-font-mono: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  --background: #0f1020;
-  --foreground: #fffffe;
-  --card: #161a34;
-  --card-foreground: #fffffe;
-  --popover: #151933;
-  --popover-foreground: #fffffe;
-  --primary: #6246ea;
-  --primary-foreground: #fffffe;
-  --secondary: #2b2c34;
-  --secondary-foreground: #fffffe;
-  --muted: #222542;
-  --muted-foreground: #c5c8e4;
-  --accent: #e45858;
-  --accent-foreground: #fffffe;
-  --destructive: #ff8e8e;
-  --border: #d1d1e933;
-  --input: #d1d1e926;
-  --ring: #9c89f5;
+
+  /* ── shadcn/ui semantic tokens (light mode) ─────────────────────────────── */
+  --background:          #d1d1e9;   /* HH6 page bg */
+  --foreground:          #2b2c34;   /* HH6 charcoal */
+  --card:                #fffffe;   /* HH6 card bg */
+  --card-foreground:     #2b2c34;
+  --popover:             #fffffe;
+  --popover-foreground:  #2b2c34;
+  --primary:             #6246ea;   /* HH6 primary */
+  --primary-foreground:  #fffffe;
+  --secondary:           #e4e4f4;   /* bg-2 panel tint */
+  --secondary-foreground: #2b2c34;
+  --muted:               #e4e4f4;
+  --muted-foreground:    #585970;   /* rt-label */
+  --accent:              #e45858;   /* HH6 coral */
+  --accent-foreground:   #fffffe;
+  --destructive:         #c83838;
+  --border:              #2b2c3432; /* rt-border-soft */
+  --input:               #2b2c3418;
+  --ring:                #6246ea;
+
+  /* Charts */
   --chart-1: #6246ea;
-  --chart-2: #7f5af0;
-  --chart-3: #8a6ff0;
-  --chart-4: #b29bff;
-  --chart-5: #e45858;
+  --chart-2: #8a78f5;
+  --chart-3: #b8acff;
+  --chart-4: #e45858;
+  --chart-5: #f09058;
+
   --radius: 0.625rem;
-  --sidebar: #11152c;
-  --sidebar-foreground: #fffffe;
-  --sidebar-primary: #6246ea;
+
+  --sidebar:                    #fffffe;
+  --sidebar-foreground:         #2b2c34;
+  --sidebar-primary:            #6246ea;
   --sidebar-primary-foreground: #fffffe;
-  --sidebar-accent: #242744;
-  --sidebar-accent-foreground: #fffffe;
-  --sidebar-border: #d1d1e933;
-  --sidebar-ring: #9c89f5;
+  --sidebar-accent:             #e4e4f4;
+  --sidebar-accent-foreground:  #2b2c34;
+  --sidebar-border:             #2b2c3422;
+  --sidebar-ring:               #6246ea;
 }
 
 .dark {
-  --background: #0f1020;
-  --foreground: #fffffe;
-  --card: #161a34;
-  --card-foreground: #fffffe;
-  --popover: #151933;
-  --popover-foreground: #fffffe;
-  --primary: #6246ea;
-  --primary-foreground: #fffffe;
-  --secondary: #2b2c34;
+  /* ── Dark background scale (H=240°, derived from #d1d1e9's hue) ─────── */
+  --rt-bg-0:  #0f0f17;   /* near-black shell underlay   (H=240° S=21% L≈7%) */
+  --rt-bg-1:  #13131c;   /* page background             (H=240° S=19% L≈9%) */
+  --rt-bg-2:  #1a1a28;   /* panel / sidebar             (H=240° S=21% L≈13%) */
+  --rt-bg-3:  #212133;   /* surface / card              (H=240° S=22% L≈16%) */
+  --rt-bg-4:  #282840;   /* elevated surface            (H=240° S=23% L≈20%) */
+  --rt-bg-5:  #31314e;   /* hover / accent surface      (H=240° S=23% L≈25%) */
+
+  /* ── Gradient anchors ────────────────────────────────────────────────── */
+  --rt-shell-grad-a:        var(--rt-bg-1);
+  --rt-shell-grad-b:        var(--rt-bg-2);
+  --rt-shell-grad-c:        #321b5e;      /* HH6 purple #6246ea @ 23% L */
+  --rt-stage-grad-a:        var(--rt-bg-1);
+  --rt-stage-grad-b:        var(--rt-bg-2);
+  --rt-stage-mobile-grad-a: var(--rt-bg-0);
+  --rt-stage-mobile-grad-b: #151520;
+  --rt-grid-line: #ffffff1a;
+
+  /* ── Panel / surface ─────────────────────────────────────────────────── */
+  --rt-panel-bg:        var(--rt-bg-2);
+  --rt-panel-bg-strong: var(--rt-bg-0);
+  --rt-surface-bg:      var(--rt-bg-3);
+  --rt-surface-overlay: var(--rt-bg-0);
+  --rt-surface-minutes: #242545;
+
+  /* ── Accent / state ──────────────────────────────────────────────────── */
+  --rt-surface-live:         #7357f5;   /* HH6 primary +15% for dark-bg */
+  --rt-live-state:           #7357f5;
+  --rt-stage-glow-primary:   #6246ea;
+  --rt-stage-glow-secondary: #e45858;
+  --rt-warning-state:        #f09058;   /* coral shifted +20° to amber */
+  --rt-error-state:          #f06868;   /* coral brightened */
+  --rt-moderator-ring:       #f0aeae;
+  --rt-moderator-core:       #f8d0d0;
+
+  /* ── Text ────────────────────────────────────────────────────────────── */
+  --rt-text-strong: #fffffe;
+  --rt-text-muted:  #d1d1e9;
+  --rt-text-dim:    #9496b4;
+  --rt-label:       #b8b9d0;
+
+  /* ── Borders ─────────────────────────────────────────────────────────── */
+  --rt-border-soft:   #d1d1e930;
+  --rt-border-strong: #d1d1e965;
+
+  /* ── Card shadow (none in dark mode — border does the job) ───────────── */
+  --rt-card-shadow: none;
+
+  /* ── shadcn/ui tokens ────────────────────────────────────────────────── */
+  --background:          #13131c;
+  --foreground:          #fffffe;
+  --card:                #212133;
+  --card-foreground:     #fffffe;
+  --popover:             #1d1d2d;
+  --popover-foreground:  #fffffe;
+  --primary:             #6246ea;
+  --primary-foreground:  #fffffe;
+  --secondary:           #2b2c34;
   --secondary-foreground: #fffffe;
-  --muted: #222542;
-  --muted-foreground: #c5c8e4;
-  --accent: #e45858;
-  --accent-foreground: #fffffe;
-  --destructive: #ff8e8e;
-  --border: #d1d1e933;
-  --input: #d1d1e926;
-  --ring: #9c89f5;
+  --muted:               #272740;
+  --muted-foreground:    #b8b9d0;
+  --accent:              #e45858;
+  --accent-foreground:   #fffffe;
+  --destructive:         #f06868;
+  --border:              #d1d1e930;
+  --input:               #d1d1e920;
+  --ring:                #8a78f5;
   --chart-1: #6246ea;
-  --chart-2: #7f5af0;
-  --chart-3: #8a6ff0;
-  --chart-4: #b29bff;
+  --chart-2: #7357f5;
+  --chart-3: #8a78f5;
+  --chart-4: #b8acff;
   --chart-5: #e45858;
-  --sidebar: #11152c;
-  --sidebar-foreground: #fffffe;
-  --sidebar-primary: #6246ea;
+  --sidebar:                    #1a1a28;
+  --sidebar-foreground:         #fffffe;
+  --sidebar-primary:            #6246ea;
   --sidebar-primary-foreground: #fffffe;
-  --sidebar-accent: #242744;
-  --sidebar-accent-foreground: #fffffe;
-  --sidebar-border: #d1d1e933;
-  --sidebar-ring: #9c89f5;
+  --sidebar-accent:             #282840;
+  --sidebar-accent-foreground:  #fffffe;
+  --sidebar-border:             #d1d1e930;
+  --sidebar-ring:               #8a78f5;
 }
 
 @layer base {
@@ -179,11 +284,13 @@
   .rt-panel {
     border-color: var(--rt-border-soft);
     background-color: color-mix(in srgb, var(--rt-panel-bg) 88%, transparent);
+    box-shadow: var(--rt-card-shadow);
   }
 
   .rt-panel-strong {
     border-color: var(--rt-border-strong);
     background-color: color-mix(in srgb, var(--rt-panel-bg-strong) 90%, transparent);
+    box-shadow: var(--rt-card-shadow);
   }
 
   .rt-stage {
@@ -219,11 +326,13 @@
   .rt-surface {
     border-color: var(--rt-border-soft);
     background-color: color-mix(in srgb, var(--rt-surface-bg) 78%, transparent);
+    box-shadow: var(--rt-card-shadow);
   }
 
   .rt-surface-strong {
     border-color: var(--rt-border-soft);
     background-color: color-mix(in srgb, var(--rt-surface-bg) 88%, transparent);
+    box-shadow: var(--rt-card-shadow);
   }
 
   .rt-surface-faint {
@@ -316,5 +425,23 @@
 
   .rt-error {
     color: var(--rt-error-state);
+  }
+
+  /* ── Typography utilities ──────────────────────────────────────────────
+     Replaces proliferation of text-[11px] font-semibold uppercase tracking-[0.2em]
+  */
+  .rt-eyebrow {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    color: var(--rt-text-dim);
+    text-transform: none;
+  }
+
+  .rt-section-label {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--rt-text-muted);
   }
 }

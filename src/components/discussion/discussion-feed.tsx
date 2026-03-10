@@ -25,6 +25,29 @@ interface DiscussionFeedProps {
   className?: string;
 }
 
+// ─── Phase label helper ────────────────────────────────────────────────────────
+
+function phaseLabel(phase: string): string {
+  if (!phase) return '';
+  if (phase === 'opening') return 'Opening';
+  if (phase === 'closing' || phase === 'summary') return 'Closing Summary';
+  if (phase === 'research') return 'Research Phase';
+  const roundMatch = phase.match(/(\d+)/);
+  if (roundMatch) return `Round ${roundMatch[1]}`;
+  return phase.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function phaseOrder(phase: string): number {
+  if (phase === 'research') return 0;
+  if (phase === 'opening') return 1;
+  const m = phase.match(/(\d+)/);
+  if (m) return 10 + parseInt(m[1], 10);
+  if (phase === 'closing' || phase === 'summary') return 99;
+  return 50;
+}
+
+// ─── Feed component ────────────────────────────────────────────────────────────
+
 export function DiscussionFeed({
   messages,
   autoScroll = true,
@@ -35,7 +58,6 @@ export function DiscussionFeed({
 }: DiscussionFeedProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to bottom when new messages arrive (if auto-scroll is active).
   useEffect(() => {
     if (!autoScroll) return;
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -65,23 +87,75 @@ export function DiscussionFeed({
           {messages.map((msg, idx) => {
             const prev = messages[idx - 1];
             const next = messages[idx + 1];
+
+            const phaseChanged = !prev || prev.phase !== msg.phase;
+            const showSeparator =
+              phaseChanged &&
+              idx > 0 &&
+              phaseOrder(msg.phase) !== phaseOrder(prev?.phase ?? '');
+
             const isFirst =
-              !prev || prev.displayName !== msg.displayName || prev.role !== msg.role;
+              !prev || prev.displayName !== msg.displayName || prev.role !== msg.role || phaseChanged;
             const isLast =
-              !next || next.displayName !== msg.displayName || next.role !== msg.role;
+              !next || next.displayName !== msg.displayName || next.role !== msg.role || next.phase !== msg.phase;
+
             return (
-              <FeedBubble
-                key={msg.id}
-                message={msg}
-                showHeader={isFirst}
-                roundBottom={isLast}
-              />
+              <div key={msg.id}>
+                {showSeparator && <PhaseSeparator phase={msg.phase} />}
+                <FeedBubble message={msg} showHeader={isFirst} roundBottom={isLast} />
+              </div>
             );
           })}
-          <div ref={bottomRef} className="h-2" />
+          <div ref={bottomRef} className="h-4" />
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Phase transition separator ────────────────────────────────────────────────
+
+function PhaseSeparator({ phase }: { phase: string }) {
+  const label = phaseLabel(phase);
+  const isDebate = /\d/.test(phase);
+  const isClosing = phase === 'closing' || phase === 'summary';
+
+  return (
+    <div className="relative flex items-center gap-3 px-5 py-3">
+      <div className="flex-1 border-t border-dashed rt-border-soft" />
+      <span
+        className={[
+          'shrink-0 rounded-full border px-2.5 py-0.5 text-[10px] font-medium tracking-wide',
+          isDebate
+            ? 'border-[color-mix(in_srgb,var(--rt-live-state)_30%,transparent)] bg-[color-mix(in_srgb,var(--rt-live-state)_8%,transparent)] text-[color-mix(in_srgb,var(--rt-live-state)_85%,var(--foreground))]'
+            : isClosing
+              ? 'border-[color-mix(in_srgb,var(--rt-warning-state)_30%,transparent)] bg-[color-mix(in_srgb,var(--rt-warning-state)_8%,transparent)] text-[color-mix(in_srgb,var(--rt-warning-state)_85%,var(--foreground))]'
+              : 'rt-border-soft rt-surface rt-text-dim',
+        ].join(' ')}
+      >
+        {label}
+      </span>
+      <div className="flex-1 border-t border-dashed rt-border-soft" />
+    </div>
+  );
+}
+
+// ─── Live streaming dot ────────────────────────────────────────────────────────
+
+function LiveDot({ color }: { color: string }) {
+  return (
+    <span className="flex items-center gap-1">
+      <span className="relative flex h-1.5 w-1.5">
+        <span
+          className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60"
+          style={{ backgroundColor: color }}
+        />
+        <span
+          className="relative inline-flex rounded-full h-1.5 w-1.5"
+          style={{ backgroundColor: color }}
+        />
+      </span>
+    </span>
   );
 }
 
@@ -100,21 +174,63 @@ function FeedBubble({
   const accentColor =
     message.color ?? (isModerator ? 'var(--rt-warning-state)' : 'var(--rt-text-muted)');
 
+  // Moderator: full-width left-border card with subtle purple tint
+  if (isModerator) {
+    return (
+      <div className={`px-4 ${showHeader ? 'pt-3' : 'pt-0.5'}`}>
+        {showHeader && (
+          <div className="mb-1.5 flex items-center gap-2">
+            <span
+              className="h-1.5 w-1.5 rounded-full shrink-0"
+              style={{ backgroundColor: accentColor }}
+            />
+            <span
+              className="text-xs font-semibold"
+              style={{ color: accentColor }}
+            >
+              {message.displayName}
+            </span>
+            <span className="text-[10px] rt-text-dim font-medium">Moderator</span>
+            {message.isStreaming && <LiveDot color={accentColor} />}
+          </div>
+        )}
+        <div
+          className={[
+            'px-4 py-3 text-sm border-l-2',
+            'border-l-[color-mix(in_srgb,var(--rt-hh6-primary)_35%,transparent)]',
+            'bg-[color-mix(in_srgb,var(--rt-hh6-primary)_5%,transparent)]',
+            showHeader ? 'rounded-tr-2xl rounded-br-xl' : 'rounded-r-xl',
+            roundBottom ? 'rounded-br-2xl' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        >
+          <MarkdownContent
+            content={message.content}
+            streaming={message.isStreaming}
+            className="text-sm"
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // Agent: avatar + chat bubble
   return (
     <div className={`flex gap-3 px-4 ${showHeader ? 'pt-4' : 'pt-0.5'}`}>
-      {/* Avatar column — always reserves 32px, only renders avatar on first bubble */}
-      <div className="w-8 shrink-0">
+      {/* Avatar column — slightly smaller (28px) */}
+      <div className="w-7 shrink-0">
         {showHeader &&
           (message.sprite ? (
             <PixelAgentAvatar
               seed={message.displayName}
               color={message.color ?? '#888'}
               sprite={message.sprite}
-              size={32}
+              size={28}
             />
           ) : (
             <div
-              className="flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-bold uppercase text-white"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold text-white"
               style={{ backgroundColor: accentColor }}
             >
               {message.displayName.slice(0, 2)}
@@ -132,29 +248,20 @@ function FeedBubble({
             >
               {message.displayName}
             </span>
-            {isModerator && (
-              <span className="text-[10px] uppercase tracking-[0.15em] rt-text-dim">MC</span>
-            )}
-            <span className="text-[10px] uppercase tracking-[0.12em] rt-text-dim">
-              {message.phase}
+            <span className="text-[10px] rt-text-dim">
+              {phaseLabel(message.phase)}
             </span>
-            {message.isStreaming && (
-              <span className="animate-pulse text-[10px] rt-text-muted">• 输出中</span>
-            )}
+            {message.isStreaming && <LiveDot color={accentColor} />}
           </div>
         )}
 
-        {/* Bubble */}
         <div
           className={[
-            'px-3.5 py-2.5 text-sm',
-            isModerator
-              ? 'border border-[color-mix(in_srgb,var(--rt-warning-state)_28%,transparent)] bg-[color-mix(in_srgb,var(--rt-warning-state)_9%,transparent)]'
-              : 'rt-surface border border-[color-mix(in_srgb,var(--rt-live-state)_18%,transparent)]',
+            'px-4 py-3 text-sm rt-surface border',
             showHeader ? 'rounded-t-2xl' : 'rounded-t-sm',
             roundBottom ? 'rounded-b-2xl' : 'rounded-b-sm',
             message.isStreaming
-              ? 'shadow-[0_0_14px_color-mix(in_srgb,var(--rt-live-state)_18%,transparent)]'
+              ? 'shadow-[0_0_12px_color-mix(in_srgb,var(--rt-live-state)_18%,transparent)]'
               : '',
           ]
             .filter(Boolean)
