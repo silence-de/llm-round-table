@@ -1,14 +1,20 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Activity,
   Cpu,
   FastForward,
+  FileText,
   History,
+  MessageSquare,
   Pause,
   Play,
   RotateCcw,
+  Search,
+  Send,
+  Users,
+  Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -238,6 +244,7 @@ export default function HomePage() {
   const [maxDebateRounds, setMaxDebateRounds] = useState<number>(2);
   const [loadingAgents, setLoadingAgents] = useState(true);
 
+  const [leftTab, setLeftTab] = useState<'brief' | 'council' | 'research'>('brief');
   const [rightTab, setRightTab] = useState<'context' | 'history'>('context');
   const [historyQuery, setHistoryQuery] = useState('');
   const [historyStatusFilter, setHistoryStatusFilter] = useState<'all' | SessionRecord['status']>('all');
@@ -1363,10 +1370,33 @@ export default function HomePage() {
             LEFT PANEL: Session Setup + Compact Agent Config
         ───────────────────────────────────────────────────────────────── */}
         <aside className="flex min-h-0 flex-col gap-2 overflow-hidden">
-          {/* Scrollable config area */}
+          {/* ── Tab navigation ── */}
+          <div className="shrink-0 flex rounded-xl border rt-surface p-1 gap-0.5">
+            {([
+              { id: 'brief', icon: FileText, label: 'Brief' },
+              { id: 'council', icon: Users, label: 'Council' },
+              { id: 'research', icon: Search, label: 'Research' },
+            ] as const).map(({ id, icon: Icon, label }) => (
+              <button
+                key={id}
+                onClick={() => setLeftTab(id)}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition-all ${
+                  leftTab === id
+                    ? 'bg-[color-mix(in_srgb,var(--rt-live-state)_18%,transparent)] rt-text-strong'
+                    : 'rt-text-dim hover:rt-text-muted'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0" />
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Scrollable tab content */}
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-0.5">
 
-            {/* Decision brief */}
+            {/* ── Brief Tab ── */}
+            {leftTab === 'brief' && <>
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
@@ -1443,7 +1473,7 @@ export default function HomePage() {
                 value={brief.topic}
                 onChange={(e) => updateBrief('topic', e.target.value)}
                 disabled={isRunning}
-                className="rt-input min-h-[80px] text-sm"
+                className="rt-input min-h-[56px] text-sm"
               />
             </div>
 
@@ -1456,7 +1486,7 @@ export default function HomePage() {
                 value={brief.goal}
                 onChange={(e) => updateBrief('goal', e.target.value)}
                 disabled={isRunning}
-                className="rt-input min-h-[56px] text-sm"
+                className="rt-input min-h-[44px] text-sm"
               />
             </div>
 
@@ -1523,7 +1553,7 @@ export default function HomePage() {
                 value={brief.background}
                 onChange={(e) => updateBrief('background', e.target.value)}
                 disabled={isRunning}
-                className="rt-input min-h-[72px] text-sm"
+                className="rt-input min-h-[52px] text-sm"
               />
             </div>
 
@@ -1536,10 +1566,13 @@ export default function HomePage() {
                 value={brief.constraints}
                 onChange={(e) => updateBrief('constraints', e.target.value)}
                 disabled={isRunning}
-                className="rt-input min-h-[72px] text-sm"
+                className="rt-input min-h-[52px] text-sm"
               />
             </div>
+            </>}
 
+            {/* ── Research Tab ── */}
+            {leftTab === 'research' && <>
             <div className="rounded-xl border rt-surface p-2.5">
               <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
                 Agenda
@@ -1681,7 +1714,10 @@ export default function HomePage() {
                 </p>
               </div>
             </div>
+            </>}
 
+            {/* ── Council Tab ── */}
+            {leftTab === 'council' && <>
             {followUpParentSession && (
               <div className="rounded-xl border bg-[color-mix(in_srgb,var(--rt-live-state)_10%,transparent)] px-3 py-2 text-xs">
                 <p className="font-semibold rt-text-strong">Follow-up session</p>
@@ -1876,9 +1912,10 @@ export default function HomePage() {
                 })}
               </div>
             )}
+            </>}
           </div>
 
-          {/* Sticky bottom: Start / Stop + Interjection */}
+          {/* Sticky bottom: Start / Stop */}
           <div className="shrink-0 space-y-2">
             <div className="flex gap-2">
               <Button
@@ -1895,49 +1932,11 @@ export default function HomePage() {
               )}
             </div>
 
-            {/* Interjection — only visible while running */}
-            {isRunning && (
-              <div className="rt-surface space-y-1.5 rounded-xl border p-2.5">
-                <label className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
-                  Runtime Control
-                </label>
-                <Select
-                  value={interjectionControlType}
-                  onValueChange={(value) => {
-                    if (!value) return;
-                    setInterjectionControlType(value as DecisionControlType);
-                  }}
-                >
-                  <SelectTrigger className="rt-input h-8 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(DECISION_CONTROL_LABELS).map(([value, label]) => (
-                      <SelectItem key={value} value={value} className="text-xs">
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Textarea
-                  placeholder="每轮开始前注入新要求…"
-                  value={interjection}
-                  onChange={(e) => setInterjection(e.target.value)}
-                  className="rt-input min-h-[56px] text-xs"
-                />
-                <div className="flex items-center justify-between">
-                  <Button
-                    size="sm"
-                    className="h-7 text-xs"
-                    onClick={handleInterjection}
-                    disabled={!interjection.trim()}
-                  >
-                    Send
-                  </Button>
-                  <span className="text-xs rt-text-dim">
-                    Queued: {interjections.length}
-                  </span>
-                </div>
+            {/* Live status badge when running */}
+            {isRunning && interjections.length > 0 && (
+              <div className="flex items-center gap-1.5 rounded-lg border rt-surface px-2.5 py-1.5 text-xs rt-text-dim">
+                <Zap className="h-3 w-3 text-[var(--rt-live-state)]" />
+                <span>{interjections.length} queued</span>
               </div>
             )}
           </div>
@@ -2088,6 +2087,71 @@ export default function HomePage() {
           {error && (
             <div className="shrink-0 rounded-xl border bg-[color-mix(in_srgb,var(--rt-stage-glow-secondary)_12%,transparent)] px-3 py-2 text-sm rt-error">
               {error}
+            </div>
+          )}
+
+          {/* ── Interjection bar — visible during live discussion ── */}
+          {isRunning && !historyDetail && (
+            <div className="shrink-0 rounded-2xl border rt-surface p-2.5 space-y-2">
+              {/* Control-type icon strip */}
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.18em] rt-text-dim mr-1">
+                  Control
+                </span>
+                {(
+                  [
+                    { value: 'general', label: 'General', icon: MessageSquare },
+                    { value: 'add_constraint', label: 'Add Constraint', icon: Zap },
+                    { value: 'ask_comparison', label: 'Compare', icon: Activity },
+                    { value: 'force_converge', label: 'Converge', icon: FastForward },
+                    { value: 'continue_debate', label: 'Debate', icon: RotateCcw },
+                  ] as { value: DecisionControlType; label: string; icon: React.ComponentType<{ className?: string }> }[]
+                ).map(({ value, label, icon: Icon }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    title={DECISION_CONTROL_LABELS[value]}
+                    onClick={() => setInterjectionControlType(value)}
+                    className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-medium transition-all ${
+                      interjectionControlType === value
+                        ? 'rt-border-strong bg-[color-mix(in_srgb,var(--rt-live-state)_20%,transparent)] rt-text-strong'
+                        : 'rt-surface rt-text-dim hover:rt-text-muted'
+                    }`}
+                  >
+                    <Icon className="h-3 w-3 shrink-0" />
+                    <span className="hidden sm:inline">{label}</span>
+                  </button>
+                ))}
+                {interjections.length > 0 && (
+                  <span className="ml-auto text-[10px] rt-text-dim">
+                    {interjections.length} queued
+                  </span>
+                )}
+              </div>
+              {/* Message input row */}
+              <div className="flex items-end gap-2">
+                <Textarea
+                  placeholder="每轮开始前注入新要求…"
+                  value={interjection}
+                  onChange={(e) => setInterjection(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && interjection.trim()) {
+                      handleInterjection();
+                    }
+                  }}
+                  className="rt-input min-h-[44px] flex-1 resize-none text-sm"
+                  rows={2}
+                />
+                <Button
+                  size="sm"
+                  className="h-[44px] w-[44px] shrink-0 p-0"
+                  onClick={handleInterjection}
+                  disabled={!interjection.trim()}
+                  title="Send (⌘↵)"
+                >
+                  <Send className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           )}
 
