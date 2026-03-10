@@ -7,6 +7,10 @@ export interface AgentMessage {
   phase: string;
 }
 
+export type StageMode = 'desktop-roundtable' | 'mobile-hybrid';
+export type AutoScrollMode = 'follow' | 'paused';
+export type ReplayStatus = 'idle' | 'playing' | 'paused';
+
 interface DiscussionState {
   sessionId: string | null;
   phase: string;
@@ -18,6 +22,15 @@ interface DiscussionState {
   moderatorMessages: Array<{ content: string; phase: string }>;
   interjections: Array<{ content: string; phase?: string; round?: number }>;
   error: string | null;
+  ui: {
+    activeSpeakerId: string | null;
+    stageMode: StageMode;
+    autoScroll: AutoScrollMode;
+  };
+  replay: {
+    status: ReplayStatus;
+    cursor: number;
+  };
 
   // Actions
   setSessionId: (sessionId: string | null) => void;
@@ -26,6 +39,13 @@ interface DiscussionState {
   setRound: (round: number) => void;
   setRunning: (running: boolean) => void;
   setError: (error: string | null) => void;
+  setStageMode: (mode: StageMode) => void;
+  setAutoScroll: (mode: AutoScrollMode) => void;
+  setActiveSpeakerId: (agentId: string | null) => void;
+  setReplayStatus: (status: ReplayStatus) => void;
+  setReplayCursor: (cursor: number) => void;
+  advanceReplayCursor: (maxCursor: number) => void;
+  resetReplay: () => void;
   startAgent: (agentId: string, phase: string) => void;
   appendAgentToken: (agentId: string, token: string) => void;
   finalizeAgent: (agentId: string) => void;
@@ -47,6 +67,15 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
   moderatorMessages: [],
   interjections: [],
   error: null,
+  ui: {
+    activeSpeakerId: null,
+    stageMode: 'desktop-roundtable',
+    autoScroll: 'follow',
+  },
+  replay: {
+    status: 'idle',
+    cursor: 0,
+  },
 
   setSessionId: (sessionId) => set({ sessionId }),
   setUsage: (usage) =>
@@ -56,13 +85,69 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
     }),
   setPhase: (phase) => set({ phase }),
   setRound: (round) => set({ round }),
-  setRunning: (running) => set({ isRunning: running }),
+  setRunning: (running) =>
+    set((state) => ({
+      isRunning: running,
+      ui: {
+        ...state.ui,
+        activeSpeakerId: running ? state.ui.activeSpeakerId : null,
+      },
+    })),
   setError: (error) => set({ error }),
+  setStageMode: (mode) =>
+    set((state) => ({
+      ui: { ...state.ui, stageMode: mode },
+    })),
+  setAutoScroll: (mode) =>
+    set((state) => ({
+      ui: { ...state.ui, autoScroll: mode },
+    })),
+  setActiveSpeakerId: (agentId) =>
+    set((state) => ({
+      ui: { ...state.ui, activeSpeakerId: agentId },
+    })),
+  setReplayStatus: (status) =>
+    set((state) => ({
+      replay: { ...state.replay, status },
+    })),
+  setReplayCursor: (cursor) =>
+    set((state) => ({
+      replay: {
+        ...state.replay,
+        cursor: Math.max(0, cursor),
+      },
+    })),
+  advanceReplayCursor: (maxCursor) =>
+    set((state) => {
+      if (state.replay.status !== 'playing') return {};
+      if (state.replay.cursor >= maxCursor) {
+        return {
+          replay: {
+            ...state.replay,
+            status: 'paused',
+          },
+        };
+      }
+
+      return {
+        replay: {
+          ...state.replay,
+          cursor: state.replay.cursor + 1,
+        },
+      };
+    }),
+  resetReplay: () =>
+    set({
+      replay: {
+        status: 'idle',
+        cursor: 0,
+      },
+    }),
 
   startAgent: (agentId, phase) => {
     const messages = new Map(get().agentMessages);
     const existing = messages.get(agentId);
-    // In debate phase, append to existing; in initial phase, create new
+
     if (phase === 'debate' && existing) {
       messages.set(agentId, {
         ...existing,
@@ -73,7 +158,11 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
     } else {
       messages.set(agentId, { agentId, content: '', isStreaming: true, phase });
     }
-    set({ agentMessages: messages });
+
+    set((state) => ({
+      agentMessages: messages,
+      ui: { ...state.ui, activeSpeakerId: agentId },
+    }));
   },
 
   appendAgentToken: (agentId, token) => {
@@ -88,18 +177,26 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
   finalizeAgent: (agentId) => {
     const messages = new Map(get().agentMessages);
     const msg = messages.get(agentId);
-    if (msg) {
-      messages.set(agentId, { ...msg, isStreaming: false });
-      set({ agentMessages: messages });
-    }
+    if (!msg) return;
+
+    messages.set(agentId, { ...msg, isStreaming: false });
+
+    const fallbackSpeaker = Array.from(messages.values()).find((item) => item.isStreaming)?.agentId ?? null;
+
+    set((state) => ({
+      agentMessages: messages,
+      ui: {
+        ...state.ui,
+        activeSpeakerId:
+          state.ui.activeSpeakerId === agentId ? fallbackSpeaker : state.ui.activeSpeakerId,
+      },
+    }));
   },
 
   startModerator: (phase) => {
     set((state) => ({
-      moderatorMessages: [
-        ...state.moderatorMessages,
-        { content: '', phase },
-      ],
+      moderatorMessages: [...state.moderatorMessages, { content: '', phase }],
+      ui: { ...state.ui, activeSpeakerId: 'moderator' },
     }));
   },
 
@@ -115,7 +212,12 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
   },
 
   finalizeModerator: () => {
-    // No-op for now, moderator message is already in the array
+    set((state) => ({
+      ui: {
+        ...state.ui,
+        activeSpeakerId: state.ui.activeSpeakerId === 'moderator' ? null : state.ui.activeSpeakerId,
+      },
+    }));
   },
 
   addInterjection: (interjection) => {
@@ -125,7 +227,7 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
   },
 
   reset: () =>
-    set({
+    set((state) => ({
       sessionId: null,
       phase: '',
       round: 0,
@@ -136,5 +238,14 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
       moderatorMessages: [],
       interjections: [],
       error: null,
-    }),
+      replay: {
+        status: 'idle',
+        cursor: 0,
+      },
+      ui: {
+        ...state.ui,
+        activeSpeakerId: null,
+        autoScroll: 'follow',
+      },
+    })),
 }));

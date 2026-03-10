@@ -53,7 +53,7 @@ export function useDiscussionStream() {
             if (!part.startsWith('data: ')) continue;
             try {
               const event: SSEEvent = JSON.parse(part.slice(6));
-              handleEvent(event, store);
+              handleEvent(event);
             } catch {
               // Skip malformed events
             }
@@ -115,61 +115,56 @@ export function useDiscussionStream() {
   return { startDiscussion, stopDiscussion, sendInterjection };
 }
 
-function handleEvent(
-  event: SSEEvent,
-  store: ReturnType<typeof useDiscussionStore.getState>
-) {
+function handleEvent(event: SSEEvent) {
+  // Always read the latest store state via getState() to avoid stale closures.
+  const s = useDiscussionStore.getState();
+
   switch (event.type) {
     case 'phase_change':
-      if (event.phase) store.setPhase(event.phase);
-      if (event.round !== undefined) store.setRound(event.round);
+      if (event.phase) s.setPhase(event.phase);
+      if (event.round !== undefined) s.setRound(event.round);
       break;
 
     case 'agent_start':
       if (event.agentId) {
-        const phase = useDiscussionStore.getState().phase;
-        store.startAgent(event.agentId, phase);
+        s.startAgent(event.agentId, useDiscussionStore.getState().phase);
       }
       break;
 
     case 'agent_token':
       if (event.agentId && event.content) {
-        store.appendAgentToken(event.agentId, event.content);
+        s.appendAgentToken(event.agentId, event.content);
       }
       break;
 
     case 'agent_done':
-      if (event.agentId) store.finalizeAgent(event.agentId);
+      if (event.agentId) s.finalizeAgent(event.agentId);
       break;
 
     case 'agent_error':
-      if (event.agentId) {
-        store.finalizeAgent(event.agentId);
-      }
+      if (event.agentId) s.finalizeAgent(event.agentId);
       break;
 
-    case 'moderator_start': {
-      const phase = useDiscussionStore.getState().phase;
-      store.startModerator(phase);
+    case 'moderator_start':
+      s.startModerator(useDiscussionStore.getState().phase);
       break;
-    }
 
     case 'moderator_token':
-      if (event.content) store.appendModeratorToken(event.content);
+      if (event.content) s.appendModeratorToken(event.content);
       break;
 
     case 'moderator_done':
-      store.finalizeModerator();
+      s.finalizeModerator();
       break;
 
     case 'discussion_complete':
-      store.setRunning(false);
-      void hydrateUsageFromSession(store);
+      s.setRunning(false);
+      void hydrateUsageFromSession();
       break;
 
     case 'user_interjection':
       if (event.content) {
-        store.addInterjection({
+        s.addInterjection({
           content: event.content,
           phase: event.phase,
           round: event.round,
@@ -179,9 +174,7 @@ function handleEvent(
   }
 }
 
-async function hydrateUsageFromSession(
-  store: ReturnType<typeof useDiscussionStore.getState>
-) {
+async function hydrateUsageFromSession() {
   const sessionId = useDiscussionStore.getState().sessionId;
   if (!sessionId) return;
 
@@ -191,7 +184,7 @@ async function hydrateUsageFromSession(
     const data = (await response.json()) as {
       session?: { usageInputTokens?: number; usageOutputTokens?: number };
     };
-    store.setUsage({
+    useDiscussionStore.getState().setUsage({
       inputTokens: data.session?.usageInputTokens ?? 0,
       outputTokens: data.session?.usageOutputTokens ?? 0,
     });
