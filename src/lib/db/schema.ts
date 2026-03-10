@@ -13,6 +13,8 @@ export const sessions = sqliteTable('sessions', {
   researchConfig: text('research_config').notNull().default('{}'),
   parentSessionId: text('parent_session_id'),
   decisionStatus: text('decision_status').notNull().default('draft'),
+  retrospectiveNote: text('retrospective_note').notNull().default(''),
+  outcomeSummary: text('outcome_summary').notNull().default(''),
   moderatorAgentId: text('moderator_agent_id').notNull(),
   maxDebateRounds: integer('max_debate_rounds').notNull(),
   selectedAgentIds: text('selected_agent_ids').notNull().default('[]'),
@@ -77,6 +79,19 @@ export const researchSources = sqliteTable('research_sources', {
   qualityFlags: text('quality_flags').notNull().default('[]'),
   publishedDate: text('published_date'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
+export const actionItems = sqliteTable('action_items', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull(),
+  content: text('content').notNull(),
+  status: text('status').notNull().default('pending'),
+  source: text('source').notNull().default('generated'),
+  carriedFromSessionId: text('carried_from_session_id'),
+  note: text('note').notNull().default(''),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });
 
 export const interjections = sqliteTable('interjections', {

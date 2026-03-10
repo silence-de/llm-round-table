@@ -1,4 +1,5 @@
 import type {
+  ActionItemStatus,
   DecisionBrief,
   DecisionControlType,
   DecisionSummaryEvidence,
@@ -34,6 +35,20 @@ export const DECISION_STATUS_OPTIONS: DecisionStatus[] = [
   'discarded',
   'needs_follow_up',
 ];
+
+export const ACTION_ITEM_STATUS_OPTIONS: ActionItemStatus[] = [
+  'pending',
+  'in_progress',
+  'verified',
+  'discarded',
+];
+
+export const ACTION_ITEM_STATUS_LABELS: Record<ActionItemStatus, string> = {
+  pending: '待执行',
+  in_progress: '执行中',
+  verified: '已验证',
+  discarded: '已废弃',
+};
 
 export const DECISION_CONTROL_LABELS: Record<DecisionControlType, string> = {
   general: '补充问题',
@@ -74,6 +89,14 @@ export function normalizeDecisionStatus(
   return DECISION_STATUS_OPTIONS.includes(value as DecisionStatus)
     ? (value as DecisionStatus)
     : 'draft';
+}
+
+export function normalizeActionItemStatus(
+  value?: string | null
+): ActionItemStatus {
+  return ACTION_ITEM_STATUS_OPTIONS.includes(value as ActionItemStatus)
+    ? (value as ActionItemStatus)
+    : 'pending';
 }
 
 export function formatControlInstruction(

@@ -20,6 +20,12 @@ export type DecisionStatus =
   | 'discarded'
   | 'needs_follow_up';
 
+export type ActionItemStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'verified'
+  | 'discarded';
+
 export type DecisionControlType =
   | 'general'
   | 'add_constraint'
@@ -59,6 +65,18 @@ export interface DecisionSummary {
   nextActions: string[];
   confidence: number;
   evidence: DecisionSummaryEvidence[];
+}
+
+export interface ActionItem {
+  id: string;
+  content: string;
+  status: ActionItemStatus;
+  source: 'generated' | 'carried_forward';
+  carriedFromSessionId?: string | null;
+  note: string;
+  sortOrder: number;
+  createdAt?: number | string;
+  updatedAt?: number | string;
 }
 
 export interface DecisionTemplate {

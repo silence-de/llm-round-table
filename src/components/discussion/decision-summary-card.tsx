@@ -26,9 +26,14 @@ export function DecisionSummaryCard({
           <span>{title}</span>
           <div className="flex items-center gap-2">
             {researchEvaluation && (
-              <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
-                research {researchEvaluation.overallConfidence}%
-              </span>
+              <>
+                <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
+                  research {researchEvaluation.overallConfidence}%
+                </span>
+                <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
+                  {describeEvidenceStrength(researchEvaluation.overallConfidence)}
+                </span>
+              </>
             )}
             <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
               confidence {decisionSummary.confidence}%
@@ -135,4 +140,10 @@ function ListSection({ heading, items }: { heading: string; items: string[] }) {
       )}
     </div>
   );
+}
+
+function describeEvidenceStrength(confidence: number) {
+  if (confidence >= 70) return 'evidence solid';
+  if (confidence >= 45) return 'evidence mixed';
+  return 'evidence thin';
 }

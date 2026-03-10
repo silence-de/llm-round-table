@@ -1,4 +1,4 @@
-import type { DecisionSummary } from './decision/types';
+import type { ActionItem, DecisionSummary } from './decision/types';
 
 export interface TranscriptMessage {
   role: string;
@@ -104,4 +104,53 @@ export function buildDecisionSummaryMarkdown(input: {
 
 function toBulletLines(items: string[]) {
   return items.length > 0 ? items.map((item) => `- ${item}`) : ['- None'];
+}
+
+export function buildExecutionChecklistMarkdown(input: {
+  topic: string;
+  status?: string;
+  actionItems: ActionItem[];
+}) {
+  const topic = input.topic.trim() || 'Untitled session';
+  const status = input.status?.trim() || 'unknown';
+  const lines = [
+    '# Round Table Execution Checklist',
+    '',
+    '## Topic',
+    topic,
+    '',
+    '## Meta',
+    `- Status: ${status}`,
+    `- Items: ${input.actionItems.length}`,
+    '',
+    '## Checklist',
+  ];
+
+  if (input.actionItems.length === 0) {
+    lines.push('', '_No action items captured._');
+    return `${lines.join('\n').trim()}\n`;
+  }
+
+  for (const item of input.actionItems) {
+    const mark =
+      item.status === 'verified'
+        ? '[x]'
+        : item.status === 'discarded'
+          ? '[-]'
+          : '[ ]';
+    const meta = [
+      `status=${item.status}`,
+      `source=${item.source}`,
+      item.carriedFromSessionId ? `from=${item.carriedFromSessionId}` : '',
+    ]
+      .filter(Boolean)
+      .join(', ');
+    lines.push('', `- ${mark} ${item.content}`);
+    lines.push(`  - ${meta}`);
+    if (item.note.trim()) {
+      lines.push(`  - note: ${item.note.trim()}`);
+    }
+  }
+
+  return `${lines.join('\n').trim()}\n`;
 }

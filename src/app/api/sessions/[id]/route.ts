@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import {
   deleteSession,
   getSessionDetail,
-  updateSessionDecisionStatus,
+  updateSessionReview,
 } from '@/lib/db/repository';
 import { normalizeDecisionStatus } from '@/lib/decision/utils';
 
@@ -32,14 +32,28 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const body = (await req.json()) as { decisionStatus?: string };
+  const body = (await req.json()) as {
+    decisionStatus?: string;
+    retrospectiveNote?: string;
+    outcomeSummary?: string;
+  };
 
   const detail = await getSessionDetail(id);
   if (!detail) {
     return NextResponse.json({ error: 'not found' }, { status: 404 });
   }
 
-  const decisionStatus = normalizeDecisionStatus(body.decisionStatus);
-  await updateSessionDecisionStatus(id, decisionStatus);
-  return NextResponse.json({ ok: true, decisionStatus });
+  const decisionStatus =
+    body.decisionStatus !== undefined
+      ? normalizeDecisionStatus(body.decisionStatus)
+      : undefined;
+  await updateSessionReview(id, {
+    decisionStatus,
+    retrospectiveNote: body.retrospectiveNote,
+    outcomeSummary: body.outcomeSummary,
+  });
+  return NextResponse.json({
+    ok: true,
+    decisionStatus: decisionStatus ?? detail.session.decisionStatus,
+  });
 }

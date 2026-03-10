@@ -37,6 +37,8 @@ import {
   DECISION_TEMPLATES,
 } from '@/lib/decision/templates';
 import type {
+  ActionItem,
+  ActionItemStatus,
   DecisionBrief,
   DecisionControlType,
   DecisionStatus,
@@ -44,6 +46,8 @@ import type {
   DiscussionAgenda,
 } from '@/lib/decision/types';
 import {
+  ACTION_ITEM_STATUS_LABELS,
+  ACTION_ITEM_STATUS_OPTIONS,
   DECISION_CONTROL_LABELS,
   DECISION_STATUS_OPTIONS,
   DEFAULT_DECISION_BRIEF,
@@ -53,6 +57,7 @@ import {
 } from '@/lib/decision/utils';
 import {
   buildDecisionSummaryMarkdown,
+  buildExecutionChecklistMarkdown,
   buildTranscriptMarkdown,
   type TranscriptMessage,
 } from '@/lib/session-artifacts';
@@ -85,6 +90,8 @@ interface SessionRecord {
   goal: string;
   background: string;
   constraints: string;
+  retrospectiveNote?: string;
+  outcomeSummary?: string;
   decisionType: string;
   desiredOutput: string;
   templateId?: string | null;
@@ -115,6 +122,7 @@ interface SessionDetail {
   }>;
   minutes: { content: string } | null;
   decisionSummary: DecisionSummary | null;
+  actionItems: ActionItem[];
   researchRun: ResearchRunDetail | null;
   interjections: Array<{
     id: string;
@@ -244,6 +252,9 @@ export default function HomePage() {
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
   const [historyDetail, setHistoryDetail] = useState<SessionDetail | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [researchBusySessionId, setResearchBusySessionId] = useState<string | null>(
+    null
+  );
 
   // ── Store ────────────────────────────────────────────────────────────────
   const {
@@ -257,12 +268,18 @@ export default function HomePage() {
     moderatorMessages,
     interjections,
     decisionSummary,
+    actionItems,
+    review,
     error,
     research,
     ui,
     replay,
     setError,
     setAutoScroll,
+    setActionItems,
+    setReview,
+    setResearchRun,
+    setResearchStatus,
     setReplayStatus,
     setReplayCursor,
     advanceReplayCursor,
@@ -576,6 +593,13 @@ export default function HomePage() {
     () => new Map(personaPresets.map((preset) => [preset.id, preset])),
     [personaPresets]
   );
+  const activeTemplate = useMemo(
+    () =>
+      brief.templateId
+        ? DECISION_TEMPLATES.find((template) => template.id === brief.templateId) ?? null
+        : null,
+    [brief.templateId]
+  );
 
   const historyPersonaSelections = useMemo(
     () => parsePersonaSelectionMap(historyDetail?.session.personaSelections),
@@ -843,6 +867,8 @@ export default function HomePage() {
         session.topic,
         session.goal,
         session.constraints,
+        session.outcomeSummary,
+        session.retrospectiveNote,
         session.id,
         session.status,
         session.decisionType,
@@ -952,6 +978,18 @@ export default function HomePage() {
     );
   }, [brief.topic, decisionSummary, isRunning, phase, sessionId]);
 
+  const handleExportLiveChecklist = useCallback(() => {
+    if (actionItems.length === 0) return;
+    downloadMarkdown(
+      `checklist-${sessionId ?? 'current'}.md`,
+      buildExecutionChecklistMarkdown({
+        topic: brief.topic.trim() || 'Live discussion',
+        status: isRunning ? phase || 'running' : 'completed',
+        actionItems,
+      })
+    );
+  }, [actionItems, brief.topic, isRunning, phase, sessionId]);
+
   const handleExportHistoryTranscript = useCallback(() => {
     if (!historyDetail) return;
     downloadMarkdown(
@@ -978,6 +1016,18 @@ export default function HomePage() {
         topic: historyDetail.session.topic,
         status: historyDetail.session.decisionStatus,
         decisionSummary: historyDetail.decisionSummary,
+      })
+    );
+  }, [historyDetail]);
+
+  const handleExportHistoryChecklist = useCallback(() => {
+    if (!historyDetail || historyDetail.actionItems.length === 0) return;
+    downloadMarkdown(
+      `checklist-${historyDetail.session.id}.md`,
+      buildExecutionChecklistMarkdown({
+        topic: historyDetail.session.topic,
+        status: historyDetail.session.decisionStatus,
+        actionItems: historyDetail.actionItems,
       })
     );
   }, [historyDetail]);
@@ -1052,15 +1102,84 @@ export default function HomePage() {
     setError,
   ]);
 
-  const handleDecisionStatusChange = useCallback(
-    async (sessionIdToUpdate: string, nextStatus: DecisionStatus) => {
+  const updateLocalActionItems = useCallback(
+    (
+      items: ActionItem[],
+      itemId: string,
+      patch: Partial<Pick<ActionItem, 'status' | 'note'>>
+    ) =>
+      items.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              ...patch,
+            }
+          : item
+      ),
+    []
+  );
+
+  const handleActionItemUpdate = useCallback(
+    async (
+      sessionIdToUpdate: string,
+      itemId: string,
+      patch: { status?: ActionItemStatus; note?: string }
+    ) => {
+      const response = await fetch(
+        `/api/sessions/${sessionIdToUpdate}/action-items/${itemId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        }
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to update action item (${response.status})`);
+      }
+
+      const updated = (await response.json()) as ActionItem;
+
+      setHistoryDetail((prev) =>
+        prev && prev.session.id === sessionIdToUpdate
+          ? {
+              ...prev,
+              actionItems: prev.actionItems.map((item) =>
+                item.id === itemId ? updated : item
+              ),
+            }
+          : prev
+      );
+
+      if (sessionId === sessionIdToUpdate) {
+        setActionItems(
+          useDiscussionStore
+            .getState()
+            .actionItems.map((item) => (item.id === itemId ? updated : item))
+        );
+      }
+
+      await refreshSessions();
+      return updated;
+    },
+    [refreshSessions, sessionId, setActionItems]
+  );
+
+  const handleSessionReviewUpdate = useCallback(
+    async (
+      sessionIdToUpdate: string,
+      patch: {
+        decisionStatus?: DecisionStatus;
+        retrospectiveNote?: string;
+        outcomeSummary?: string;
+      }
+    ) => {
       const response = await fetch(`/api/sessions/${sessionIdToUpdate}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decisionStatus: nextStatus }),
+        body: JSON.stringify(patch),
       });
       if (!response.ok) {
-        throw new Error(`Failed to update decision status (${response.status})`);
+        throw new Error(`Failed to update session review (${response.status})`);
       }
 
       setHistoryDetail((prev) =>
@@ -1069,14 +1188,128 @@ export default function HomePage() {
               ...prev,
               session: {
                 ...prev.session,
-                decisionStatus: nextStatus,
+                ...(patch.decisionStatus
+                  ? { decisionStatus: patch.decisionStatus }
+                  : {}),
+                ...(patch.retrospectiveNote !== undefined
+                  ? { retrospectiveNote: patch.retrospectiveNote }
+                  : {}),
+                ...(patch.outcomeSummary !== undefined
+                  ? { outcomeSummary: patch.outcomeSummary }
+                  : {}),
               },
             }
           : prev
       );
+
+      if (sessionId === sessionIdToUpdate) {
+        setReview({
+          retrospectiveNote: patch.retrospectiveNote,
+          outcomeSummary: patch.outcomeSummary,
+        });
+      }
+
       await refreshSessions();
     },
-    [refreshSessions]
+    [refreshSessions, sessionId, setReview]
+  );
+
+  const handleResearchRerun = useCallback(
+    async (sessionIdToUpdate: string, config?: ResearchConfig) => {
+      setResearchBusySessionId(sessionIdToUpdate);
+      if (sessionId === sessionIdToUpdate) {
+        setResearchStatus('running');
+      }
+
+      try {
+        const response = await fetch(`/api/sessions/${sessionIdToUpdate}/research`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(
+            config ? { researchConfig: config } : {}
+          ),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to rerun research (${response.status})`);
+        }
+
+        const nextRun = (await response.json()) as ResearchRunDetail | null;
+
+        setHistoryDetail((prev) =>
+          prev && prev.session.id === sessionIdToUpdate
+            ? {
+                ...prev,
+                researchRun: nextRun,
+              }
+            : prev
+        );
+
+        if (sessionId === sessionIdToUpdate) {
+          setResearchRun(nextRun);
+        }
+
+        await refreshSessions();
+      } finally {
+        setResearchBusySessionId(null);
+      }
+    },
+    [refreshSessions, sessionId, setResearchRun, setResearchStatus]
+  );
+
+  const handleResearchSourceSelection = useCallback(
+    async (sessionIdToUpdate: string, sourceId: string, selected: boolean) => {
+      const response = await fetch(
+        `/api/sessions/${sessionIdToUpdate}/research/sources/${sourceId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ selected }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to update research source (${response.status})`);
+      }
+
+      const updated = (await response.json()) as ResearchRunDetail['sources'][number];
+
+      setHistoryDetail((prev) =>
+        prev && prev.session.id === sessionIdToUpdate && prev.researchRun
+          ? {
+              ...prev,
+              researchRun: {
+                ...prev.researchRun,
+                sources: prev.researchRun.sources.map((source) =>
+                  source.id === sourceId ? updated : source
+                ),
+              },
+            }
+          : prev
+      );
+
+      if (sessionId === sessionIdToUpdate) {
+        const currentRun = useDiscussionStore.getState().research.run;
+        if (currentRun) {
+          setResearchRun({
+            ...currentRun,
+            sources: currentRun.sources.map((source) =>
+              source.id === sourceId ? updated : source
+            ),
+          });
+        }
+      }
+    },
+    [sessionId, setResearchRun]
+  );
+
+  const handleDecisionStatusChange = useCallback(
+    async (sessionIdToUpdate: string, nextStatus: DecisionStatus) => {
+      await handleSessionReviewUpdate(sessionIdToUpdate, {
+        decisionStatus: nextStatus,
+      });
+    },
+    [handleSessionReviewUpdate]
   );
 
   const toggleCompareSession = useCallback((sessionIdToToggle: string) => {
@@ -1255,13 +1488,25 @@ export default function HomePage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="rounded-xl border rt-border-soft px-3 py-2 text-[11px] rt-text-dim">
-                {brief.templateId
-                  ? DECISION_TEMPLATES.find((template) => template.id === brief.templateId)
-                      ?.description
+                <div className="rounded-xl border rt-border-soft px-3 py-2 text-[11px] rt-text-dim">
+                {activeTemplate
+                  ? activeTemplate.description
                   : 'Use a template to prefill a repeatable decision workflow.'}
+                </div>
               </div>
-            </div>
+
+            {activeTemplate && (
+              <div className="rounded-xl border rt-surface p-2.5">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
+                  Template Guide
+                </p>
+                <div className="mt-2 space-y-1.5 text-[11px] leading-relaxed rt-text-dim">
+                  <p>Goal hint: {activeTemplate.goal}</p>
+                  <p>Background hint: {activeTemplate.background}</p>
+                  <p>Constraint hint: {activeTemplate.constraints}</p>
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.2em] rt-text-muted">
@@ -1727,6 +1972,16 @@ export default function HomePage() {
                       Export Decision
                     </Button>
                   )}
+                  {actionItems.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 shrink-0 text-xs"
+                      onClick={handleExportLiveChecklist}
+                    >
+                      Export Checklist
+                    </Button>
+                  )}
                 </div>
               )}
 
@@ -1846,6 +2101,34 @@ export default function HomePage() {
                 status={research.status}
                 sources={research.sources}
                 researchRun={research.run}
+                busy={researchBusySessionId === sessionId}
+                onRerun={
+                  sessionId
+                    ? () =>
+                        void handleResearchRerun(
+                          sessionId,
+                          research.run?.searchConfig ?? researchConfig
+                        ).catch((error) =>
+                          setError(
+                            error instanceof Error ? error.message : String(error)
+                          )
+                        )
+                    : null
+                }
+                onToggleSourceSelection={
+                  sessionId
+                    ? (sourceId, selected) =>
+                        void handleResearchSourceSelection(
+                          sessionId,
+                          sourceId,
+                          selected
+                        ).catch((error) =>
+                          setError(
+                            error instanceof Error ? error.message : String(error)
+                          )
+                        )
+                    : null
+                }
               />
             )}
           </div>
@@ -1895,6 +2178,38 @@ export default function HomePage() {
                     status={research.status}
                     sources={research.sources}
                     researchRun={research.run}
+                    busy={researchBusySessionId === sessionId}
+                    onRerun={
+                      sessionId
+                        ? () =>
+                            void handleResearchRerun(
+                              sessionId,
+                              research.run?.searchConfig ?? researchConfig
+                            ).catch((error) =>
+                              setError(
+                                error instanceof Error
+                                  ? error.message
+                                  : String(error)
+                              )
+                            )
+                        : null
+                    }
+                    onToggleSourceSelection={
+                      sessionId
+                        ? (sourceId, selected) =>
+                            void handleResearchSourceSelection(
+                              sessionId,
+                              sourceId,
+                              selected
+                            ).catch((error) =>
+                              setError(
+                                error instanceof Error
+                                  ? error.message
+                                  : String(error)
+                              )
+                            )
+                        : null
+                    }
                   />
                 )}
 
@@ -1942,6 +2257,167 @@ export default function HomePage() {
                       </div>
                     }
                   />
+                )}
+
+                {sessionId && actionItems.length > 0 && (
+                  <Card className="rt-surface">
+                    <CardHeader className="px-3 pb-1.5 pt-3">
+                      <CardTitle className="text-sm rt-text-strong">
+                        Execution Plan
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2 px-3 pb-3">
+                      {actionItems.map((item) => (
+                        <div
+                          key={item.id}
+                          className="rounded-xl border rt-border-soft p-2.5"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="space-y-1">
+                              <p className="text-sm font-medium rt-text-strong">
+                                {item.content}
+                              </p>
+                              <div className="flex flex-wrap gap-1">
+                                <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
+                                  {item.source === 'carried_forward'
+                                    ? 'Carried forward'
+                                    : 'Generated'}
+                                </span>
+                                {item.carriedFromSessionId && (
+                                  <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
+                                    {item.carriedFromSessionId.slice(0, 8)}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <Select
+                              value={item.status}
+                              onValueChange={(value) => {
+                                const nextStatus = value as ActionItemStatus;
+                                setActionItems(
+                                  updateLocalActionItems(actionItems, item.id, {
+                                    status: nextStatus,
+                                  })
+                                );
+                                void handleActionItemUpdate(sessionId, item.id, {
+                                  status: nextStatus,
+                                }).catch((error) =>
+                                  setError(
+                                    error instanceof Error
+                                      ? error.message
+                                      : String(error)
+                                  )
+                                );
+                              }}
+                              disabled={isRunning}
+                            >
+                              <SelectTrigger className="rt-input h-8 w-[150px] text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {ACTION_ITEM_STATUS_OPTIONS.map((status) => (
+                                  <SelectItem
+                                    key={status}
+                                    value={status}
+                                    className="text-xs"
+                                  >
+                                    {ACTION_ITEM_STATUS_LABELS[status]}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <Textarea
+                            value={item.note ?? ''}
+                            onChange={(event) =>
+                              setActionItems(
+                                updateLocalActionItems(actionItems, item.id, {
+                                  note: event.target.value,
+                                })
+                              )
+                            }
+                            onBlur={() =>
+                              void handleActionItemUpdate(sessionId, item.id, {
+                                note:
+                                  useDiscussionStore
+                                    .getState()
+                                    .actionItems.find((entry) => entry.id === item.id)
+                                    ?.note ?? '',
+                              }).catch((error) =>
+                                setError(
+                                  error instanceof Error
+                                    ? error.message
+                                    : String(error)
+                                )
+                              )
+                            }
+                            disabled={isRunning}
+                            placeholder="Execution note, owner, or outcome signal"
+                            className="rt-input mt-2 min-h-[74px] text-xs"
+                          />
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {sessionId && !isRunning && (
+                  <Card className="rt-surface">
+                    <CardHeader className="px-3 pb-1.5 pt-3">
+                      <CardTitle className="text-sm rt-text-strong">
+                        Outcome Review
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2 px-3 pb-3">
+                      <Textarea
+                        value={review.outcomeSummary}
+                        onChange={(event) =>
+                          setReview({ outcomeSummary: event.target.value })
+                        }
+                        placeholder="What happened after this decision?"
+                        className="rt-input min-h-[74px] text-xs"
+                      />
+                      <Textarea
+                        value={review.retrospectiveNote}
+                        onChange={(event) =>
+                          setReview({ retrospectiveNote: event.target.value })
+                        }
+                        placeholder="What would you adjust in the next round?"
+                        className="rt-input min-h-[90px] text-xs"
+                      />
+                      <div className="flex justify-end">
+                        <Button
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() =>
+                            void handleSessionReviewUpdate(sessionId, {
+                              outcomeSummary: useDiscussionStore.getState().review.outcomeSummary,
+                              retrospectiveNote:
+                                useDiscussionStore.getState().review.retrospectiveNote,
+                            }).catch((error) =>
+                              setError(
+                                error instanceof Error
+                                  ? error.message
+                                  : String(error)
+                              )
+                            )
+                          }
+                        >
+                          Save review
+                        </Button>
+                        {actionItems.length > 0 && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="ml-2 h-7 text-xs"
+                            onClick={handleExportLiveChecklist}
+                          >
+                            Export checklist
+                          </Button>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
                 )}
 
                 {/* Token usage */}
@@ -2277,6 +2753,16 @@ export default function HomePage() {
                             Export decision
                           </Button>
                         )}
+                        {historyDetail.actionItems.length > 0 && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-xs"
+                            onClick={handleExportHistoryChecklist}
+                          >
+                            Export checklist
+                          </Button>
+                        )}
                       </div>
                     </div>
 
@@ -2294,8 +2780,221 @@ export default function HomePage() {
                         status={historyDetail.researchRun.status}
                         sources={historyDetail.researchRun.sources}
                         researchRun={historyDetail.researchRun}
+                        busy={researchBusySessionId === historyDetail.session.id}
+                        onRerun={() =>
+                          void handleResearchRerun(historyDetail.session.id).catch(
+                            (error) =>
+                              setError(
+                                error instanceof Error
+                                  ? error.message
+                                  : String(error)
+                              )
+                          )
+                        }
+                        onToggleSourceSelection={(sourceId, selected) =>
+                          void handleResearchSourceSelection(
+                            historyDetail.session.id,
+                            sourceId,
+                            selected
+                          ).catch((error) =>
+                            setError(
+                              error instanceof Error
+                                ? error.message
+                                : String(error)
+                            )
+                          )
+                        }
                       />
                     )}
+
+                    {historyDetail.actionItems.length > 0 && (
+                      <div className="rounded-xl border rt-surface p-2.5">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                            Execution Plan
+                          </p>
+                          <span className="text-[10px] rt-text-dim">
+                            {historyDetail.actionItems.length} items
+                          </span>
+                        </div>
+                        <div className="space-y-2">
+                          {historyDetail.actionItems.map((item) => (
+                            <div
+                              key={item.id}
+                              className="rounded-xl border rt-border-soft p-2.5"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="space-y-1">
+                                  <p className="text-sm font-medium rt-text-strong">
+                                    {item.content}
+                                  </p>
+                                  <div className="flex flex-wrap gap-1">
+                                    <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
+                                      {item.source === 'carried_forward'
+                                        ? 'Carried forward'
+                                        : 'Generated'}
+                                    </span>
+                                    {item.carriedFromSessionId && (
+                                      <button
+                                        type="button"
+                                        className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] underline rt-text-dim"
+                                        onClick={() =>
+                                          void loadHistory(item.carriedFromSessionId!)
+                                        }
+                                      >
+                                        From {item.carriedFromSessionId.slice(0, 8)}
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                                <Select
+                                  value={item.status}
+                                  onValueChange={(value) => {
+                                    const nextStatus = value as ActionItemStatus;
+                                    setHistoryDetail((prev) =>
+                                      prev && prev.session.id === historyDetail.session.id
+                                        ? {
+                                            ...prev,
+                                            actionItems: updateLocalActionItems(
+                                              prev.actionItems,
+                                              item.id,
+                                              { status: nextStatus }
+                                            ),
+                                          }
+                                        : prev
+                                    );
+                                    void handleActionItemUpdate(
+                                      historyDetail.session.id,
+                                      item.id,
+                                      { status: nextStatus }
+                                    ).catch((error) =>
+                                      setError(
+                                        error instanceof Error
+                                          ? error.message
+                                          : String(error)
+                                      )
+                                    );
+                                  }}
+                                >
+                                  <SelectTrigger className="rt-input h-8 w-[150px] text-xs">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {ACTION_ITEM_STATUS_OPTIONS.map((status) => (
+                                      <SelectItem
+                                        key={status}
+                                        value={status}
+                                        className="text-xs"
+                                      >
+                                        {ACTION_ITEM_STATUS_LABELS[status]}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <Textarea
+                                value={item.note ?? ''}
+                                onChange={(event) =>
+                                  setHistoryDetail((prev) =>
+                                    prev && prev.session.id === historyDetail.session.id
+                                      ? {
+                                          ...prev,
+                                          actionItems: updateLocalActionItems(
+                                            prev.actionItems,
+                                            item.id,
+                                            { note: event.target.value }
+                                          ),
+                                        }
+                                      : prev
+                                  )
+                                }
+                                onBlur={(event) =>
+                                  void handleActionItemUpdate(
+                                    historyDetail.session.id,
+                                    item.id,
+                                    { note: event.target.value }
+                                  ).catch((error) =>
+                                    setError(
+                                      error instanceof Error
+                                        ? error.message
+                                        : String(error)
+                                    )
+                                  )
+                                }
+                                placeholder="Execution note, result, or owner"
+                                className="rt-input mt-2 min-h-[74px] text-xs"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="rounded-xl border rt-surface p-2.5">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                        Outcome Review
+                      </p>
+                      <div className="mt-2 space-y-2">
+                        <Textarea
+                          value={historyDetail.session.outcomeSummary ?? ''}
+                          onChange={(event) =>
+                            setHistoryDetail((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    session: {
+                                      ...prev.session,
+                                      outcomeSummary: event.target.value,
+                                    },
+                                  }
+                                : prev
+                            )
+                          }
+                          placeholder="What happened after this decision?"
+                          className="rt-input min-h-[74px] text-xs"
+                        />
+                        <Textarea
+                          value={historyDetail.session.retrospectiveNote ?? ''}
+                          onChange={(event) =>
+                            setHistoryDetail((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    session: {
+                                      ...prev.session,
+                                      retrospectiveNote: event.target.value,
+                                    },
+                                  }
+                                : prev
+                            )
+                          }
+                          placeholder="What would you change in the next follow-up?"
+                          className="rt-input min-h-[90px] text-xs"
+                        />
+                        <div className="flex justify-end">
+                          <Button
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() =>
+                              void handleSessionReviewUpdate(historyDetail.session.id, {
+                                outcomeSummary:
+                                  historyDetail.session.outcomeSummary ?? '',
+                                retrospectiveNote:
+                                  historyDetail.session.retrospectiveNote ?? '',
+                              }).catch((error) =>
+                                setError(
+                                  error instanceof Error
+                                    ? error.message
+                                    : String(error)
+                                )
+                              )
+                            }
+                          >
+                            Save review
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
 
                     {/* Session minutes */}
                     {historyDetail.minutes?.content && (
@@ -2372,21 +3071,52 @@ export default function HomePage() {
                     </p>
                     <div className="mt-2 grid gap-2">
                       {compareDetails.map((detail) => (
-                        <div key={detail.session.id} className="rounded-lg border rt-border-soft p-2">
+                        <div
+                          key={detail.session.id}
+                          className="rounded-lg border rt-border-soft p-2"
+                        >
                           <p className="text-sm font-semibold rt-text-strong">
                             {detail.session.topic}
                           </p>
                           <p className="mt-1 text-[11px] rt-text-muted">
                             {detail.session.decisionStatus} · {detail.session.decisionType}
                           </p>
-                          <p className="mt-1 text-xs rt-text-dim">
-                            Recommended:{' '}
-                            {detail.decisionSummary?.recommendedOption ?? 'No decision card'}
-                          </p>
-                          <p className="mt-1 text-xs rt-text-dim">
-                            Risks: {detail.decisionSummary?.risks.length ?? 0} · Next actions:{' '}
-                            {detail.decisionSummary?.nextActions.length ?? 0}
-                          </p>
+                          <div className="mt-2 space-y-2">
+                            <div>
+                              <p className="text-[10px] uppercase tracking-[0.18em] rt-text-muted">
+                                Recommendation
+                              </p>
+                              <p className="mt-1 text-xs rt-text-dim">
+                                {detail.decisionSummary?.recommendedOption ??
+                                  'No decision card'}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase tracking-[0.18em] rt-text-muted">
+                                Risks
+                              </p>
+                              <p className="mt-1 text-xs rt-text-dim">
+                                {detail.decisionSummary?.risks.join(' · ') || 'None'}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase tracking-[0.18em] rt-text-muted">
+                                Research gaps
+                              </p>
+                              <p className="mt-1 text-xs rt-text-dim">
+                                {detail.researchRun?.evaluation?.gaps.join(' · ') || 'None'}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase tracking-[0.18em] rt-text-muted">
+                                Action items
+                              </p>
+                              <p className="mt-1 text-xs rt-text-dim">
+                                {detail.actionItems.map((item) => item.content).join(' · ') ||
+                                  'None'}
+                              </p>
+                            </div>
+                          </div>
                         </div>
                       ))}
                     </div>

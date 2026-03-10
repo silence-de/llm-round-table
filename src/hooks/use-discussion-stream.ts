@@ -4,6 +4,7 @@ import { useCallback, useRef } from 'react';
 import { nanoid } from 'nanoid';
 import type { PersonaSelection } from '@/lib/agents/types';
 import type {
+  ActionItem,
   DecisionBrief,
   DecisionControlType,
   DiscussionAgenda,
@@ -255,8 +256,14 @@ async function hydrateSessionArtifactsFromSession() {
     const response = await fetch(`/api/sessions/${sessionId}`);
     if (!response.ok) return;
     const data = (await response.json()) as {
-      session?: { usageInputTokens?: number; usageOutputTokens?: number };
+      session?: {
+        usageInputTokens?: number;
+        usageOutputTokens?: number;
+        retrospectiveNote?: string;
+        outcomeSummary?: string;
+      };
       decisionSummary?: import('@/lib/decision/types').DecisionSummary | null;
+      actionItems?: ActionItem[];
       researchRun?: ResearchRunDetail | null;
     };
     useDiscussionStore.getState().setUsage({
@@ -264,6 +271,11 @@ async function hydrateSessionArtifactsFromSession() {
       outputTokens: data.session?.usageOutputTokens ?? 0,
     });
     useDiscussionStore.getState().setDecisionSummary(data.decisionSummary ?? null);
+    useDiscussionStore.getState().setActionItems(data.actionItems ?? []);
+    useDiscussionStore.getState().setReview({
+      retrospectiveNote: data.session?.retrospectiveNote ?? '',
+      outcomeSummary: data.session?.outcomeSummary ?? '',
+    });
     useDiscussionStore.getState().setResearchRun(data.researchRun ?? null);
   } catch {
     // ignore post-run usage hydration errors

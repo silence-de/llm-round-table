@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   research_config TEXT NOT NULL DEFAULT '{}',
   parent_session_id TEXT,
   decision_status TEXT NOT NULL DEFAULT 'draft',
+  retrospective_note TEXT NOT NULL DEFAULT '',
+  outcome_summary TEXT NOT NULL DEFAULT '',
   moderator_agent_id TEXT NOT NULL,
   max_debate_rounds INTEGER NOT NULL,
   selected_agent_ids TEXT NOT NULL DEFAULT '[]',
@@ -98,6 +100,19 @@ CREATE TABLE IF NOT EXISTS research_sources (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS action_items (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  content TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  source TEXT NOT NULL DEFAULT 'generated',
+  carried_from_session_id TEXT,
+  note TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS interjections (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
@@ -141,6 +156,8 @@ ensureColumn('sessions', 'agenda_config', "TEXT NOT NULL DEFAULT '{}'");
 ensureColumn('sessions', 'research_config', "TEXT NOT NULL DEFAULT '{}'");
 ensureColumn('sessions', 'parent_session_id', 'TEXT');
 ensureColumn('sessions', 'decision_status', "TEXT NOT NULL DEFAULT 'draft'");
+ensureColumn('sessions', 'retrospective_note', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('sessions', 'outcome_summary', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('sessions', 'usage_input_tokens', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('sessions', 'usage_output_tokens', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('sessions', 'stop_requested', 'INTEGER NOT NULL DEFAULT 0');

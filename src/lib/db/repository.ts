@@ -2,6 +2,8 @@ import { and, asc, eq } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import type { PersonaSelection } from '../agents/types';
 import type {
+  ActionItem,
+  ActionItemStatus,
   DecisionBrief,
   DecisionControlType,
   DecisionStatus,
@@ -9,6 +11,7 @@ import type {
   DiscussionAgenda,
 } from '../decision/types';
 import {
+  normalizeActionItemStatus,
   normalizeDecisionStatus,
   normalizePersistedDecisionSummary,
 } from '../decision/utils';
@@ -22,6 +25,7 @@ import type {
 import { normalizeResearchConfig } from '../search/utils';
 import { db, sqliteDb } from './client';
 import {
+  actionItems,
   decisionSummaries,
   interjections,
   messages,
@@ -87,6 +91,10 @@ export async function createSession(input: {
     createdAt: now,
     updatedAt: now,
   });
+
+  if (input.parentSessionId) {
+    await carryForwardOpenActionItems(input.parentSessionId, input.id);
+  }
 }
 
 export async function updateSessionStatus(
@@ -107,6 +115,31 @@ export async function updateSessionDecisionStatus(
     .update(sessions)
     .set({
       decisionStatus: normalizeDecisionStatus(decisionStatus),
+      updatedAt: new Date(),
+    })
+    .where(eq(sessions.id, sessionId));
+}
+
+export async function updateSessionReview(
+  sessionId: string,
+  input: {
+    decisionStatus?: DecisionStatus;
+    retrospectiveNote?: string;
+    outcomeSummary?: string;
+  }
+) {
+  await db
+    .update(sessions)
+    .set({
+      ...(input.decisionStatus
+        ? { decisionStatus: normalizeDecisionStatus(input.decisionStatus) }
+        : {}),
+      ...(input.retrospectiveNote !== undefined
+        ? { retrospectiveNote: input.retrospectiveNote.trim() }
+        : {}),
+      ...(input.outcomeSummary !== undefined
+        ? { outcomeSummary: input.outcomeSummary.trim() }
+        : {}),
       updatedAt: new Date(),
     })
     .where(eq(sessions.id, sessionId));
@@ -175,6 +208,7 @@ export async function upsertDecisionSummary(
       .update(decisionSummaries)
       .set({ content: serialized, updatedAt: now })
       .where(eq(decisionSummaries.sessionId, sessionId));
+    await syncGeneratedActionItems(sessionId, summary.nextActions);
     return;
   }
 
@@ -184,6 +218,8 @@ export async function upsertDecisionSummary(
     createdAt: now,
     updatedAt: now,
   });
+
+  await syncGeneratedActionItems(sessionId, summary.nextActions);
 }
 
 export async function upsertResearchRun(
@@ -322,6 +358,28 @@ export async function getSessionResearch(
   };
 }
 
+export async function updateResearchSourceSelection(
+  sessionId: string,
+  sourceId: string,
+  selected: boolean
+) {
+  const run = await getSessionResearch(sessionId);
+  if (!run) return null;
+
+  await db
+    .update(researchSources)
+    .set({ selected: selected ? 1 : 0 })
+    .where(
+      and(
+        eq(researchSources.id, sourceId),
+        eq(researchSources.researchRunId, run.id)
+      )
+    );
+
+  const refreshed = await getSessionResearch(sessionId);
+  return refreshed?.sources.find((source) => source.id === sourceId) ?? null;
+}
+
 export async function getSessionDetail(sessionId: string) {
   const [session] = await db
     .select()
@@ -357,6 +415,7 @@ export async function getSessionDetail(sessionId: string) {
     .from(interjections)
     .where(eq(interjections.sessionId, sessionId))
     .orderBy(asc(interjections.createdAt));
+  const sessionActionItems = await listActionItems(sessionId);
 
   const parentSession = session.parentSessionId
     ? (
@@ -400,6 +459,7 @@ export async function getSessionDetail(sessionId: string) {
       : null,
     researchRun,
     interjections: sessionInterjections,
+    actionItems: sessionActionItems,
     parentSession,
     childSessions,
   };
@@ -432,6 +492,7 @@ export async function deleteSession(sessionId: string) {
       .where(eq(researchSources.researchRunId, run.id));
     await db.delete(researchRuns).where(eq(researchRuns.id, run.id));
   }
+  await db.delete(actionItems).where(eq(actionItems.sessionId, sessionId));
   await db.delete(sessions).where(eq(sessions.id, sessionId));
 }
 
@@ -501,6 +562,42 @@ export interface InterjectionRecord {
   controlType: DecisionControlType;
   phaseHint?: string;
   roundHint?: number;
+}
+
+export async function listActionItems(sessionId: string): Promise<ActionItem[]> {
+  const rows = await db
+    .select()
+    .from(actionItems)
+    .where(eq(actionItems.sessionId, sessionId))
+    .orderBy(asc(actionItems.sortOrder), asc(actionItems.createdAt));
+
+  return rows.map((row) => ({
+    id: row.id,
+    content: row.content,
+    status: normalizeActionItemStatus(row.status),
+    source:
+      row.source === 'carried_forward' ? 'carried_forward' : 'generated',
+    carriedFromSessionId: row.carriedFromSessionId ?? null,
+    note: row.note ?? '',
+    sortOrder: row.sortOrder ?? 0,
+    createdAt: normalizeDateLike(row.createdAt),
+    updatedAt: normalizeDateLike(row.updatedAt),
+  }));
+}
+
+export async function updateActionItem(
+  sessionId: string,
+  itemId: string,
+  input: { status?: ActionItemStatus; note?: string }
+) {
+  await db
+    .update(actionItems)
+    .set({
+      ...(input.status ? { status: normalizeActionItemStatus(input.status) } : {}),
+      ...(input.note !== undefined ? { note: input.note.trim() } : {}),
+      updatedAt: new Date(),
+    })
+    .where(and(eq(actionItems.id, itemId), eq(actionItems.sessionId, sessionId)));
 }
 
 export async function enqueueInterjection(input: {
@@ -573,6 +670,68 @@ export async function drainPendingInterjections(input: {
   });
 
   return tx();
+}
+
+async function syncGeneratedActionItems(sessionId: string, nextActions: string[]) {
+  const normalized = nextActions
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const existing = await listActionItems(sessionId);
+  const existingGeneratedByContent = new Map(
+    existing
+      .filter((item) => item.source === 'generated')
+      .map((item) => [item.content, item])
+  );
+  const now = new Date();
+
+  for (const [index, content] of normalized.entries()) {
+    const matched = existingGeneratedByContent.get(content);
+    if (matched) {
+      await db
+        .update(actionItems)
+        .set({ sortOrder: index, updatedAt: now })
+        .where(eq(actionItems.id, matched.id));
+      continue;
+    }
+
+    await db.insert(actionItems).values({
+      id: nanoid(),
+      sessionId,
+      content,
+      status: 'pending',
+      source: 'generated',
+      carriedFromSessionId: null,
+      note: '',
+      sortOrder: index,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+}
+
+async function carryForwardOpenActionItems(parentSessionId: string, sessionId: string) {
+  const parentItems = await listActionItems(parentSessionId);
+  const carryItems = parentItems.filter(
+    (item) => item.status !== 'verified' && item.status !== 'discarded'
+  );
+
+  if (carryItems.length === 0) return;
+
+  const now = new Date();
+  for (const [index, item] of carryItems.entries()) {
+    await db.insert(actionItems).values({
+      id: nanoid(),
+      sessionId,
+      content: item.content,
+      status: item.status === 'in_progress' ? 'in_progress' : 'pending',
+      source: 'carried_forward',
+      carriedFromSessionId: parentSessionId,
+      note: item.note,
+      sortOrder: index,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
 }
 
 function parseJsonArray(value?: string | null) {

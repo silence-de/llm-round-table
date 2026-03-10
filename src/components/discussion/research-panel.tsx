@@ -1,7 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { ChevronDown, ExternalLink, Globe } from 'lucide-react';
+import { ChevronDown, ExternalLink, Globe, RotateCcw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { ResearchRunDetail, ResearchSource } from '@/lib/search/types';
 import type { ResearchStatus } from '@/stores/discussion-store';
@@ -10,18 +11,35 @@ interface ResearchPanelProps {
   status: ResearchStatus;
   sources: ResearchSource[];
   researchRun?: ResearchRunDetail | null;
+  busy?: boolean;
+  onRerun?: (() => void) | null;
+  onToggleSourceSelection?: ((sourceId: string, selected: boolean) => void) | null;
 }
 
 export function ResearchPanel({
   status,
   sources,
   researchRun = null,
+  busy = false,
+  onRerun = null,
+  onToggleSourceSelection = null,
 }: ResearchPanelProps) {
   const [expanded, setExpanded] = useState(true);
 
   const visibleSources = useMemo(
     () => (researchRun?.sources.length ? researchRun.sources : sources),
     [researchRun, sources]
+  );
+  const selectedSources = useMemo(
+    () => visibleSources.filter((source) => source.selected),
+    [visibleSources]
+  );
+  const groupedSources = useMemo(
+    () =>
+      groupSourcesByCategory(
+        visibleSources.length > 0 ? visibleSources : sources
+      ),
+    [sources, visibleSources]
   );
 
   if (status === 'idle' && !researchRun) return null;
@@ -36,14 +54,34 @@ export function ResearchPanel({
           <div className="flex items-center gap-2">
             <Globe className="h-4 w-4 rt-text-muted" />
             <span>Research Intelligence</span>
-            <StatusChip status={researchRun?.status ?? status} sourceCount={visibleSources.length} />
+            <StatusChip
+              status={researchRun?.status ?? status}
+              sourceCount={selectedSources.length}
+            />
           </div>
-
-          <ChevronDown
-            className={`h-4 w-4 rt-text-muted transition-transform duration-200 ${
-              expanded ? 'rotate-180' : ''
-            }`}
-          />
+          <div className="flex items-center gap-2">
+            {onRerun && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 gap-1 px-2 text-[11px]"
+                disabled={busy || status === 'running'}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onRerun();
+                }}
+              >
+                <RotateCcw className="h-3 w-3" />
+                {busy ? 'Refreshing…' : 'Rerun'}
+              </Button>
+            )}
+            <ChevronDown
+              className={`h-4 w-4 rt-text-muted transition-transform duration-200 ${
+                expanded ? 'rotate-180' : ''
+              }`}
+            />
+          </div>
         </CardTitle>
       </CardHeader>
 
@@ -101,6 +139,13 @@ export function ResearchPanel({
                   ))}
                 </div>
               )}
+              <p className="mt-2 text-[11px] rt-text-dim">
+                {researchRun.evaluation.overallConfidence >= 70
+                  ? 'Evidence posture: solid enough to support a decision.'
+                  : researchRun.evaluation.overallConfidence >= 45
+                    ? 'Evidence posture: mixed, worth a manual review.'
+                    : 'Evidence posture: thin, treat conclusions cautiously.'}
+              </p>
             </div>
           )}
 
@@ -136,56 +181,90 @@ export function ResearchPanel({
 
           {visibleSources.length > 0 && (
             <div className="space-y-2.5">
-              {visibleSources.map((source) => (
-                <div key={source.id} className="rt-surface rounded-xl border p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[10px] uppercase tracking-[0.18em] rt-text-dim">
-                        {source.id} · {source.domain || 'unknown'}
-                      </p>
-                      <a
-                        href={source.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-1 line-clamp-1 block text-sm font-semibold rt-text-strong hover:underline"
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        {source.title}
-                      </a>
-                    </div>
-                    <a
-                      href={source.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="shrink-0 rt-text-muted hover:rt-text-strong"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" />
-                    </a>
-                  </div>
-
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {source.publishedDate && (
-                      <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
-                        {source.publishedDate.slice(0, 10)}
-                      </span>
-                    )}
-                    <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
-                      score {source.score.toFixed(2)}
-                    </span>
-                    {source.qualityFlags.map((flag) => (
-                      <span
-                        key={`${source.id}-${flag}`}
-                        className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim"
-                      >
-                        {flag}
-                      </span>
-                    ))}
-                  </div>
-
-                  <p className="mt-1.5 line-clamp-3 text-xs leading-relaxed rt-text-muted">
-                    {source.snippet}
+              <div className="rounded-xl border rt-border-soft p-3 text-xs rt-text-dim">
+                {selectedSources.length} selected / {visibleSources.length} total
+              </div>
+              {groupedSources.map(([category, categorySources]) => (
+                <div key={category} className="space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                    {category}
                   </p>
+                  {categorySources.map((source) => (
+                    <div
+                      key={source.id}
+                      className={`rt-surface rounded-xl border p-3 ${
+                        source.selected ? '' : 'opacity-55'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[10px] uppercase tracking-[0.18em] rt-text-dim">
+                            {source.id} · {source.domain || 'unknown'}
+                          </p>
+                          <a
+                            href={source.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-1 line-clamp-1 block text-sm font-semibold rt-text-strong hover:underline"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            {source.title}
+                          </a>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {onToggleSourceSelection && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 px-2 text-[11px]"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onToggleSourceSelection(source.id, !source.selected);
+                              }}
+                            >
+                              {source.selected ? 'Exclude' : 'Include'}
+                            </Button>
+                          )}
+                          <a
+                            href={source.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="shrink-0 rt-text-muted hover:rt-text-strong"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </a>
+                        </div>
+                      </div>
+
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
+                          {source.selected ? 'selected' : 'excluded'}
+                        </span>
+                        {source.publishedDate && (
+                          <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
+                            {source.publishedDate.slice(0, 10)}
+                          </span>
+                        )}
+                        <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
+                          score {source.score.toFixed(2)}
+                        </span>
+                        {source.qualityFlags.map((flag) => (
+                          <span
+                            key={`${source.id}-${flag}`}
+                            className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim"
+                          >
+                            {flag}
+                          </span>
+                        ))}
+                      </div>
+
+                      <p className="mt-1.5 line-clamp-3 text-xs leading-relaxed rt-text-muted">
+                        {source.snippet}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>
@@ -230,4 +309,40 @@ function Metric({ label, value }: { label: string; value: number }) {
       <p className="mt-1 text-sm font-semibold rt-text-strong">{value}%</p>
     </div>
   );
+}
+
+function groupSourcesByCategory(sources: ResearchSource[]) {
+  const grouped = new Map<string, ResearchSource[]>();
+
+  for (const source of sources) {
+    const category = classifySourceCategory(source);
+    const existing = grouped.get(category) ?? [];
+    existing.push(source);
+    grouped.set(category, existing);
+  }
+
+  return Array.from(grouped.entries());
+}
+
+function classifySourceCategory(source: ResearchSource) {
+  const domain = source.domain.toLowerCase();
+  const title = source.title.toLowerCase();
+
+  if (
+    /\.gov$/.test(domain) ||
+    /docs|support|developer|official/.test(domain) ||
+    /official|documentation|filing/.test(title)
+  ) {
+    return 'Official / Documentation';
+  }
+
+  if (/news|times|journal|post|reuters|bloomberg|techcrunch|theinformation/.test(domain)) {
+    return 'News';
+  }
+
+  if (/blog|medium|substack|opinion|analysis|insights/.test(domain + title)) {
+    return 'Analysis / Opinion';
+  }
+
+  return 'Reference';
 }
