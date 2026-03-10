@@ -1,17 +1,30 @@
 import { AGENT_CATALOG } from '@/lib/agents/registry';
 import { resolvePersonaText } from '@/lib/agents/persona-presets';
 import type { PersonaSelection, SessionAgent } from '@/lib/agents/types';
+import type { DecisionBrief, DiscussionAgenda } from '@/lib/decision/types';
+import {
+  DEFAULT_DECISION_BRIEF,
+  DEFAULT_DISCUSSION_AGENDA,
+  normalizeDecisionBrief,
+  normalizeDiscussionAgenda,
+} from '@/lib/decision/utils';
 import {
   appendMessage,
   createSession,
   drainPendingInterjections,
+  getSessionDetail,
   isSessionStopRequested,
+  replaceResearchSources,
   requestSessionStop,
   updateSessionUsage,
   updateSessionStatus,
+  upsertDecisionSummary,
   upsertMinutes,
+  upsertResearchRun,
 } from '@/lib/db/repository';
 import { DiscussionOrchestrator } from '@/lib/orchestrator/orchestrator';
+import type { ResearchConfig } from '@/lib/search/types';
+import { normalizeResearchConfig } from '@/lib/search/utils';
 import { encodeSSE } from '@/lib/sse/types';
 
 export const dynamic = 'force-dynamic';
@@ -24,23 +37,41 @@ export async function POST(
   const { id } = await params;
   const body = (await req.json()) as {
     topic?: string;
+    brief?: Partial<DecisionBrief>;
+    agenda?: Partial<DiscussionAgenda>;
+    researchConfig?: Partial<ResearchConfig>;
     agentIds?: string[];
     modelSelections?: Record<string, string>;
     personaSelections?: Record<string, PersonaSelection>;
     personas?: Record<string, string>;
     moderatorAgentId?: string;
     maxDebateRounds?: number;
+    parentSessionId?: string | null;
   };
   const {
     topic: rawTopic,
+    brief: rawBrief,
+    agenda: rawAgenda,
+    researchConfig: rawResearchConfig,
     agentIds: rawAgentIds,
     modelSelections = {},
     personaSelections = {},
     personas = {},
     moderatorAgentId = 'claude',
     maxDebateRounds: rawMaxDebateRounds = 2,
+    parentSessionId = null,
   } = body;
-  const topic = rawTopic?.trim() ?? '';
+  const brief = normalizeDecisionBrief({
+    ...DEFAULT_DECISION_BRIEF,
+    ...rawBrief,
+    topic: rawBrief?.topic ?? rawTopic,
+  });
+  const agenda = normalizeDiscussionAgenda({
+    ...DEFAULT_DISCUSSION_AGENDA,
+    ...rawAgenda,
+  });
+  const researchConfig = normalizeResearchConfig(rawResearchConfig);
+  const topic = brief.topic;
   const agentIds = Array.isArray(rawAgentIds) ? rawAgentIds : [];
   const normalizedMaxDebateRounds = Number.isFinite(rawMaxDebateRounds)
     ? Math.max(1, Math.min(5, Math.floor(rawMaxDebateRounds)))
@@ -122,23 +153,50 @@ export async function POST(
     );
   }
 
+  const parentDetail = parentSessionId
+    ? await getSessionDetail(parentSessionId)
+    : null;
+  const parentContext = parentDetail
+    ? [
+        `这是一个 follow-up 讨论，延续自历史会话「${parentDetail.session.topic}」。`,
+        parentDetail.decisionSummary?.summary
+          ? `上次结论摘要：${parentDetail.decisionSummary.summary}`
+          : '',
+        parentDetail.decisionSummary?.recommendedOption
+          ? `上次推荐方向：${parentDetail.decisionSummary.recommendedOption}`
+          : '',
+        parentDetail.minutes?.content
+          ? `上次纪要要点：${parentDetail.minutes.content.slice(0, 300)}`
+          : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
+    : undefined;
+
   await createSession({
     id,
-    topic,
+    brief,
+    agenda,
     moderatorAgentId,
     maxDebateRounds: normalizedMaxDebateRounds,
     selectedAgentIds: agents.map((a) => a.definition.id),
     modelSelections: resolvedModelSelections,
     personaSelections: resolvedPersonaSelections,
     personas: resolvedPersonas,
+    researchConfig,
+    parentSessionId,
   });
 
   const orchestrator = new DiscussionOrchestrator({
     sessionId: id,
     topic,
+    brief,
+    agenda,
+    researchConfig,
     agents,
     moderatorAgentId,
     maxDebateRounds: normalizedMaxDebateRounds,
+    parentContext,
     drainInterjections: ({ phase, round }) =>
       drainPendingInterjections({ sessionId: id, phase, round }),
     shouldStop: () => isSessionStopRequested(id),
@@ -153,6 +211,12 @@ export async function POST(
         content: message.content,
       }),
     onSummaryPersist: (summary) => upsertMinutes(id, summary),
+    onDecisionSummaryPersist: (summary) => upsertDecisionSummary(id, summary),
+    onResearchRunPersist: async (run) => {
+      await upsertResearchRun(id, run);
+    },
+    onResearchSourcesPersist: (researchRunId, sources) =>
+      replaceResearchSources(researchRunId, sources),
     onUsagePersist: (usage) =>
       updateSessionUsage(id, {
         inputDelta: usage.inputTokens ?? 0,

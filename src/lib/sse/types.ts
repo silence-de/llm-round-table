@@ -11,7 +11,8 @@ export type SSEEventType =
   | 'discussion_complete'
   | 'research_start'
   | 'research_result'
-  | 'research_complete';
+  | 'research_complete'
+  | 'research_failed';
 
 export interface SSEEvent {
   type: SSEEventType;

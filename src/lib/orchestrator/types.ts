@@ -1,4 +1,15 @@
 import type { SessionAgent } from '../agents/types';
+import type {
+  DecisionBrief,
+  DecisionControlType,
+  DecisionSummary,
+  DiscussionAgenda,
+} from '../decision/types';
+import type {
+  ResearchConfig,
+  ResearchRunDetail,
+  ResearchSource,
+} from '../search/types';
 
 export enum DiscussionPhase {
   CREATED = 'created',
@@ -15,9 +26,13 @@ export enum DiscussionPhase {
 export interface DiscussionConfig {
   sessionId: string;
   topic: string;
+  brief: DecisionBrief;
+  agenda: DiscussionAgenda;
+  researchConfig: ResearchConfig;
   agents: SessionAgent[];
   moderatorAgentId: string;
   maxDebateRounds: number;
+  parentContext?: string;
   drainInterjections?: (
     context: { phase: string; round?: number }
   ) => Promise<UserInterjection[]> | UserInterjection[];
@@ -26,6 +41,16 @@ export interface DiscussionConfig {
     message: PersistableMessage
   ) => Promise<void> | void;
   onSummaryPersist?: (summary: string) => Promise<void> | void;
+  onDecisionSummaryPersist?: (
+    summary: DecisionSummary
+  ) => Promise<void> | void;
+  onResearchRunPersist?: (
+    researchRun: Omit<ResearchRunDetail, 'sources'>
+  ) => Promise<void> | void;
+  onResearchSourcesPersist?: (
+    researchRunId: string,
+    sources: ResearchSource[]
+  ) => Promise<void> | void;
   onUsagePersist?: (
     usage: { inputTokens?: number; outputTokens?: number }
   ) => Promise<void> | void;
@@ -55,6 +80,7 @@ export interface UserInterjection {
   id: string;
   content: string;
   createdAt: number;
+  controlType: DecisionControlType;
   phaseHint?: string;
   roundHint?: number;
 }

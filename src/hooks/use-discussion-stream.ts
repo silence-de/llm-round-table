@@ -3,9 +3,14 @@
 import { useCallback, useRef } from 'react';
 import { nanoid } from 'nanoid';
 import type { PersonaSelection } from '@/lib/agents/types';
+import type {
+  DecisionBrief,
+  DecisionControlType,
+  DiscussionAgenda,
+} from '@/lib/decision/types';
+import type { ResearchConfig, ResearchRunDetail, ResearchSource } from '@/lib/search/types';
 import { useDiscussionStore } from '@/stores/discussion-store';
 import type { SSEEvent } from '@/lib/sse/types';
-import type { ResearchSource } from '@/lib/search/types';
 
 export function useDiscussionStream() {
   const store = useDiscussionStore();
@@ -14,12 +19,16 @@ export function useDiscussionStream() {
   const startDiscussion = useCallback(
     async (params: {
       topic: string;
+      brief?: Partial<DecisionBrief>;
+      agenda?: Partial<DiscussionAgenda>;
+      researchConfig?: Partial<ResearchConfig>;
       agentIds: string[];
       modelSelections?: Record<string, string>;
       personaSelections?: Record<string, PersonaSelection>;
       personas?: Record<string, string>;
       moderatorAgentId?: string;
       maxDebateRounds?: number;
+      parentSessionId?: string | null;
     }) => {
       store.reset();
       store.setRunning(true);
@@ -115,7 +124,36 @@ export function useDiscussionStream() {
     []
   );
 
-  return { startDiscussion, stopDiscussion, sendInterjection };
+  const sendStructuredInterjection = useCallback(
+    async (params: { content: string; controlType: DecisionControlType }) => {
+      const state = useDiscussionStore.getState();
+      if (!state.sessionId || !state.isRunning || !params.content.trim()) return false;
+
+      const response = await fetch(
+        `/api/sessions/${state.sessionId}/interjections`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content: params.content.trim(),
+            controlType: params.controlType,
+            phase: state.phase,
+            round: state.round,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(errText || `HTTP ${response.status}`);
+      }
+
+      return true;
+    },
+    []
+  );
+
+  return { startDiscussion, stopDiscussion, sendInterjection, sendStructuredInterjection };
 }
 
 function handleEvent(event: SSEEvent) {
@@ -163,7 +201,7 @@ function handleEvent(event: SSEEvent) {
 
     case 'discussion_complete':
       s.setRunning(false);
-      void hydrateUsageFromSession();
+      void hydrateSessionArtifactsFromSession();
       break;
 
     case 'user_interjection':
@@ -193,16 +231,23 @@ function handleEvent(event: SSEEvent) {
 
     case 'research_complete':
       if (event.content) {
-        s.setResearchStatus('complete');
+        s.setResearchStatus('completed');
         s.setResearchBriefText(event.content);
       } else {
         s.setResearchStatus('skipped');
       }
       break;
+
+    case 'research_failed':
+      s.setResearchStatus('failed');
+      if (event.content) {
+        s.setError(event.content);
+      }
+      break;
   }
 }
 
-async function hydrateUsageFromSession() {
+async function hydrateSessionArtifactsFromSession() {
   const sessionId = useDiscussionStore.getState().sessionId;
   if (!sessionId) return;
 
@@ -211,11 +256,15 @@ async function hydrateUsageFromSession() {
     if (!response.ok) return;
     const data = (await response.json()) as {
       session?: { usageInputTokens?: number; usageOutputTokens?: number };
+      decisionSummary?: import('@/lib/decision/types').DecisionSummary | null;
+      researchRun?: ResearchRunDetail | null;
     };
     useDiscussionStore.getState().setUsage({
       inputTokens: data.session?.usageInputTokens ?? 0,
       outputTokens: data.session?.usageOutputTokens ?? 0,
     });
+    useDiscussionStore.getState().setDecisionSummary(data.decisionSummary ?? null);
+    useDiscussionStore.getState().setResearchRun(data.researchRun ?? null);
   } catch {
     // ignore post-run usage hydration errors
   }
