@@ -181,7 +181,12 @@ export function getAgentDefinition(agentId: string): AgentDefinition | undefined
 }
 
 export function getModelId(agent: AgentDefinition, selectedModelId?: string): string {
-  if (selectedModelId) return selectedModelId;
+  // Validate stored model IDs against current availableModels — silently falls back
+  // to the agent default when a session was created with an old/migrated model ID
+  // (e.g. SiliconFlow-style "Pro/moonshotai/Kimi-K2.5" after Kimi moved to native API).
+  if (selectedModelId && agent.availableModels.some((m) => m.id === selectedModelId)) {
+    return selectedModelId;
+  }
   if (agent.envOverride && process.env[agent.envOverride]) {
     return process.env[agent.envOverride]!;
   }
