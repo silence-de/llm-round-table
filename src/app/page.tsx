@@ -2550,15 +2550,15 @@ export default function HomePage() {
         ───────────────────────────────────────────────────────────────── */}
         <div className="hidden xl:flex min-h-0 flex-col gap-2 overflow-hidden">
           {/* Tab switcher */}
-          <div className="shrink-0 flex gap-1 rounded-xl border rt-surface p-1">
+          <div className="shrink-0 flex border-b rt-border-soft gap-0">
             {(['context', 'history'] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setRightTab(tab)}
-                className={`flex-1 rounded-lg py-1.5 text-xs font-semibold capitalize transition-all ${
+                className={`flex flex-1 items-center justify-center py-2 text-xs font-medium capitalize transition-all border-b-2 -mb-px ${
                   rightTab === tab
-                    ? 'bg-[color-mix(in_srgb,var(--rt-live-state)_18%,transparent)] rt-text-strong'
-                    : 'rt-text-dim hover:rt-text-muted'
+                    ? 'border-[var(--rt-hh6-primary)] rt-text-strong'
+                    : 'border-transparent rt-text-dim hover:rt-text-muted'
                 }`}
               >
                 {tab === 'context' ? 'Context' : 'History'}
@@ -2809,7 +2809,9 @@ export default function HomePage() {
                       placeholder="Search topic, goal, status, template…"
                       className="rt-input h-8 text-xs"
                     />
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                      <span className="rt-eyebrow pl-0.5">Status</span>
+                      <span className="rt-eyebrow pl-0.5">Template</span>
                       <Select
                         value={historyStatusFilter}
                         onValueChange={(value) => {
@@ -2853,33 +2855,36 @@ export default function HomePage() {
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Select
-                        value={historyTimeRange}
-                        onValueChange={(value) => {
-                          if (!value) return;
-                          setHistoryTimeRange(value as typeof historyTimeRange);
-                        }}
-                      >
-                        <SelectTrigger className="rt-input h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all" className="text-xs">
-                            All time
-                          </SelectItem>
-                          <SelectItem value="7d" className="text-xs">
-                            Last 7 days
-                          </SelectItem>
-                          <SelectItem value="30d" className="text-xs">
-                            Last 30 days
-                          </SelectItem>
-                          <SelectItem value="90d" className="text-xs">
-                            Last 90 days
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <span className="text-[11px] rt-text-dim">
+                    <div className="flex items-end gap-2">
+                      <div className="flex flex-col gap-0.5 flex-1">
+                        <span className="rt-eyebrow pl-0.5">Time Range</span>
+                        <Select
+                          value={historyTimeRange}
+                          onValueChange={(value) => {
+                            if (!value) return;
+                            setHistoryTimeRange(value as typeof historyTimeRange);
+                          }}
+                        >
+                          <SelectTrigger className="rt-input h-8 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all" className="text-xs">
+                              All time
+                            </SelectItem>
+                            <SelectItem value="7d" className="text-xs">
+                              Last 7 days
+                            </SelectItem>
+                            <SelectItem value="30d" className="text-xs">
+                              Last 30 days
+                            </SelectItem>
+                            <SelectItem value="90d" className="text-xs">
+                              Last 90 days
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <span className="text-[11px] rt-text-dim pb-1.5">
                         {filteredSessions.length} / {sessions.length}
                       </span>
                     </div>
