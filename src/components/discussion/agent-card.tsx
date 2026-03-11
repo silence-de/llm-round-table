@@ -74,8 +74,15 @@ export function AgentCard({
               </div>
             </div>
             {message?.isStreaming && (
-              <span className="ml-auto text-xs rt-text-muted animate-pulse">
-                输出中...
+              <span className="ml-auto flex items-center gap-[3px]">
+                {[0, 1, 2].map((i) => (
+                  <motion.span
+                    key={i}
+                    className="inline-block h-1 w-1 rounded-full bg-current rt-text-muted"
+                    animate={{ opacity: [0.25, 1, 0.25] }}
+                    transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.18, ease: 'easeInOut' }}
+                  />
+                ))}
               </span>
             )}
           </CardTitle>
