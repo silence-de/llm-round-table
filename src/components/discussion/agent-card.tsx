@@ -28,8 +28,11 @@ export function AgentCard({
 
   useEffect(() => {
     if (!message?.isStreaming) return;
-    if (!viewportRef.current) return;
-    viewportRef.current.scrollTop = viewportRef.current.scrollHeight;
+    const el = viewportRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    });
   }, [message?.content, message?.isStreaming]);
 
   return (
