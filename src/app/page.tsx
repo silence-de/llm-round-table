@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/select';
 import { useDiscussionStore } from '@/stores/discussion-store';
 import { useDiscussionStream } from '@/hooks/use-discussion-stream';
+import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { PhaseIndicator } from '@/components/discussion/phase-indicator';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { RoundTableStage } from '@/components/discussion/round-table-stage';
@@ -953,6 +954,25 @@ export default function HomePage() {
     setReplayStatus('idle');
     setReplayCursor(Math.max(0, replayableMessages.length - 1));
   }, [replayableMessages.length, setReplayCursor, setReplayStatus]);
+
+  const handleEscape = useCallback(() => {
+    (document.activeElement as HTMLElement | null)?.blur();
+  }, []);
+
+  const handleSpacePause = useCallback(() => {
+    if (isRunning) {
+      stopDiscussion();
+    } else if (replay.status === 'playing') {
+      pauseReplay();
+    } else if (historyDetail) {
+      startReplay();
+    }
+  }, [isRunning, stopDiscussion, replay.status, pauseReplay, startReplay, historyDetail]);
+
+  useKeyboardShortcuts(
+    { onTogglePause: handleSpacePause, onEscape: handleEscape },
+    true
+  );
 
   // ── Stage props helper ───────────────────────────────────────────────────
 
@@ -2345,6 +2365,51 @@ export default function HomePage() {
               />
             )}
           </div>
+
+          {/* Phase Progress Bar */}
+          {(isRunning || feedMessages.length > 0) && (() => {
+            const phaseOrder: Record<string, number> = { research: 0, opening: 1, round: 2, summary: 3 };
+            const curStep: string =
+              phase === 'research' ? 'research'
+              : phase === 'opening' ? 'opening'
+              : (phase === 'summary' || phase === 'completed' || phase === 'closing') ? 'summary'
+              : 'round';
+            return (
+              <div className="shrink-0 flex items-center px-1 py-1.5">
+                {(['research', 'opening', 'round', 'summary'] as const).map((step, i) => {
+                  const isDone = phaseOrder[step] < (phaseOrder[curStep] ?? 0);
+                  const isActive = step === curStep;
+                  const label =
+                    step === 'round' ? `第${round + 1}轮`
+                    : step === 'research' ? '检索'
+                    : step === 'opening' ? '开场'
+                    : '总结';
+                  return (
+                    <React.Fragment key={step}>
+                      {i > 0 && (
+                        <div
+                          className={`h-px flex-1 transition-colors duration-500 ${
+                            isDone || isActive ? 'bg-[var(--rt-live-state)]' : 'bg-[var(--rt-border-soft)]'
+                          }`}
+                        />
+                      )}
+                      <div
+                        className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all duration-300 ${
+                          isActive
+                            ? 'bg-[color-mix(in_srgb,var(--rt-live-state)_18%,transparent)] text-[var(--rt-live-state)] border border-[color-mix(in_srgb,var(--rt-live-state)_40%,transparent)]'
+                            : isDone
+                            ? 'rt-text-dim'
+                            : 'rt-text-dim opacity-40'
+                        }`}
+                      >
+                        {label}
+                      </div>
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           {/* Discussion Feed */}
           <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border rt-surface">
