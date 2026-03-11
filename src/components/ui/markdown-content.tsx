@@ -25,12 +25,12 @@ const components: Components = {
 
   // ── Paragraph ─────────────────────────────────────────────────────────────
   p: ({ children }) => (
-    <p className="mb-2 last:mb-0 leading-7 rt-text-strong">{children}</p>
+    <p className="mb-4 last:mb-0 leading-7 rt-text-strong">{children}</p>
   ),
 
   // ── Strong / Em ───────────────────────────────────────────────────────────
   strong: ({ children }) => (
-    <strong className="font-semibold rt-text-strong">{children}</strong>
+    <strong className="font-semibold text-[var(--rt-hh6-primary)]">{children}</strong>
   ),
   em: ({ children }) => (
     <em className="italic rt-text-muted">{children}</em>
@@ -51,7 +51,7 @@ const components: Components = {
   code: ({ inline, children, ...props }: { inline?: boolean; children?: React.ReactNode; className?: string }) =>
     inline ? (
       <code
-        className="rounded px-1 py-0.5 font-mono text-[0.82em] bg-[color-mix(in_srgb,var(--rt-live-state)_14%,transparent)] rt-text-strong"
+        className="rounded px-1.5 py-0.5 font-mono text-[0.82em] bg-[color-mix(in_srgb,var(--rt-hh6-primary)_15%,transparent)] text-[var(--rt-hh6-primary)] border border-[color-mix(in_srgb,var(--rt-hh6-primary)_20%,transparent)]"
         {...props}
       >
         {children}
@@ -178,13 +178,10 @@ function preprocessMarkdown(text: string): string {
 }
 
 export function MarkdownContent({ content, streaming, className }: MarkdownContentProps) {
-  // Append block cursor character during streaming so it flows naturally inside
-  // the last rendered paragraph rather than needing a separate DOM element.
-  const raw = streaming ? `${content}▋` : content;
-  const text = preprocessMarkdown(raw);
+  const text = preprocessMarkdown(content);
 
   return (
-    <div className={className}>
+    <div className={streaming ? `rt-streaming-caret${className ? ` ${className}` : ''}` : className}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {text}
       </ReactMarkdown>
