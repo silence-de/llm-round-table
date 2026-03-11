@@ -1,7 +1,8 @@
 'use client';
 
-import { useRef, useEffect, useCallback, type UIEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, type UIEvent } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { MessageSquare, Copy, Check } from 'lucide-react';
 import { MarkdownContent } from '@/components/ui/markdown-content';
 import { PixelAgentAvatar } from '@/components/discussion/pixel-agent-avatar';
 
@@ -47,6 +48,24 @@ function phaseOrder(phase: string): number {
   return 50;
 }
 
+// ─── Typing indicator ─────────────────────────────────────────────────────────
+
+function TypingDots({ color }: { color: string }) {
+  return (
+    <div className="flex items-center gap-1 py-1">
+      {[0, 1, 2].map((i) => (
+        <motion.span
+          key={i}
+          className="h-1.5 w-1.5 rounded-full"
+          style={{ backgroundColor: color }}
+          animate={{ opacity: [0.3, 1, 0.3], y: [0, -3, 0] }}
+          transition={{ duration: 0.9, repeat: Infinity, delay: i * 0.18 }}
+        />
+      ))}
+    </div>
+  );
+}
+
 // ─── Feed component ────────────────────────────────────────────────────────────
 
 export function DiscussionFeed({
@@ -80,7 +99,10 @@ export function DiscussionFeed({
   return (
     <div className={`overflow-y-auto ${className}`} onScroll={handleScroll}>
       {messages.length === 0 ? (
-        <div className="flex h-full min-h-[200px] items-center justify-center">
+        <div className="flex h-full min-h-[200px] flex-col items-center justify-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl border rt-surface rt-border-soft">
+            <MessageSquare className="h-5 w-5 rt-text-dim" />
+          </div>
           <p className="text-sm rt-text-dim">{emptyLabel}</p>
         </div>
       ) : (
@@ -168,6 +190,35 @@ function LiveDot({ color }: { color: string }) {
   );
 }
 
+// ─── Copy button ──────────────────────────────────────────────────────────────
+
+function CopyButton({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleCopy = () => {
+    if (!navigator.clipboard) return;
+    void navigator.clipboard.writeText(content).then(() => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      setCopied(true);
+      timerRef.current = setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="absolute -top-1.5 right-2 flex h-6 w-6 items-center justify-center rounded-md border rt-surface opacity-0 group-hover:opacity-100 transition-opacity z-10"
+      aria-label="Copy message"
+      title="Copy message"
+    >
+      {copied
+        ? <Check className="h-3 w-3 text-[var(--rt-live-state)]" />
+        : <Copy className="h-3 w-3 rt-text-dim" />}
+    </button>
+  );
+}
+
 // ─── Individual message bubble ────────────────────────────────────────────────
 
 function FeedBubble({
@@ -203,22 +254,29 @@ function FeedBubble({
             {message.isStreaming && <LiveDot color={accentColor} />}
           </div>
         )}
-        <div
-          className={[
-            'px-4 py-3 text-sm border-l-2',
-            'border-l-[color-mix(in_srgb,var(--rt-hh6-primary)_35%,transparent)]',
-            'bg-[color-mix(in_srgb,var(--rt-hh6-primary)_5%,transparent)]',
-            showHeader ? 'rounded-tr-2xl rounded-br-xl' : 'rounded-r-xl',
-            roundBottom ? 'rounded-br-2xl' : '',
-          ]
-            .filter(Boolean)
-            .join(' ')}
-        >
-          <MarkdownContent
-            content={message.content}
-            streaming={message.isStreaming}
-            className="text-sm"
-          />
+        <div className="relative group">
+          <div
+            className={[
+              'px-4 py-3 text-sm border-l-2',
+              'border-l-[color-mix(in_srgb,var(--rt-hh6-primary)_35%,transparent)]',
+              'bg-[color-mix(in_srgb,var(--rt-hh6-primary)_5%,transparent)]',
+              showHeader ? 'rounded-tr-2xl rounded-br-xl' : 'rounded-r-xl',
+              roundBottom ? 'rounded-br-2xl' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+          >
+            {message.isStreaming && message.content.length === 0 ? (
+              <TypingDots color="var(--rt-hh6-primary)" />
+            ) : (
+              <MarkdownContent
+                content={message.content}
+                streaming={message.isStreaming}
+                className="text-sm"
+              />
+            )}
+          </div>
+          <CopyButton content={message.content} />
         </div>
       </div>
     );
@@ -264,23 +322,30 @@ function FeedBubble({
           </div>
         )}
 
-        <div
-          className={[
-            'px-4 py-3 text-sm rt-surface border',
-            showHeader ? 'rounded-t-2xl' : 'rounded-t-sm',
-            roundBottom ? 'rounded-b-2xl' : 'rounded-b-sm',
-            message.isStreaming
-              ? 'shadow-[0_0_12px_color-mix(in_srgb,var(--rt-live-state)_18%,transparent)]'
-              : '',
-          ]
-            .filter(Boolean)
-            .join(' ')}
-        >
-          <MarkdownContent
-            content={message.content}
-            streaming={message.isStreaming}
-            className="text-sm"
-          />
+        <div className="relative group">
+          <div
+            className={[
+              'px-4 py-3 text-sm rt-surface border',
+              showHeader ? 'rounded-t-2xl' : 'rounded-t-sm',
+              roundBottom ? 'rounded-b-2xl' : 'rounded-b-sm',
+              message.isStreaming
+                ? 'shadow-[0_0_12px_color-mix(in_srgb,var(--rt-live-state)_18%,transparent)]'
+                : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+          >
+            {message.isStreaming && message.content.length === 0 ? (
+              <TypingDots color={accentColor} />
+            ) : (
+              <MarkdownContent
+                content={message.content}
+                streaming={message.isStreaming}
+                className="text-sm"
+              />
+            )}
+          </div>
+          <CopyButton content={message.content} />
         </div>
       </div>
     </div>
