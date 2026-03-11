@@ -2245,8 +2245,8 @@ export default function HomePage() {
         <div className="flex min-h-0 flex-col gap-2 overflow-hidden">
           {/* Feed header */}
           <div className="shrink-0 space-y-1.5">
-            <div className="flex items-center gap-2 px-0.5">
-              <h2 className="min-w-0 flex-1 truncate text-base font-semibold rt-text-strong">
+            <div className="flex items-center gap-2 border-b rt-border-soft px-1 py-2">
+              <h2 className="min-w-0 flex-1 truncate text-sm font-semibold rt-text-strong">
                 {historyDetail
                   ? historyDetail.session.topic
                   : isRunning
