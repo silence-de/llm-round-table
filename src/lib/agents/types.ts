@@ -1,4 +1,9 @@
-export type ProviderType = 'anthropic' | 'openai' | 'siliconflow';
+export type ProviderType =
+  | 'anthropic'
+  | 'openai'
+  | 'siliconflow'
+  | 'deepseek'
+  | 'moonshot';
 
 export interface ModelOption {
   id: string;

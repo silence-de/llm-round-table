@@ -299,6 +299,80 @@ test('orchestrator persists guided research run and uses stable source ids', asy
   }
 });
 
+test('orchestrator marks agent as degraded after timeout-like errors', async () => {
+  process.env.ROUND_TABLE_AGENT_DEGRADE_TIMEOUT_THRESHOLD = '1';
+  installFakeProviders(
+    new FakeProvider({
+      streamChat: async function* (params) {
+        if (params.messages[0]?.content.includes('请就以下议题发表你的观点')) {
+          yield {
+            type: 'error',
+            content: 'Agent timed out',
+            errorCode: 'startup_timeout',
+            timeoutType: 'startup',
+          };
+          return;
+        }
+
+        if (params.messages[0]?.content.includes('会议纪要')) {
+          yield* streamText('# 圆桌讨论纪要');
+          return;
+        }
+
+        yield* streamText('主持人继续');
+      },
+      chat: async () => ({
+        content: JSON.stringify({
+          agreements: [],
+          disagreements: [],
+          shouldConverge: true,
+          moderatorNarrative: '进入总结。',
+        }),
+        usage: { inputTokens: 10, outputTokens: 14 },
+      }),
+    })
+  );
+
+  const sessionEvents: Array<{ type: string; timeoutType?: string; agentId?: string }> =
+    [];
+  const events = [];
+  const orchestrator = new DiscussionOrchestrator({
+    sessionId: 'orchestrator-degrade',
+    topic: 'degrade test',
+    brief: {
+      ...DEFAULT_DECISION_BRIEF,
+      topic: 'degrade test',
+    },
+    agenda: DEFAULT_DISCUSSION_AGENDA,
+    researchConfig: DEFAULT_RESEARCH_CONFIG,
+    agents: buildAgents(),
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 1,
+    shouldStop: () => false,
+    onSessionEventPersist: async (event) => {
+      sessionEvents.push({
+        type: event.type,
+        timeoutType: event.timeoutType,
+        agentId: event.agentId,
+      });
+    },
+  });
+
+  for await (const event of orchestrator.run()) {
+    events.push(event);
+  }
+
+  assert.equal(events.some((event) => event.type === 'agent_degraded'), true);
+  assert.equal(
+    sessionEvents.some((event) => event.type === 'timeout' && event.timeoutType === 'startup'),
+    true
+  );
+  assert.equal(
+    sessionEvents.some((event) => event.type === 'agent_degraded' && event.agentId === 'gpt'),
+    true
+  );
+});
+
 function buildAgents(): SessionAgent[] {
   return [{ definition: claude }, { definition: gpt }];
 }

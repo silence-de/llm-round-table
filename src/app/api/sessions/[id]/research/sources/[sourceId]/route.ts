@@ -1,7 +1,8 @@
+import { apiError } from '@/lib/api/errors';
 import { NextResponse } from 'next/server';
 import {
   getSessionResearch,
-  updateResearchSourceSelection,
+  updateResearchSource,
 } from '@/lib/db/repository';
 
 export async function PATCH(
@@ -11,19 +12,38 @@ export async function PATCH(
   }: { params: Promise<{ id: string; sourceId: string }> }
 ) {
   const { id, sourceId } = await params;
-  const body = (await req.json()) as { selected?: boolean };
-  if (typeof body.selected !== 'boolean') {
-    return NextResponse.json({ error: 'selected is required' }, { status: 400 });
+  const body = (await req.json()) as {
+    selected?: boolean;
+    pinned?: boolean;
+    excludedReason?: string;
+    rank?: number;
+  };
+  const hasPatch =
+    body.selected !== undefined ||
+    body.pinned !== undefined ||
+    body.excludedReason !== undefined ||
+    body.rank !== undefined;
+  if (!hasPatch) {
+    return apiError(
+      400,
+      'INVALID_INPUT',
+      'at least one source field is required'
+    );
   }
 
   const run = await getSessionResearch(id);
   if (!run) {
-    return NextResponse.json({ error: 'research not found' }, { status: 404 });
+    return apiError(404, 'NOT_FOUND', 'research not found');
   }
 
-  const updated = await updateResearchSourceSelection(id, sourceId, body.selected);
+  const updated = await updateResearchSource(id, sourceId, {
+    selected: body.selected,
+    pinned: body.pinned,
+    excludedReason: body.excludedReason,
+    rank: body.rank,
+  });
   if (!updated) {
-    return NextResponse.json({ error: 'source not found' }, { status: 404 });
+    return apiError(404, 'NOT_FOUND', 'source not found');
   }
 
   return NextResponse.json(updated);

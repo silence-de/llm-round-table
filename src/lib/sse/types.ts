@@ -4,11 +4,13 @@ export type SSEEventType =
   | 'agent_token'
   | 'agent_done'
   | 'agent_error'
+  | 'agent_degraded'
   | 'moderator_start'
   | 'moderator_token'
   | 'moderator_done'
   | 'user_interjection'
   | 'discussion_complete'
+  | 'resume_snapshot'
   | 'research_start'
   | 'research_result'
   | 'research_complete'
@@ -20,6 +22,7 @@ export interface SSEEvent {
   phase?: string;
   content?: string;
   round?: number;
+  meta?: Record<string, unknown>;
   timestamp: number;
 }
 

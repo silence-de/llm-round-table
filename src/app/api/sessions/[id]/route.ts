@@ -1,3 +1,4 @@
+import { apiError } from '@/lib/api/errors';
 import { NextResponse } from 'next/server';
 import {
   deleteSession,
@@ -13,7 +14,7 @@ export async function GET(
   const { id } = await params;
   const data = await getSessionDetail(id);
   if (!data) {
-    return NextResponse.json({ error: 'not found' }, { status: 404 });
+    return apiError(404, 'NOT_FOUND', 'not found');
   }
   return NextResponse.json(data);
 }
@@ -36,11 +37,13 @@ export async function PATCH(
     decisionStatus?: string;
     retrospectiveNote?: string;
     outcomeSummary?: string;
+    actualOutcome?: string;
+    outcomeConfidence?: number;
   };
 
   const detail = await getSessionDetail(id);
   if (!detail) {
-    return NextResponse.json({ error: 'not found' }, { status: 404 });
+    return apiError(404, 'NOT_FOUND', 'not found');
   }
 
   const decisionStatus =
@@ -51,6 +54,8 @@ export async function PATCH(
     decisionStatus,
     retrospectiveNote: body.retrospectiveNote,
     outcomeSummary: body.outcomeSummary,
+    actualOutcome: body.actualOutcome,
+    outcomeConfidence: body.outcomeConfidence,
   });
   return NextResponse.json({
     ok: true,

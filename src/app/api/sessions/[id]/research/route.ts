@@ -1,5 +1,7 @@
+import { apiError } from '@/lib/api/errors';
 import { NextResponse } from 'next/server';
 import {
+  appendSessionEvent,
   getSessionDetail,
   getSessionResearch,
   replaceResearchSources,
@@ -15,7 +17,7 @@ export async function POST(
   const { id } = await params;
   const detail = await getSessionDetail(id);
   if (!detail) {
-    return NextResponse.json({ error: 'not found' }, { status: 404 });
+    return apiError(404, 'NOT_FOUND', 'not found');
   }
 
   const body = (await req.json().catch(() => ({}))) as {
@@ -29,9 +31,20 @@ export async function POST(
   );
 
   if (!config.enabled) {
-    return NextResponse.json(
-      { error: 'research is disabled for this session' },
-      { status: 400 }
+    return apiError(
+      400,
+      'INVALID_INPUT',
+      'research is disabled for this session'
+    );
+  }
+
+  const rerunCount = detail.researchRun?.rerunCount ?? 0;
+  if (rerunCount >= config.maxReruns) {
+    return apiError(
+      429,
+      'RATE_LIMITED',
+      `research rerun limit reached (${config.maxReruns})`,
+      { maxReruns: config.maxReruns, rerunCount }
     );
   }
 
@@ -42,6 +55,7 @@ export async function POST(
       searchConfig: config,
       summary: '',
       evaluation: null,
+      incrementRerunCount: true,
     });
 
     const result = await conductResearch({
@@ -76,6 +90,21 @@ export async function POST(
       evaluation: result.evaluation,
     });
     await replaceResearchSources(runId, result.sources);
+    if (result.status === 'partial' || result.status === 'failed') {
+      await appendSessionEvent(id, {
+        type: 'provider_error',
+        phase: 'research',
+        message:
+          result.status === 'partial'
+            ? 'research rerun partially completed'
+            : 'research rerun failed',
+        metadata: {
+          status: result.status,
+          queryPlanLength: result.queryPlan.length,
+          sourceCount: result.sources.length,
+        },
+      });
+    }
 
     const refreshed = await getSessionResearch(id);
     return NextResponse.json(refreshed);
@@ -95,15 +124,20 @@ export async function POST(
             ? error.message
             : 'research rerun failed',
         ],
+        staleFlags: ['no_sources'],
       },
     });
+    await appendSessionEvent(id, {
+      type: 'provider_error',
+      phase: 'research',
+      message: error instanceof Error ? error.message : 'research rerun failed',
+      metadata: { status: 'failed' },
+    });
 
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : 'research rerun failed',
-      },
-      { status: 502 }
+    return apiError(
+      502,
+      'PROVIDER_UNAVAILABLE',
+      error instanceof Error ? error.message : 'research rerun failed'
     );
   }
 }

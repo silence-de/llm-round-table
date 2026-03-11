@@ -10,6 +10,9 @@ import type { ChatParams, ChatResponse, LLMProvider, StreamChunk } from '@/lib/l
 export function resetTestDatabase() {
   sqliteDb.exec(`
     DELETE FROM action_items;
+    DELETE FROM claim_source_links;
+    DELETE FROM decision_claims;
+    DELETE FROM session_events;
     DELETE FROM interjections;
     DELETE FROM messages;
     DELETE FROM minutes;
@@ -26,7 +29,10 @@ export function resetTestEnvironment() {
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.OPENAI_API_KEY;
   delete process.env.SILICONFLOW_API_KEY;
+  delete process.env.DEEPSEEK_API_KEY;
+  delete process.env.MOONSHOT_API_KEY;
   delete process.env.TAVILY_API_KEY;
+  delete process.env.ROUND_TABLE_AGENT_DEGRADE_TIMEOUT_THRESHOLD;
 }
 
 export function cleanupTestDatabaseFile() {
@@ -80,6 +86,8 @@ export function installFakeProviders(provider: LLMProvider) {
   setProviderOverrideForTests('anthropic', provider);
   setProviderOverrideForTests('openai', provider);
   setProviderOverrideForTests('siliconflow', provider);
+  setProviderOverrideForTests('deepseek', provider);
+  setProviderOverrideForTests('moonshot', provider);
 }
 
 export async function* streamText(text: string): AsyncIterable<StreamChunk> {

@@ -1,3 +1,4 @@
+import { apiError } from '@/lib/api/errors';
 import { NextResponse } from 'next/server';
 import {
   appendMessage,
@@ -24,18 +25,20 @@ export async function POST(
 
   const content = body.content?.trim();
   if (!content) {
-    return NextResponse.json({ error: 'content required' }, { status: 400 });
+    return apiError(400, 'INVALID_INPUT', 'content required');
   }
 
   const status = await getSessionStatus(id);
   if (!status) {
-    return NextResponse.json({ error: 'session not found' }, { status: 404 });
+    return apiError(404, 'NOT_FOUND', 'session not found');
   }
 
   if (status !== 'running') {
-    return NextResponse.json(
-      { error: `session is not running (current: ${status})` },
-      { status: 409 }
+    return apiError(
+      409,
+      'CONFLICT',
+      `session is not running (current: ${status})`,
+      { status }
     );
   }
 

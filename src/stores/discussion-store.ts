@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { ResearchRunDetail, ResearchSource } from '@/lib/search/types';
 import type { ActionItem, DecisionSummary } from '@/lib/decision/types';
+import type { DiscussionResumeSnapshot } from '@/lib/orchestrator/types';
 
 export interface AgentMessage {
   agentId: string;
@@ -37,6 +38,8 @@ interface DiscussionState {
     outcomeSummary: string;
   };
   error: string | null;
+  resumeSnapshot: DiscussionResumeSnapshot | null;
+  degradedAgents: string[];
   research: {
     status: ResearchStatus;
     sources: ResearchSource[];
@@ -60,6 +63,8 @@ interface DiscussionState {
   setRound: (round: number) => void;
   setRunning: (running: boolean) => void;
   setError: (error: string | null) => void;
+  setResumeSnapshot: (snapshot: DiscussionResumeSnapshot | null) => void;
+  addDegradedAgent: (agentId: string) => void;
   setStageMode: (mode: StageMode) => void;
   setAutoScroll: (mode: AutoScrollMode) => void;
   setActiveSpeakerId: (agentId: string | null) => void;
@@ -101,6 +106,8 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
     outcomeSummary: '',
   },
   error: null,
+  resumeSnapshot: null,
+  degradedAgents: [],
   research: {
     status: 'idle',
     sources: [],
@@ -134,6 +141,13 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
       },
     })),
   setError: (error) => set({ error }),
+  setResumeSnapshot: (snapshot) => set({ resumeSnapshot: snapshot }),
+  addDegradedAgent: (agentId) =>
+    set((state) => ({
+      degradedAgents: state.degradedAgents.includes(agentId)
+        ? state.degradedAgents
+        : [...state.degradedAgents, agentId],
+    })),
   setStageMode: (mode) =>
     set((state) => ({
       ui: { ...state.ui, stageMode: mode },
@@ -324,6 +338,8 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
         outcomeSummary: '',
       },
       error: null,
+      resumeSnapshot: null,
+      degradedAgents: [],
       research: {
         status: 'idle',
         sources: [],

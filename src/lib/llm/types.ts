@@ -23,6 +23,8 @@ export interface ChatResponse {
 export interface StreamChunk {
   type: 'text_delta' | 'done' | 'error';
   content: string;
+  errorCode?: 'provider_error' | 'startup_timeout' | 'idle_timeout' | 'request_timeout';
+  timeoutType?: 'startup' | 'idle' | 'request';
 }
 
 export interface LLMProvider {

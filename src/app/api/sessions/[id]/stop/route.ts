@@ -1,3 +1,4 @@
+import { apiError } from '@/lib/api/errors';
 import { NextResponse } from 'next/server';
 import { getSessionStatus, requestSessionStop } from '@/lib/db/repository';
 
@@ -8,7 +9,7 @@ export async function POST(
   const { id } = await params;
   const status = await getSessionStatus(id);
   if (!status) {
-    return NextResponse.json({ error: 'session not found' }, { status: 404 });
+    return apiError(404, 'NOT_FOUND', 'session not found');
   }
   if (status !== 'running') {
     return NextResponse.json(

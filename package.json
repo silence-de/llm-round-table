@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-transform-types --import ./test/register-hooks.mjs --test --test-concurrency=1 test/*.test.ts"
+    "test": "node --experimental-transform-types --import ./test/register-hooks.mjs --test --test-concurrency=1 test/*.test.ts",
+    "test:smoke-api": "node --experimental-transform-types --import ./test/register-hooks.mjs --test --test-concurrency=1 test/smoke-api.test.ts",
+    "gate": "npm run test && npm run lint && npm run build && npm run test:smoke-api"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",

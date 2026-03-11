@@ -58,9 +58,9 @@ export const AGENT_CATALOG: AgentDefinition[] = [
   {
     id: 'deepseek',
     displayName: 'DeepSeek',
-    provider: 'siliconflow',
-    modelId: 'Pro/deepseek-ai/DeepSeek-V3.2',
-    envKeyName: 'SILICONFLOW_API_KEY',
+    provider: 'deepseek',
+    modelId: 'deepseek-chat',
+    envKeyName: 'DEEPSEEK_API_KEY',
     envOverride: 'DEEPSEEK_MODEL_ID',
     defaultTemperature: 0.7,
     maxTokens: 4096,
@@ -74,10 +74,8 @@ export const AGENT_CATALOG: AgentDefinition[] = [
       'contrarian',
     ],
     availableModels: [
-      { id: 'Pro/deepseek-ai/DeepSeek-V3.2', label: 'DeepSeek-V3.2 (Pro)' },
-      { id: 'deepseek-ai/DeepSeek-V3.2', label: 'DeepSeek-V3.2' },
-      { id: 'Pro/deepseek-ai/DeepSeek-R1.2', label: 'DeepSeek-R1.2 (Pro)' },
-      { id: 'deepseek-ai/DeepSeek-R1.2', label: 'DeepSeek-R1.2' },
+      { id: 'deepseek-chat', label: 'DeepSeek Chat' },
+      { id: 'deepseek-reasoner', label: 'DeepSeek Reasoner' },
     ],
   },
   {
@@ -107,9 +105,9 @@ export const AGENT_CATALOG: AgentDefinition[] = [
   {
     id: 'kimi',
     displayName: 'Kimi',
-    provider: 'siliconflow',
-    modelId: 'Pro/moonshotai/Kimi-K2.5',
-    envKeyName: 'SILICONFLOW_API_KEY',
+    provider: 'moonshot',
+    modelId: 'kimi-k2.5',
+    envKeyName: 'MOONSHOT_API_KEY',
     envOverride: 'KIMI_MODEL_ID',
     defaultTemperature: 0.7,
     maxTokens: 4096,
@@ -123,9 +121,7 @@ export const AGENT_CATALOG: AgentDefinition[] = [
       'execution-coach',
     ],
     availableModels: [
-      { id: 'Pro/moonshotai/Kimi-K2.5', label: 'Kimi-K2.5 (Pro)' },
-      { id: 'moonshotai/Kimi-K2.5', label: 'Kimi-K2.5' },
-      { id: 'Pro/moonshotai/Kimi-K1.5-Thinking', label: 'Kimi-K1.5-Thinking (Pro)' },
+      { id: 'kimi-k2.5', label: 'Kimi K2.5' },
     ],
   },
   {

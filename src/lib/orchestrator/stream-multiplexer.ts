@@ -4,7 +4,8 @@ import type { SSEEvent } from '../sse/types';
 interface AgentStream {
   agentId: string;
   stream: AsyncIterable<StreamChunk>;
-  timeoutMs?: number;
+  startupTimeoutMs?: number;
+  idleTimeoutMs?: number;
 }
 
 export async function* multiplexStreams(
@@ -16,21 +17,21 @@ export async function* multiplexStreams(
   };
 
   const iterators = new Map<string, AsyncIterator<StreamChunk>>();
-  const timeouts = new Map<string, number | undefined>();
+  const startupTimeouts = new Map<string, number | undefined>();
+  const idleTimeouts = new Map<string, number | undefined>();
   const pending = new Map<string, Promise<PendingResult>>();
+  const hasStarted = new Set<string>();
 
   // Initialize all iterators
-  for (const { agentId, stream, timeoutMs } of agentStreams) {
+  for (const { agentId, stream, startupTimeoutMs, idleTimeoutMs } of agentStreams) {
     const iterator = stream[Symbol.asyncIterator]();
     iterators.set(agentId, iterator);
-    timeouts.set(agentId, timeoutMs);
+    startupTimeouts.set(agentId, startupTimeoutMs);
+    idleTimeouts.set(agentId, idleTimeoutMs);
 
     yield { type: 'agent_start', agentId, timestamp: Date.now() };
 
-    pending.set(
-      agentId,
-      nextWithTimeout(agentId, iterator, timeouts.get(agentId))
-    );
+    pending.set(agentId, nextWithTimeout(agentId, iterator, startupTimeouts.get(agentId), 'startup'));
   }
 
   // Race all streams and yield events as they arrive
@@ -46,6 +47,7 @@ export async function* multiplexStreams(
     const chunk = result.value;
 
     if (chunk.type === 'text_delta') {
+      hasStarted.add(agentId);
       yield {
         type: 'agent_token',
         agentId,
@@ -57,6 +59,7 @@ export async function* multiplexStreams(
         type: 'agent_error',
         agentId,
         content: chunk.content,
+        meta: toErrorMeta(chunk),
         timestamp: Date.now(),
       };
       pending.delete(agentId);
@@ -71,7 +74,14 @@ export async function* multiplexStreams(
     const iterator = iterators.get(agentId)!;
     pending.set(
       agentId,
-      nextWithTimeout(agentId, iterator, timeouts.get(agentId))
+      nextWithTimeout(
+        agentId,
+        iterator,
+        hasStarted.has(agentId)
+          ? idleTimeouts.get(agentId)
+          : startupTimeouts.get(agentId),
+        hasStarted.has(agentId) ? 'idle' : 'startup'
+      )
     );
   }
 }
@@ -79,7 +89,8 @@ export async function* multiplexStreams(
 async function nextWithTimeout(
   agentId: string,
   iterator: AsyncIterator<StreamChunk>,
-  timeoutMs?: number
+  timeoutMs?: number,
+  timeoutType: 'startup' | 'idle' | 'request' = 'request'
 ): Promise<{ agentId: string; result: IteratorResult<StreamChunk> }> {
   if (!timeoutMs || timeoutMs <= 0) {
     const result = await iterator.next();
@@ -92,13 +103,20 @@ async function nextWithTimeout(
         resolve({
           agentId,
           result: {
-            done: false,
-            value: {
-              type: 'error',
-              content: `Agent timed out after ${Math.round(timeoutMs / 1000)}s`,
+              done: false,
+              value: {
+                type: 'error',
+                content: `Agent timed out after ${Math.round(timeoutMs / 1000)}s`,
+                errorCode:
+                  timeoutType === 'startup'
+                    ? 'startup_timeout'
+                    : timeoutType === 'idle'
+                      ? 'idle_timeout'
+                      : 'request_timeout',
+                timeoutType,
+              },
             },
-          },
-        });
+          });
       }, timeoutMs);
 
       iterator
@@ -116,6 +134,7 @@ async function nextWithTimeout(
               value: {
                 type: 'error',
                 content: error instanceof Error ? error.message : String(error),
+                errorCode: 'provider_error',
               },
             },
           });
@@ -124,4 +143,12 @@ async function nextWithTimeout(
   );
 
   return timeoutResult;
+}
+
+function toErrorMeta(chunk: StreamChunk): Record<string, unknown> | undefined {
+  if (!chunk.errorCode && !chunk.timeoutType) return undefined;
+  return {
+    ...(chunk.errorCode ? { errorCode: chunk.errorCode } : {}),
+    ...(chunk.timeoutType ? { timeoutType: chunk.timeoutType } : {}),
+  };
 }

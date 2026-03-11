@@ -39,6 +39,7 @@ export class AnthropicProvider implements LLMProvider {
       yield {
         type: 'error',
         content: error instanceof Error ? error.message : String(error),
+        errorCode: 'provider_error',
       };
     }
   }

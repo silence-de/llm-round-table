@@ -12,10 +12,10 @@ export class SiliconFlowProvider implements LLMProvider {
     this.client = new OpenAI({
       apiKey: process.env.SILICONFLOW_API_KEY,
       baseURL: 'https://api.siliconflow.cn/v1',
-      timeout: 90_000, // 90s — large models (Qwen 397B) can be slow
+      timeout: Number(process.env.SILICONFLOW_CLIENT_TIMEOUT_MS ?? 240_000),
       maxRetries: 1,
     });
-    this.maxConcurrent = Number(process.env.SILICONFLOW_MAX_CONCURRENCY ?? 2);
+    this.maxConcurrent = Number(process.env.SILICONFLOW_MAX_CONCURRENCY ?? 1);
   }
 
   async *streamChat(params: ChatParams): AsyncIterable<StreamChunk> {
@@ -58,6 +58,7 @@ export class SiliconFlowProvider implements LLMProvider {
       yield {
         type: 'error',
         content: error instanceof Error ? error.message : String(error),
+        errorCode: 'provider_error',
       };
     }
   }
@@ -103,9 +104,9 @@ export class SiliconFlowProvider implements LLMProvider {
 
   private getTimeoutMs(modelId: string): number {
     if (/qwen/i.test(modelId)) {
-      return Number(process.env.SILICONFLOW_QWEN_TIMEOUT_MS ?? 45_000);
+      return Number(process.env.SILICONFLOW_QWEN_TIMEOUT_MS ?? 240_000);
     }
-    return Number(process.env.SILICONFLOW_TIMEOUT_MS ?? 75_000);
+    return Number(process.env.SILICONFLOW_TIMEOUT_MS ?? 180_000);
   }
 
   private async acquireSlot() {

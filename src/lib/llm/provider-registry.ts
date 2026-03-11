@@ -1,9 +1,16 @@
 import type { LLMProvider } from './types';
 import { AnthropicProvider } from './anthropic-provider';
+import { DeepSeekProvider } from './deepseek-provider';
+import { MoonshotProvider } from './moonshot-provider';
 import { OpenAIProvider } from './openai-provider';
 import { SiliconFlowProvider } from './siliconflow-provider';
 
-type ProviderType = 'anthropic' | 'openai' | 'siliconflow';
+type ProviderType =
+  | 'anthropic'
+  | 'openai'
+  | 'siliconflow'
+  | 'deepseek'
+  | 'moonshot';
 
 const providers = new Map<ProviderType, LLMProvider>();
 const providerOverrides = new Map<ProviderType, LLMProvider>();
@@ -25,6 +32,12 @@ export function getProvider(type: ProviderType): LLMProvider {
         break;
       case 'siliconflow':
         provider = new SiliconFlowProvider();
+        break;
+      case 'deepseek':
+        provider = new DeepSeekProvider();
+        break;
+      case 'moonshot':
+        provider = new MoonshotProvider();
         break;
     }
     providers.set(type, provider);

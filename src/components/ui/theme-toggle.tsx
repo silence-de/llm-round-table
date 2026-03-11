@@ -2,14 +2,16 @@
 
 import { useTheme } from 'next-themes';
 import { Sun, Moon } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    () => () => undefined,
+    () => true,
+    () => false
+  );
 
-  // Avoid hydration mismatch — only render after mount
-  useEffect(() => setMounted(true), []);
   if (!mounted) return <div className="h-8 w-8" />;
 
   const isDark = theme === 'dark';
