@@ -1527,7 +1527,7 @@ export default function HomePage() {
               Multi-agent council · strategy &amp; decisions
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <PhaseIndicator
               phase={phase}
               round={round}
@@ -1540,12 +1540,12 @@ export default function HomePage() {
       </header>
 
       {/* ── 3-column main grid ── */}
-      <main className="flex-1 overflow-hidden grid gap-2 p-3 xl:grid-cols-[280px_1fr_340px] lg:grid-cols-[260px_1fr]">
+      <main className="flex-1 overflow-hidden grid gap-2 p-3 lg:grid-cols-[minmax(240px,260px)_minmax(0,1fr)] xl:grid-cols-[minmax(260px,280px)_minmax(0,1fr)_minmax(300px,340px)]">
 
         {/* ─────────────────────────────────────────────────────────────────
             LEFT PANEL: Session Setup + Compact Agent Config
         ───────────────────────────────────────────────────────────────── */}
-        <aside className="flex min-h-0 flex-col gap-2 overflow-hidden">
+        <aside className="flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden">
           {/* ── Tab navigation ── */}
           <div className="shrink-0 flex h-10 border-b rt-border-soft gap-0">
             {([
@@ -1955,7 +1955,7 @@ export default function HomePage() {
                 </p>
                 <button
                   type="button"
-                  className="mt-1 rt-text-dim underline"
+                  className="mt-1 rt-text-dim underline transition-[color,opacity] duration-150 ease-out hover:rt-text-muted active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--rt-live-state)] focus-visible:rounded-sm"
                   onClick={() => {
                     setFollowUpParentSession(null);
                     setResumePreview(null);
@@ -2179,7 +2179,7 @@ export default function HomePage() {
                                         active ? undefined : presetId
                                       )
                                     }
-                                    className={`rounded-full border px-2 py-0.5 text-[10px] transition-all ${
+                                    className={`rounded-full border px-2 py-0.5 text-[10px] transition-[color,border-color,background-color,transform,box-shadow] duration-150 ease-out active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--rt-live-state)] ${
                                       active
                                         ? 'rt-border-strong bg-[color-mix(in_srgb,var(--rt-live-state)_22%,transparent)] rt-text-strong'
                                         : 'rt-surface rt-text-dim hover:rt-text-muted'
@@ -2242,7 +2242,7 @@ export default function HomePage() {
         {/* ─────────────────────────────────────────────────────────────────
             CENTER PANEL: Unified Discussion Feed
         ───────────────────────────────────────────────────────────────── */}
-        <div className="flex min-h-0 flex-col gap-2 overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden">
           {/* Feed header */}
           <div className="shrink-0 space-y-1.5">
             <div className="flex h-10 items-center gap-2 border-b rt-border-soft px-1">
@@ -2548,7 +2548,7 @@ export default function HomePage() {
         {/* ─────────────────────────────────────────────────────────────────
             RIGHT PANEL: Context | History (xl+ only)
         ───────────────────────────────────────────────────────────────── */}
-        <div className="hidden xl:flex min-h-0 flex-col gap-2 overflow-hidden">
+        <div className="hidden xl:flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden">
           {/* Tab switcher */}
           <div className="shrink-0 flex h-10 border-b rt-border-soft gap-0">
             {(['context', 'history'] as const).map((tab) => (
@@ -2918,7 +2918,7 @@ export default function HomePage() {
                             className={`rounded-xl border p-2.5 ${active ? 'rt-surface-live' : 'rt-surface'}`}
                           >
                             <button
-                              className="w-full text-left"
+                              className="w-full text-left transition-opacity duration-150 ease-out hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--rt-live-state)] focus-visible:rounded-md"
                               onClick={() => void loadHistory(session.id)}
                             >
                               <p className="line-clamp-2 text-sm font-semibold rt-text-strong">
@@ -2947,10 +2947,10 @@ export default function HomePage() {
                                 </span>
                                 <button
                                   type="button"
-                                  className={`rounded-full border px-2 py-0.5 text-[10px] ${
+                                  className={`rounded-full border px-2 py-0.5 text-[10px] transition-[color,border-color,background-color,transform,box-shadow] duration-150 ease-out active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--rt-live-state)] ${
                                     compareSessionIds.includes(session.id)
-                                      ? 'rt-border-strong rt-text-strong'
-                                      : 'rt-text-dim'
+                                      ? 'rt-border-strong rt-text-strong bg-[color-mix(in_srgb,var(--rt-hh6-primary)_8%,transparent)]'
+                                      : 'rt-text-dim hover:rt-text-muted'
                                   }`}
                                   onClick={() => toggleCompareSession(session.id)}
                                 >
@@ -3063,7 +3063,7 @@ export default function HomePage() {
                       {historyDetail.parentSession && (
                         <button
                           type="button"
-                          className="mt-2 block text-left text-[11px] underline rt-text-dim"
+                          className="mt-2 block text-left text-[11px] underline rt-text-dim transition-[color,opacity] duration-150 hover:rt-text-muted focus-visible:outline-none focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-[color:var(--rt-live-state)]"
                           onClick={() => void loadHistory(historyDetail.parentSession!.id)}
                         >
                           Parent session: {historyDetail.parentSession.topic}
@@ -3072,7 +3072,7 @@ export default function HomePage() {
                       {historyDetail.resumeMeta?.resumedFromSessionId && (
                         <button
                           type="button"
-                          className="mt-1 block text-left text-[11px] underline rt-text-dim"
+                          className="mt-1 block text-left text-[11px] underline rt-text-dim transition-[color,opacity] duration-150 hover:rt-text-muted focus-visible:outline-none focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-[color:var(--rt-live-state)]"
                           onClick={() =>
                             void loadHistory(historyDetail.resumeMeta!.resumedFromSessionId!)
                           }
@@ -3431,7 +3431,7 @@ export default function HomePage() {
                             <button
                               key={session.id}
                               type="button"
-                              className="block w-full rounded-lg border rt-border-soft px-2 py-1.5 text-left text-xs rt-text-strong"
+                              className="block w-full rounded-lg border rt-border-soft px-2 py-1.5 text-left text-xs rt-text-strong transition-[background-color,box-shadow] duration-150 ease-out hover:bg-[color-mix(in_srgb,currentColor_5%,transparent)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--rt-live-state)]"
                               onClick={() => void loadHistory(session.id)}
                             >
                               {session.topic}
@@ -3451,7 +3451,7 @@ export default function HomePage() {
                             <button
                               key={session.id}
                               type="button"
-                              className="block w-full rounded-lg border rt-border-soft px-2 py-1.5 text-left text-xs rt-text-strong"
+                              className="block w-full rounded-lg border rt-border-soft px-2 py-1.5 text-left text-xs rt-text-strong transition-[background-color,box-shadow] duration-150 ease-out hover:bg-[color-mix(in_srgb,currentColor_5%,transparent)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--rt-live-state)]"
                               onClick={() => void loadHistory(session.id)}
                             >
                               {session.topic}
