@@ -460,3 +460,31 @@
   font-size: 0.85em;
   color: var(--rt-hh6-primary);
 }
+
+/* ── Reduced motion (WCAG 2.1 SC 2.3.3) ──────────────────────────────────────
+   Respects user's OS-level "Reduce Motion" preference.
+   framer-motion v12 handles its own animations natively via this media query.
+   These rules cover Tailwind utilities and CSS keyframe animations.
+────────────────────────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+
+  /* Keep streaming caret visible but static (not blinking) */
+  .rt-streaming-caret::after {
+    animation: none !important;
+    opacity: 0.7;
+  }
+
+  /* Hide the outer ping ring on live indicators; inner dot remains */
+  .animate-ping {
+    animation: none !important;
+    opacity: 0 !important;
+  }
+}
