@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronDown, ExternalLink, Globe, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -94,8 +95,17 @@ export function ResearchPanel({
         </CardTitle>
       </CardHeader>
 
-      {expanded && (
-        <CardContent className="space-y-3 pt-0">
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            key="content"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+            style={{ overflow: 'hidden' }}
+          >
+            <CardContent className="space-y-3 pt-0">
           {researchRun?.summary && (
             <div className="rounded-xl border rt-border-soft p-3">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
@@ -357,8 +367,10 @@ export function ResearchPanel({
               ))}
             </div>
           )}
-        </CardContent>
-      )}
+            </CardContent>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </Card>
   );
 }

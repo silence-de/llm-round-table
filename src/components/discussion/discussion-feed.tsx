@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useEffect, useCallback, type UIEvent } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { MarkdownContent } from '@/components/ui/markdown-content';
 import { PixelAgentAvatar } from '@/components/discussion/pixel-agent-avatar';
 
@@ -84,28 +85,36 @@ export function DiscussionFeed({
         </div>
       ) : (
         <div className="py-2">
-          {messages.map((msg, idx) => {
-            const prev = messages[idx - 1];
-            const next = messages[idx + 1];
+          <AnimatePresence initial={false}>
+            {messages.map((msg, idx) => {
+              const prev = messages[idx - 1];
+              const next = messages[idx + 1];
 
-            const phaseChanged = !prev || prev.phase !== msg.phase;
-            const showSeparator =
-              phaseChanged &&
-              idx > 0 &&
-              phaseOrder(msg.phase) !== phaseOrder(prev?.phase ?? '');
+              const phaseChanged = !prev || prev.phase !== msg.phase;
+              const showSeparator =
+                phaseChanged &&
+                idx > 0 &&
+                phaseOrder(msg.phase) !== phaseOrder(prev?.phase ?? '');
 
-            const isFirst =
-              !prev || prev.displayName !== msg.displayName || prev.role !== msg.role || phaseChanged;
-            const isLast =
-              !next || next.displayName !== msg.displayName || next.role !== msg.role || next.phase !== msg.phase;
+              const isFirst =
+                !prev || prev.displayName !== msg.displayName || prev.role !== msg.role || phaseChanged;
+              const isLast =
+                !next || next.displayName !== msg.displayName || next.role !== msg.role || next.phase !== msg.phase;
 
-            return (
-              <div key={msg.id}>
-                {showSeparator && <PhaseSeparator phase={msg.phase} />}
-                <FeedBubble message={msg} showHeader={isFirst} roundBottom={isLast} />
-              </div>
-            );
-          })}
+              return (
+                <motion.div
+                  key={msg.id}
+                  layout
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ type: 'spring', stiffness: 350, damping: 30 }}
+                >
+                  {showSeparator && <PhaseSeparator phase={msg.phase} />}
+                  <FeedBubble message={msg} showHeader={isFirst} roundBottom={isLast} />
+                </motion.div>
+              );
+            })}
+          </AnimatePresence>
           <div ref={bottomRef} className="h-4" />
         </div>
       )}

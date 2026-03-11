@@ -71,7 +71,15 @@ export function PhaseIndicator({
           transition={{ repeat: Infinity, repeatType: 'reverse', duration: 0.9 }}
           className="rt-chip-live flex items-center gap-2 rounded-full border px-3 py-1 text-sm"
         >
-          <span className="inline-block h-2.5 w-2.5 rounded-full bg-[var(--rt-stage-glow-secondary)] shadow-[0_0_12px_color-mix(in_srgb,var(--rt-stage-glow-secondary)_78%,transparent)]" />
+          <span className="relative flex h-2 w-2">
+            {/* Outer glow ring — slower breath */}
+            <span
+              className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-30"
+              style={{ animationDuration: '2s' }}
+            />
+            {/* Inner solid dot */}
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_6px_2px_rgba(52,211,153,0.4)]" />
+          </span>
           讨论进行中
         </motion.span>
       )}
