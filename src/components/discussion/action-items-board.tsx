@@ -118,7 +118,11 @@ export function ActionItemsBoard({
           </Select>
           <button
             type="button"
-            className={`rt-input h-8 rounded-md text-xs ${overdueOnly ? 'rt-text-strong' : 'rt-text-muted'}`}
+            className={`rt-input h-8 rounded-md border px-2 text-xs transition-[color,border-color,background-color,transform,box-shadow] duration-150 ease-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--rt-live-state)] ${
+              overdueOnly
+                ? 'rt-text-strong border-[color:var(--rt-hh6-primary)] bg-[color-mix(in_srgb,var(--rt-hh6-primary)_10%,transparent)]'
+                : 'rt-text-muted hover:bg-[color-mix(in_srgb,var(--rt-text-dim,currentColor)_8%,transparent)]'
+            }`}
             onClick={() => setOverdueOnly((value) => !value)}
           >
             {overdueOnly ? 'Showing overdue' : 'Overdue only'}

@@ -29,6 +29,10 @@ interface RoundTableStageProps {
   stageMode: StageMode;
 }
 
+// ─── Shared motion presets ───────────────────────────────────────────────────
+const stageSpring = { type: 'spring', stiffness: 420, damping: 28, mass: 0.55 } as const;
+const stageGlow = { duration: 1.35, repeat: Infinity, repeatType: 'mirror' as const, ease: [0.22, 1, 0.36, 1] as const };
+
 function labelPhase(phase: string) {
   const map: Record<string, string> = {
     research: 'Research',
@@ -108,7 +112,7 @@ export function RoundTableStage({
               >
                 <motion.div
                   animate={{ scale: isActive ? 1.25 : 1, opacity: isActive ? 1 : 0.65 }}
-                  transition={{ duration: 0.35 }}
+                  transition={stageSpring}
                   className="h-3.5 w-3.5 rounded-full border border-[color:var(--rt-border-soft)]"
                   style={{
                     backgroundColor: agent.color,
@@ -149,7 +153,7 @@ export function RoundTableStage({
       <motion.div
         className="pointer-events-none absolute inset-x-16 top-4 h-16 rounded-full bg-[color-mix(in_srgb,var(--rt-live-state)_15%,transparent)] blur-3xl"
         animate={{ opacity: isRunning ? 0.9 : 0.4 }}
-        transition={{ duration: 1.6, repeat: Infinity, repeatType: 'reverse' }}
+        transition={stageGlow}
       />
 
       {/* ── Square canvas: aspect-square so orbit is always circular ── */}
@@ -180,7 +184,7 @@ export function RoundTableStage({
                   strokeWidth: isActive ? 1.2 : 0.5,
                 }}
                 strokeDasharray={isActive ? undefined : '3 5'}
-                transition={{ duration: 0.3 }}
+                transition={stageSpring}
               />
             );
           })}
@@ -208,7 +212,7 @@ export function RoundTableStage({
               {/* Scale wrapper — framer-motion handles only scale, no position */}
               <motion.div
                 animate={{ scale: isActive ? 1.08 : 1 }}
-                transition={{ duration: 0.3 }}
+                transition={stageSpring}
               >
                 {/* Glow wrapper */}
                 <motion.div
@@ -229,7 +233,11 @@ export function RoundTableStage({
                     />
                     {isActive && (
                       <span className="absolute -right-1 -top-1 flex h-2.5 w-2.5 items-center justify-center">
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--rt-live-state)] opacity-40" style={{ animationDuration: '1.8s' }} />
+                        <motion.span
+                          className="absolute inline-flex h-full w-full rounded-full bg-[var(--rt-live-state)]"
+                          animate={{ opacity: [0.5, 0, 0.5], scale: [1, 1.8, 1] }}
+                          transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut' }}
+                        />
                         <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--rt-live-state)] shadow-[0_0_6px_2px_color-mix(in_srgb,var(--rt-live-state)_60%,transparent)]" />
                       </span>
                     )}

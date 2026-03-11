@@ -208,7 +208,7 @@ function CopyButton({ content }: { content: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="absolute -top-1.5 right-2 flex h-6 w-6 items-center justify-center rounded-md border rt-surface opacity-0 group-hover:opacity-100 transition-opacity z-10"
+      className="absolute -top-1.5 right-2 z-10 flex h-6 w-6 items-center justify-center rounded-md border rt-surface opacity-0 transition-[opacity,transform,box-shadow] duration-150 ease-out group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 hover:scale-[1.03] active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--rt-live-state)] [@media(pointer:coarse)]:opacity-100"
       aria-label="Copy message"
       title="Copy message"
     >
