@@ -92,7 +92,10 @@ export async function conductResearch(input: {
       ).length;
       return {
         ...source,
-        id: `R${index + 1}`,
+        // Preserve the nanoid generated at collection time as the globally-unique
+        // DB primary key. rank (1-based) is used as the display label R1, R2…
+        // in the formatted brief and LLM prompts, avoiding UNIQUE PK collisions
+        // across sessions that would otherwise all produce R1, R2, R3 IDs.
         rank: index + 1,
         stale: isStale(source.publishedDate, input.brief.decisionType),
         qualityFlags: buildSourceQualityFlags(source, duplicateDomainCount),
@@ -127,7 +130,7 @@ function formatBriefText(sources: ResearchSource[], topic: string) {
       const date = source.publishedDate
         ? ` (${source.publishedDate.slice(0, 10)})`
         : '';
-      return `${source.id}. ${source.title}${date}\n   ${source.snippet}`;
+      return `R${source.rank}. ${source.title}${date}\n   ${source.snippet}`;
     }),
     '',
     '请参考以上来源进行讨论，并明确区分结论、风险和仍待验证的问题。',

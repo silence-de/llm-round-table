@@ -1,4 +1,4 @@
-import { AGENT_CATALOG } from '@/lib/agents/registry';
+import { AGENT_CATALOG, getModelId } from '@/lib/agents/registry';
 import { resolvePersonaText } from '@/lib/agents/persona-presets';
 import type { PersonaSelection, SessionAgent } from '@/lib/agents/types';
 import { apiError } from '@/lib/api/errors';
@@ -110,7 +110,8 @@ export async function POST(
     const personaSelection = personaSelections[agentId];
     const persona = resolvePersonaText(personaSelection, personas[agentId]);
     agents.push({ definition, selectedModelId, personaSelection, persona });
-    resolvedModelSelections[agentId] = selectedModelId ?? definition.modelId;
+    // Use getModelId to validate and sanitize any legacy/migrated model IDs before persisting
+    resolvedModelSelections[agentId] = getModelId(definition, selectedModelId);
     if (personaSelection?.presetId || personaSelection?.customNote) {
       resolvedPersonaSelections[agentId] = personaSelection;
     }
@@ -135,8 +136,7 @@ export async function POST(
         personaSelection,
         persona,
       });
-      resolvedModelSelections[moderatorAgentId] =
-        selectedModelId ?? moderatorDef.modelId;
+      resolvedModelSelections[moderatorAgentId] = getModelId(moderatorDef, selectedModelId);
       if (personaSelection?.presetId || personaSelection?.customNote) {
         resolvedPersonaSelections[moderatorAgentId] = personaSelection;
       }

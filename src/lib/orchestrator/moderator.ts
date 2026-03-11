@@ -205,7 +205,7 @@ export function buildDecisionSummaryPrompt(input: {
       ? [
           '可引用的 research source 列表：',
           ...input.researchSources.map(
-            (source) => `${source.id}: ${source.title} (${source.url})`
+            (source) => `R${source.rank}: ${source.title} (${source.url})`
           ),
           '',
           '如果某条结论明显受到了这些 source 的支持，请在 evidence 的 sourceIds 中引用对应的 source id，例如 ["R1", "R2"]。',
