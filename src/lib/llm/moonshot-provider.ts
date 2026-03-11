@@ -16,6 +16,7 @@ export class MoonshotProvider implements LLMProvider {
 
   async *streamChat(params: ChatParams): AsyncIterable<StreamChunk> {
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+    const temperature = this.normalizeTemperature(params.model, params.temperature);
 
     if (params.systemPrompt) {
       messages.push({ role: 'system', content: params.systemPrompt });
@@ -31,7 +32,7 @@ export class MoonshotProvider implements LLMProvider {
           model: params.model,
           messages,
           stream: true,
-          temperature: params.temperature,
+          temperature,
           max_tokens: params.maxTokens,
         },
         { timeout: params.timeoutMs ?? this.getTimeoutMs(params.model) }
@@ -56,6 +57,7 @@ export class MoonshotProvider implements LLMProvider {
 
   async chat(params: ChatParams): Promise<ChatResponse> {
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+    const temperature = this.normalizeTemperature(params.model, params.temperature);
 
     if (params.systemPrompt) {
       messages.push({ role: 'system', content: params.systemPrompt });
@@ -69,7 +71,7 @@ export class MoonshotProvider implements LLMProvider {
       {
         model: params.model,
         messages,
-        temperature: params.temperature,
+        temperature,
         max_tokens: params.maxTokens,
       },
       { timeout: params.timeoutMs ?? this.getTimeoutMs(params.model) }
@@ -91,5 +93,12 @@ export class MoonshotProvider implements LLMProvider {
       return Number(process.env.MOONSHOT_PREVIEW_TIMEOUT_MS ?? 180_000);
     }
     return Number(process.env.MOONSHOT_TIMEOUT_MS ?? 120_000);
+  }
+
+  private normalizeTemperature(modelId: string, temperature?: number) {
+    if (/^kimi-k2\.5$/i.test(modelId)) {
+      return 1;
+    }
+    return temperature;
   }
 }

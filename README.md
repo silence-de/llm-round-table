@@ -50,6 +50,11 @@ Optional model overrides:
 - `GLM_MODEL_ID`
 - `QWEN_MODEL_ID`
 
+Notes:
+
+- `KIMI_MODEL_ID` must use Moonshot native model IDs such as `kimi-k2.5`.
+- Do not use SiliconFlow-style IDs like `Pro/moonshotai/Kimi-K2.5` with the Moonshot provider.
+
 Optional runtime tuning:
 
 - `DEFAULT_MODERATOR`

@@ -109,7 +109,7 @@ export const AGENT_CATALOG: AgentDefinition[] = [
     modelId: 'kimi-k2.5',
     envKeyName: 'MOONSHOT_API_KEY',
     envOverride: 'KIMI_MODEL_ID',
-    defaultTemperature: 0.7,
+    defaultTemperature: 1,
     maxTokens: 4096,
     color: '#D66BA5',
     sprite: '/sprites/kimi.svg',
@@ -176,6 +176,21 @@ export const AGENT_CATALOG: AgentDefinition[] = [
   },
 ];
 
+function normalizeConfiguredModelId(agent: AgentDefinition, modelId?: string): string | undefined {
+  if (!modelId) return undefined;
+
+  const trimmed = modelId.trim();
+  if (!trimmed) return undefined;
+
+  if (agent.provider === 'moonshot') {
+    if (/^(?:pro\/)?moonshotai\/kimi-k2\.5$/i.test(trimmed) || /^kimi-k2\.5$/i.test(trimmed)) {
+      return 'kimi-k2.5';
+    }
+  }
+
+  return trimmed;
+}
+
 export function getAgentDefinition(agentId: string): AgentDefinition | undefined {
   return AGENT_CATALOG.find((a) => a.id === agentId);
 }
@@ -184,11 +199,21 @@ export function getModelId(agent: AgentDefinition, selectedModelId?: string): st
   // Validate stored model IDs against current availableModels — silently falls back
   // to the agent default when a session was created with an old/migrated model ID
   // (e.g. SiliconFlow-style "Pro/moonshotai/Kimi-K2.5" after Kimi moved to native API).
-  if (selectedModelId && agent.availableModels.some((m) => m.id === selectedModelId)) {
-    return selectedModelId;
+  const normalizedSelectedModelId = normalizeConfiguredModelId(agent, selectedModelId);
+  if (
+    normalizedSelectedModelId &&
+    agent.availableModels.some((m) => m.id === normalizedSelectedModelId)
+  ) {
+    return normalizedSelectedModelId;
   }
-  if (agent.envOverride && process.env[agent.envOverride]) {
-    return process.env[agent.envOverride]!;
+
+  const normalizedEnvOverride = normalizeConfiguredModelId(
+    agent,
+    agent.envOverride ? process.env[agent.envOverride] : undefined
+  );
+  if (normalizedEnvOverride && agent.availableModels.some((m) => m.id === normalizedEnvOverride)) {
+    return normalizedEnvOverride;
   }
+
   return agent.modelId;
 }
