@@ -11,6 +11,24 @@ import type {
 } from './types';
 import type { ResearchSource } from '../search/types';
 
+const ACTION_ITEM_TRANSITIONS: Record<ActionItemStatus, ActionItemStatus[]> = {
+  pending: ['pending', 'in_progress'],
+  in_progress: ['in_progress', 'verified', 'discarded'],
+  verified: ['verified'],
+  discarded: ['discarded'],
+};
+
+export function isValidActionItemTransition(
+  current: ActionItemStatus,
+  next: ActionItemStatus
+) {
+  return ACTION_ITEM_TRANSITIONS[current].includes(next);
+}
+
+export function getAllowedActionItemTransitions(current: ActionItemStatus) {
+  return [...ACTION_ITEM_TRANSITIONS[current]];
+}
+
 export const DEFAULT_DECISION_BRIEF: DecisionBrief = {
   topic: '',
   goal: '',
@@ -34,6 +52,7 @@ export const DECISION_STATUS_OPTIONS: DecisionStatus[] = [
   'adopted',
   'discarded',
   'needs_follow_up',
+  'degraded',
 ];
 
 export const ACTION_ITEM_STATUS_OPTIONS: ActionItemStatus[] = [
@@ -221,9 +240,25 @@ function normalizeConfidence(value: unknown) {
 function normalizeEvidence(value: unknown, researchSources: ResearchSource[]) {
   if (!Array.isArray(value)) return [];
 
-  return value.map((item) =>
-    normalizeEvidenceItem(item, researchSources)
+  const evidence = value.map((item) => normalizeEvidenceItem(item, researchSources));
+  return evidence.filter((item) => item.claim.trim().length > 0);
+}
+
+function resolveEvidenceSourceSet(researchSources: ResearchSource[]) {
+  const activeSourceIds = new Set(
+    researchSources
+      .filter((source) => source.selected && !source.excludedReason?.trim())
+      .map((source) => source.id)
   );
+  if (activeSourceIds.size > 0) {
+    return activeSourceIds;
+  }
+  return new Set(researchSources.map((source) => source.id));
+}
+
+function normalizeGapReason(record: Record<string, unknown>) {
+  if (typeof record.gapReason !== 'string') return '';
+  return record.gapReason.trim();
 }
 
 function normalizeEvidenceItem(
@@ -232,7 +267,7 @@ function normalizeEvidenceItem(
 ): DecisionSummaryEvidence {
   const record =
     item && typeof item === 'object' ? (item as Record<string, unknown>) : {};
-  const sourceIdSet = new Set(researchSources.map((source) => source.id));
+  const sourceIdSet = resolveEvidenceSourceSet(researchSources);
   const directSourceIds = normalizeStringArray(record.sourceIds).filter(
     (sourceId) => sourceIdSet.size === 0 || sourceIdSet.has(sourceId)
   );
@@ -243,16 +278,26 @@ function normalizeEvidenceItem(
     : [];
   const mappedSourceIds = legacySourceIndices
     .map((index) => researchSources[index]?.id)
-    .filter((sourceId): sourceId is string => Boolean(sourceId));
+    .filter(
+      (sourceId): sourceId is string =>
+        Boolean(sourceId) && (sourceIdSet.size === 0 || sourceIdSet.has(sourceId))
+    );
   const unresolvedSourceIndices = legacySourceIndices.filter(
     (index) => !researchSources[index]?.id
   );
+  const sourceIds = Array.from(new Set([...directSourceIds, ...mappedSourceIds]));
+  const gapReason = normalizeGapReason(record);
 
   return {
     claim:
       (typeof record.claim === 'string' ? record.claim : '').trim() ||
       '未命名证据',
-    sourceIds: Array.from(new Set([...directSourceIds, ...mappedSourceIds])),
+    sourceIds,
+    ...(sourceIds.length === 0
+      ? { gapReason: gapReason || '缺少可解析证据来源' }
+      : gapReason
+        ? { gapReason }
+        : {}),
     ...(unresolvedSourceIndices.length > 0
       ? { unresolvedSourceIndices }
       : {}),

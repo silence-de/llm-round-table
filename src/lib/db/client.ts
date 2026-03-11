@@ -31,9 +31,13 @@ CREATE TABLE IF NOT EXISTS sessions (
   agenda_config TEXT NOT NULL DEFAULT '{}',
   research_config TEXT NOT NULL DEFAULT '{}',
   parent_session_id TEXT,
+  resumed_from_session_id TEXT,
+  resume_snapshot TEXT,
   decision_status TEXT NOT NULL DEFAULT 'draft',
   retrospective_note TEXT NOT NULL DEFAULT '',
   outcome_summary TEXT NOT NULL DEFAULT '',
+  actual_outcome TEXT NOT NULL DEFAULT '',
+  outcome_confidence INTEGER NOT NULL DEFAULT 0,
   moderator_agent_id TEXT NOT NULL,
   max_debate_rounds INTEGER NOT NULL,
   selected_agent_ids TEXT NOT NULL DEFAULT '[]',
@@ -82,6 +86,7 @@ CREATE TABLE IF NOT EXISTS research_runs (
   search_config TEXT NOT NULL DEFAULT '{}',
   summary TEXT NOT NULL DEFAULT '',
   evaluation TEXT,
+  rerun_count INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -95,6 +100,10 @@ CREATE TABLE IF NOT EXISTS research_sources (
   snippet TEXT NOT NULL DEFAULT '',
   score REAL NOT NULL DEFAULT 0,
   selected INTEGER NOT NULL DEFAULT 1,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  rank INTEGER NOT NULL DEFAULT 0,
+  excluded_reason TEXT NOT NULL DEFAULT '',
+  stale INTEGER NOT NULL DEFAULT 0,
   quality_flags TEXT NOT NULL DEFAULT '[]',
   published_date TEXT,
   created_at INTEGER NOT NULL
@@ -103,14 +112,50 @@ CREATE TABLE IF NOT EXISTS research_sources (
 CREATE TABLE IF NOT EXISTS action_items (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
+  source_action_id TEXT,
   content TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
   source TEXT NOT NULL DEFAULT 'generated',
   carried_from_session_id TEXT,
   note TEXT NOT NULL DEFAULT '',
+  owner TEXT NOT NULL DEFAULT '',
+  due_at INTEGER,
+  verified_at INTEGER,
+  verification_note TEXT NOT NULL DEFAULT '',
+  priority TEXT NOT NULL DEFAULT 'medium',
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS decision_claims (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  claim TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'evidence',
+  gap_reason TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS claim_source_links (
+  id TEXT PRIMARY KEY,
+  claim_id TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS session_events (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  provider TEXT,
+  model_id TEXT,
+  phase TEXT,
+  agent_id TEXT,
+  timeout_type TEXT,
+  message TEXT NOT NULL DEFAULT '',
+  metadata TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS interjections (
@@ -155,13 +200,33 @@ ensureColumn('sessions', 'template_id', 'TEXT');
 ensureColumn('sessions', 'agenda_config', "TEXT NOT NULL DEFAULT '{}'");
 ensureColumn('sessions', 'research_config', "TEXT NOT NULL DEFAULT '{}'");
 ensureColumn('sessions', 'parent_session_id', 'TEXT');
+ensureColumn('sessions', 'resumed_from_session_id', 'TEXT');
+ensureColumn('sessions', 'resume_snapshot', 'TEXT');
 ensureColumn('sessions', 'decision_status', "TEXT NOT NULL DEFAULT 'draft'");
 ensureColumn('sessions', 'retrospective_note', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('sessions', 'outcome_summary', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('sessions', 'actual_outcome', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('sessions', 'outcome_confidence', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('sessions', 'usage_input_tokens', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('sessions', 'usage_output_tokens', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('sessions', 'stop_requested', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('interjections', 'control_type', "TEXT NOT NULL DEFAULT 'general'");
+ensureColumn('research_runs', 'rerun_count', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('research_sources', 'pinned', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('research_sources', 'rank', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('research_sources', 'excluded_reason', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('research_sources', 'stale', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('action_items', 'owner', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('action_items', 'source_action_id', 'TEXT');
+ensureColumn('action_items', 'due_at', 'INTEGER');
+ensureColumn('action_items', 'verified_at', 'INTEGER');
+ensureColumn(
+  'action_items',
+  'verification_note',
+  "TEXT NOT NULL DEFAULT ''"
+);
+ensureColumn('action_items', 'priority', "TEXT NOT NULL DEFAULT 'medium'");
+ensureColumn('decision_claims', 'gap_reason', "TEXT NOT NULL DEFAULT ''");
 
 export const sqliteDb = sqlite;
 export const db = drizzle(sqlite);

@@ -91,9 +91,14 @@ export function DecisionSummaryCard({
                     </div>
                   ) : (
                     <p className="mt-1 text-[11px] rt-text-dim">
-                      No explicit source mapping
+                      {evidence.gapReason || 'No explicit source mapping'}
                     </p>
                   )}
+                  {evidence.gapReason && evidence.sourceIds.length > 0 ? (
+                    <p className="mt-1 text-[11px] rt-text-dim">
+                      Gap note: {evidence.gapReason}
+                    </p>
+                  ) : null}
                   {evidence.unresolvedSourceIndices?.length ? (
                     <p className="mt-1 text-[11px] rt-text-dim">
                       Legacy refs unresolved: {evidence.unresolvedSourceIndices.join(', ')}

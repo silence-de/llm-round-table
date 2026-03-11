@@ -7,7 +7,6 @@ import {
   FastForward,
   FileText,
   History,
-  MessageSquare,
   Pause,
   Play,
   RotateCcw,
@@ -38,14 +37,16 @@ import { ResearchPanel } from '@/components/discussion/research-panel';
 import { MarkdownContent } from '@/components/ui/markdown-content';
 import { DiscussionFeed } from '@/components/discussion/discussion-feed';
 import { DecisionSummaryCard } from '@/components/discussion/decision-summary-card';
+import { ActionItemsBoard } from '@/components/discussion/action-items-board';
 import type { FeedMessage } from '@/components/discussion/discussion-feed';
 import type { PersonaPreset, PersonaSelection } from '@/lib/agents/types';
 import {
   DECISION_TEMPLATES,
 } from '@/lib/decision/templates';
 import type {
+  ActionStats,
+  DecisionClaim,
   ActionItem,
-  ActionItemStatus,
   DecisionBrief,
   DecisionControlType,
   DecisionStatus,
@@ -53,8 +54,6 @@ import type {
   DiscussionAgenda,
 } from '@/lib/decision/types';
 import {
-  ACTION_ITEM_STATUS_LABELS,
-  ACTION_ITEM_STATUS_OPTIONS,
   DECISION_CONTROL_LABELS,
   DECISION_STATUS_OPTIONS,
   DEFAULT_DECISION_BRIEF,
@@ -73,6 +72,7 @@ import {
   DEFAULT_RESEARCH_CONFIG,
   normalizeResearchConfig,
 } from '@/lib/search/utils';
+import type { DiscussionResumeSnapshot } from '@/lib/orchestrator/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -101,6 +101,8 @@ interface SessionRecord {
   constraints: string;
   retrospectiveNote?: string;
   outcomeSummary?: string;
+  actualOutcome?: string;
+  outcomeConfidence?: number;
   decisionType: string;
   desiredOutput: string;
   templateId?: string | null;
@@ -132,6 +134,7 @@ interface SessionDetail {
   minutes: { content: string } | null;
   decisionSummary: DecisionSummary | null;
   actionItems: ActionItem[];
+  actionStats?: ActionStats;
   researchRun: ResearchRunDetail | null;
   interjections: Array<{
     id: string;
@@ -139,6 +142,36 @@ interface SessionDetail {
     controlType?: DecisionControlType;
     phaseHint?: string | null;
     roundHint?: number | null;
+    createdAt: number | string;
+  }>;
+  decisionClaims: DecisionClaim[];
+  unresolvedEvidence?: Array<{
+    claim: string;
+    sourceIds: string[];
+    unresolvedSourceIndices: number[];
+    gapReason: string;
+  }>;
+  resumeMeta:
+    | {
+        resumedFromSessionId?: string | null;
+        snapshot?: DiscussionResumeSnapshot | null;
+        events?: Array<{
+          id: string;
+          type: string;
+          message: string;
+          createdAt: number | string;
+        }>;
+      }
+    | null;
+  degradeEvents: Array<{
+    id: string;
+    type: string;
+    provider?: string;
+    modelId?: string;
+    phase?: string;
+    agentId?: string;
+    timeoutType?: string;
+    message: string;
     createdAt: number | string;
   }>;
   parentSession:
@@ -225,6 +258,23 @@ function parseResearchConfig(value?: string | null): ResearchConfig {
   }
 }
 
+function summarizeActionStats(items: ActionItem[]): ActionStats {
+  const now = Date.now();
+  return {
+    total: items.length,
+    pending: items.filter((item) => item.status === 'pending').length,
+    inProgress: items.filter((item) => item.status === 'in_progress').length,
+    verified: items.filter((item) => item.status === 'verified').length,
+    discarded: items.filter((item) => item.status === 'discarded').length,
+    overdue: items.filter((item) => {
+      if (item.status === 'verified' || item.status === 'discarded') return false;
+      if (!item.dueAt) return false;
+      const dueDate = new Date(item.dueAt);
+      return !Number.isNaN(dueDate.getTime()) && dueDate.getTime() < now;
+    }).length,
+  };
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function HomePage() {
@@ -254,6 +304,17 @@ export default function HomePage() {
   const [followUpParentSession, setFollowUpParentSession] = useState<{
     id: string;
     topic: string;
+    mode: 'follow_up' | 'resume';
+  } | null>(null);
+  const [resumePreview, setResumePreview] = useState<DiscussionResumeSnapshot | null>(
+    null
+  );
+  const [carryForwardMode, setCarryForwardMode] = useState<
+    'all_open' | 'high_priority_only'
+  >('high_priority_only');
+  const [followUpCarryPreview, setFollowUpCarryPreview] = useState<{
+    inheritedActionCount: number;
+    skippedReason: string[];
   } | null>(null);
   const [compareSessionIds, setCompareSessionIds] = useState<string[]>([]);
   const [compareDetails, setCompareDetails] = useState<SessionDetail[]>([]);
@@ -281,6 +342,8 @@ export default function HomePage() {
     actionItems,
     review,
     error,
+    resumeSnapshot,
+    degradedAgents,
     research,
     ui,
     replay,
@@ -427,6 +490,44 @@ export default function HomePage() {
       );
   }, [compareSessionIds, setError]);
 
+  useEffect(() => {
+    if (!followUpParentSession || followUpParentSession.mode !== 'follow_up') {
+      setFollowUpCarryPreview(null);
+      return;
+    }
+
+    let cancelled = false;
+    void fetch(`/api/sessions/${followUpParentSession.id}/follow-up`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ carryForwardMode }),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to preview carry-forward (${response.status})`);
+        }
+        return (await response.json()) as {
+          inheritedActionCount: number;
+          skippedReason: string[];
+        };
+      })
+      .then((preview) => {
+        if (!cancelled) {
+          setFollowUpCarryPreview(preview);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setError(error instanceof Error ? error.message : String(error));
+          setFollowUpCarryPreview(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [carryForwardMode, followUpParentSession, setError]);
+
   // ── Agent config callbacks ───────────────────────────────────────────────
 
   const updateBrief = useCallback(
@@ -513,6 +614,7 @@ export default function HomePage() {
     if (!brief.topic.trim() || selectedAgents.size < 2) return;
     setHistoryDetail(null);
     setActiveHistoryId(null);
+    setResumePreview(null);
     resetReplay();
 
     const legacyPersonas: Record<string, string> = {};
@@ -534,10 +636,16 @@ export default function HomePage() {
       moderatorAgentId,
       maxDebateRounds,
       parentSessionId: followUpParentSession?.id ?? null,
+      resumeFromSessionId:
+        followUpParentSession?.mode === 'resume'
+          ? followUpParentSession.id
+          : null,
+      carryForwardMode,
     });
   }, [
     agenda,
     brief,
+    carryForwardMode,
     followUpParentSession,
     maxDebateRounds,
     modelSelections,
@@ -1093,7 +1201,11 @@ export default function HomePage() {
     setFollowUpParentSession({
       id: historyDetail.session.id,
       topic: historyDetail.session.topic,
+      mode: 'follow_up',
     });
+    setCarryForwardMode('high_priority_only');
+    setResumePreview(null);
+    setFollowUpCarryPreview(null);
     resetReplay();
     setAutoScroll('follow');
 
@@ -1116,28 +1228,53 @@ export default function HomePage() {
     setError,
   ]);
 
-  const updateLocalActionItems = useCallback(
-    (
-      items: ActionItem[],
-      itemId: string,
-      patch: Partial<Pick<ActionItem, 'status' | 'note'>>
-    ) =>
-      items.map((item) =>
-        item.id === itemId
-          ? {
-              ...item,
-              ...patch,
-            }
-          : item
-      ),
-    []
-  );
+  const handleResumeHistorySession = useCallback(async () => {
+    if (!historyDetail) return;
+
+    handleReuseHistorySetup();
+    setFollowUpParentSession({
+      id: historyDetail.session.id,
+      topic: historyDetail.session.topic,
+      mode: 'resume',
+    });
+    setFollowUpCarryPreview(null);
+    setError(null);
+
+    try {
+      const previewTargetId = sessionId ?? 'preview';
+      const response = await fetch(
+        `/api/sessions/${previewTargetId}/resume-preview`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ resumeFromSessionId: historyDetail.session.id }),
+        }
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to preview resume (${response.status})`);
+      }
+      const payload = (await response.json()) as {
+        resumeSnapshot?: DiscussionResumeSnapshot;
+      };
+      setResumePreview(payload.resumeSnapshot ?? null);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    }
+  }, [handleReuseHistorySetup, historyDetail, sessionId, setError]);
 
   const handleActionItemUpdate = useCallback(
     async (
       sessionIdToUpdate: string,
       itemId: string,
-      patch: { status?: ActionItemStatus; note?: string }
+      patch: {
+        status?: ActionItem['status'];
+        note?: string;
+        owner?: string;
+        dueAt?: number | string | null;
+        verifiedAt?: number | string | null;
+        verificationNote?: string;
+        priority?: ActionItem['priority'];
+      }
     ) => {
       const response = await fetch(
         `/api/sessions/${sessionIdToUpdate}/action-items/${itemId}`,
@@ -1155,12 +1292,16 @@ export default function HomePage() {
 
       setHistoryDetail((prev) =>
         prev && prev.session.id === sessionIdToUpdate
-          ? {
-              ...prev,
-              actionItems: prev.actionItems.map((item) =>
+          ? (() => {
+              const nextItems = prev.actionItems.map((item) =>
                 item.id === itemId ? updated : item
-              ),
-            }
+              );
+              return {
+                ...prev,
+                actionItems: nextItems,
+                actionStats: summarizeActionStats(nextItems),
+              };
+            })()
           : prev
       );
 
@@ -1185,6 +1326,8 @@ export default function HomePage() {
         decisionStatus?: DecisionStatus;
         retrospectiveNote?: string;
         outcomeSummary?: string;
+        actualOutcome?: string;
+        outcomeConfidence?: number;
       }
     ) => {
       const response = await fetch(`/api/sessions/${sessionIdToUpdate}`, {
@@ -1271,14 +1414,23 @@ export default function HomePage() {
     [refreshSessions, sessionId, setResearchRun, setResearchStatus]
   );
 
-  const handleResearchSourceSelection = useCallback(
-    async (sessionIdToUpdate: string, sourceId: string, selected: boolean) => {
+  const handleResearchSourceUpdate = useCallback(
+    async (
+      sessionIdToUpdate: string,
+      sourceId: string,
+      patch: {
+        selected?: boolean;
+        pinned?: boolean;
+        excludedReason?: string;
+        rank?: number;
+      }
+    ) => {
       const response = await fetch(
         `/api/sessions/${sessionIdToUpdate}/research/sources/${sourceId}`,
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ selected }),
+          body: JSON.stringify(patch),
         }
       );
 
@@ -1294,9 +1446,9 @@ export default function HomePage() {
               ...prev,
               researchRun: {
                 ...prev.researchRun,
-                sources: prev.researchRun.sources.map((source) =>
-                  source.id === sourceId ? updated : source
-                ),
+                sources: prev.researchRun.sources
+                  .map((source) => (source.id === sourceId ? updated : source))
+                  .sort((left, right) => left.rank - right.rank),
               },
             }
           : prev
@@ -1307,9 +1459,9 @@ export default function HomePage() {
         if (currentRun) {
           setResearchRun({
             ...currentRun,
-            sources: currentRun.sources.map((source) =>
-              source.id === sourceId ? updated : source
-            ),
+            sources: currentRun.sources
+              .map((source) => (source.id === sourceId ? updated : source))
+              .sort((left, right) => left.rank - right.rank),
           });
         }
       }
@@ -1678,6 +1830,53 @@ export default function HomePage() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Select
+                    value={researchConfig.domainPolicy}
+                    onValueChange={(value) => {
+                      if (!value) return;
+                      updateResearchConfig(
+                        'domainPolicy',
+                        value as ResearchConfig['domainPolicy']
+                      );
+                    }}
+                    disabled={isRunning || !researchConfig.enabled}
+                  >
+                    <SelectTrigger className="rt-input h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="any" className="text-xs">
+                        Any domain
+                      </SelectItem>
+                      <SelectItem value="prefer" className="text-xs">
+                        Prefer domains
+                      </SelectItem>
+                      <SelectItem value="strict" className="text-xs">
+                        Strict domains
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={String(researchConfig.maxReruns)}
+                    onValueChange={(value) => {
+                      if (!value) return;
+                      updateResearchConfig('maxReruns', Number(value));
+                    }}
+                    disabled={isRunning || !researchConfig.enabled}
+                  >
+                    <SelectTrigger className="rt-input h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[0, 1, 2, 3].map((value) => (
+                        <SelectItem key={value} value={String(value)} className="text-xs">
+                          reruns {value}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <Textarea
                   placeholder="Additional queries (one per line)"
                   value={researchConfig.userQueries.join('\n')}
@@ -1724,18 +1923,85 @@ export default function HomePage() {
             {leftTab === 'council' && <>
             {followUpParentSession && (
               <div className="rounded-xl border bg-[color-mix(in_srgb,var(--rt-live-state)_10%,transparent)] px-3 py-2 text-xs">
-                <p className="font-semibold rt-text-strong">Follow-up session</p>
+                <p className="font-semibold rt-text-strong">
+                  {followUpParentSession.mode === 'resume'
+                    ? 'Safe resume'
+                    : 'Follow-up session'}
+                </p>
                 <p className="mt-1 rt-text-muted">
-                  Continuing from {followUpParentSession.topic}
+                  {followUpParentSession.mode === 'resume'
+                    ? `Resuming from ${followUpParentSession.topic}`
+                    : `Continuing from ${followUpParentSession.topic}`}
                 </p>
                 <button
                   type="button"
                   className="mt-1 rt-text-dim underline"
-                  onClick={() => setFollowUpParentSession(null)}
+                  onClick={() => {
+                    setFollowUpParentSession(null);
+                    setResumePreview(null);
+                    setFollowUpCarryPreview(null);
+                  }}
                   disabled={isRunning}
                 >
                   Clear link
                 </button>
+                {followUpParentSession.mode === 'follow_up' && (
+                  <div className="mt-2">
+                    <label className="mb-1 block rt-eyebrow">Carry-forward</label>
+                    <Select
+                      value={carryForwardMode}
+                      onValueChange={(value) =>
+                        setCarryForwardMode(
+                          value as 'all_open' | 'high_priority_only'
+                        )
+                      }
+                      disabled={isRunning}
+                    >
+                      <SelectTrigger className="rt-input h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all_open" className="text-xs">
+                          All unfinished items
+                        </SelectItem>
+                        <SelectItem value="high_priority_only" className="text-xs">
+                          High-priority only
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {followUpCarryPreview && (
+                      <p className="mt-1 text-[11px] rt-text-muted">
+                        {followUpCarryPreview.inheritedActionCount} items will be inherited
+                        {followUpCarryPreview.skippedReason.length > 0
+                          ? ` · skipped ${followUpCarryPreview.skippedReason.length}`
+                          : ''}
+                      </p>
+                    )}
+                  </div>
+                )}
+                {followUpParentSession.mode === 'resume' &&
+                  (resumePreview || resumeSnapshot) && (
+                    <div className="mt-2 rounded-lg border rt-border-soft p-2 text-[11px] rt-text-muted">
+                      {(() => {
+                        const snapshot = resumePreview ?? resumeSnapshot;
+                        if (!snapshot) return null;
+                        return (
+                          <>
+                            <p className="font-semibold rt-text-strong">
+                              Resume plan: {snapshot.nextPhase} (round {snapshot.nextRound})
+                            </p>
+                            <p className="mt-1">
+                              Inherit: {snapshot.inherited.join(', ') || 'none'}
+                            </p>
+                            <p className="mt-1">
+                              Discard: {snapshot.discarded.join(', ') || 'none'}
+                            </p>
+                            <p className="mt-1">Reason: {snapshot.reason}</p>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
               </div>
             )}
 
@@ -1942,6 +2208,12 @@ export default function HomePage() {
               <div className="flex items-center gap-1.5 rounded-lg border rt-surface px-2.5 py-1.5 text-xs rt-text-dim">
                 <Zap className="h-3 w-3 text-[var(--rt-live-state)]" />
                 <span>{interjections.length} queued</span>
+              </div>
+            )}
+            {isRunning && degradedAgents.length > 0 && (
+              <div className="flex items-center gap-1.5 rounded-lg border rt-surface px-2.5 py-1.5 text-xs rt-text-dim">
+                <Activity className="h-3 w-3 text-[var(--rt-warning-state)]" />
+                <span>Degraded agents: {degradedAgents.join(', ')}</span>
               </div>
             )}
           </div>
@@ -2182,14 +2454,24 @@ export default function HomePage() {
                 onToggleSourceSelection={
                   sessionId
                     ? (sourceId, selected) =>
-                        void handleResearchSourceSelection(
-                          sessionId,
-                          sourceId,
-                          selected
-                        ).catch((error) =>
+                        void handleResearchSourceUpdate(sessionId, sourceId, {
+                          selected,
+                          excludedReason: selected ? '' : 'manual_exclude',
+                        }).catch((error) =>
                           setError(
                             error instanceof Error ? error.message : String(error)
                           )
+                        )
+                    : null
+                }
+                onPatchSource={
+                  sessionId
+                    ? (sourceId, patch) =>
+                        void handleResearchSourceUpdate(sessionId, sourceId, patch).catch(
+                          (error) =>
+                            setError(
+                              error instanceof Error ? error.message : String(error)
+                            )
                         )
                     : null
                 }
@@ -2261,10 +2543,25 @@ export default function HomePage() {
                     onToggleSourceSelection={
                       sessionId
                         ? (sourceId, selected) =>
-                            void handleResearchSourceSelection(
+                            void handleResearchSourceUpdate(sessionId, sourceId, {
+                              selected,
+                              excludedReason: selected ? '' : 'manual_exclude',
+                            }).catch((error) =>
+                              setError(
+                                error instanceof Error
+                                  ? error.message
+                                  : String(error)
+                              )
+                            )
+                        : null
+                    }
+                    onPatchSource={
+                      sessionId
+                        ? (sourceId, patch) =>
+                            void handleResearchSourceUpdate(
                               sessionId,
                               sourceId,
-                              selected
+                              patch
                             ).catch((error) =>
                               setError(
                                 error instanceof Error
@@ -2324,105 +2621,16 @@ export default function HomePage() {
                 )}
 
                 {sessionId && actionItems.length > 0 && (
-                  <Card className="rt-surface">
-                    <CardHeader className="px-3 pb-1.5 pt-3">
-                      <CardTitle className="text-sm rt-text-strong">
-                        Execution Plan
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2 px-3 pb-3">
-                      {actionItems.map((item) => (
-                        <div
-                          key={item.id}
-                          className="rounded-xl border rt-border-soft p-2.5"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="space-y-1">
-                              <p className="text-sm font-medium rt-text-strong">
-                                {item.content}
-                              </p>
-                              <div className="flex flex-wrap gap-1">
-                                <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
-                                  {item.source === 'carried_forward'
-                                    ? 'Carried forward'
-                                    : 'Generated'}
-                                </span>
-                                {item.carriedFromSessionId && (
-                                  <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
-                                    {item.carriedFromSessionId.slice(0, 8)}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <Select
-                              value={item.status}
-                              onValueChange={(value) => {
-                                const nextStatus = value as ActionItemStatus;
-                                setActionItems(
-                                  updateLocalActionItems(actionItems, item.id, {
-                                    status: nextStatus,
-                                  })
-                                );
-                                void handleActionItemUpdate(sessionId, item.id, {
-                                  status: nextStatus,
-                                }).catch((error) =>
-                                  setError(
-                                    error instanceof Error
-                                      ? error.message
-                                      : String(error)
-                                  )
-                                );
-                              }}
-                              disabled={isRunning}
-                            >
-                              <SelectTrigger className="rt-input h-8 w-[150px] text-xs">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {ACTION_ITEM_STATUS_OPTIONS.map((status) => (
-                                  <SelectItem
-                                    key={status}
-                                    value={status}
-                                    className="text-xs"
-                                  >
-                                    {ACTION_ITEM_STATUS_LABELS[status]}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <Textarea
-                            value={item.note ?? ''}
-                            onChange={(event) =>
-                              setActionItems(
-                                updateLocalActionItems(actionItems, item.id, {
-                                  note: event.target.value,
-                                })
-                              )
-                            }
-                            onBlur={() =>
-                              void handleActionItemUpdate(sessionId, item.id, {
-                                note:
-                                  useDiscussionStore
-                                    .getState()
-                                    .actionItems.find((entry) => entry.id === item.id)
-                                    ?.note ?? '',
-                              }).catch((error) =>
-                                setError(
-                                  error instanceof Error
-                                    ? error.message
-                                    : String(error)
-                                )
-                              )
-                            }
-                            disabled={isRunning}
-                            placeholder="Execution note, owner, or outcome signal"
-                            className="rt-input mt-2 min-h-[74px] text-xs"
-                          />
-                        </div>
-                      ))}
-                    </CardContent>
-                  </Card>
+                  <ActionItemsBoard
+                    title="Execution Plan"
+                    items={actionItems}
+                    disabled={isRunning}
+                    onItemsChange={setActionItems}
+                    onPatch={(itemId, patch) =>
+                      handleActionItemUpdate(sessionId, itemId, patch)
+                    }
+                    onError={setError}
+                  />
                 )}
 
                 {sessionId && !isRunning && (
@@ -2791,6 +2999,51 @@ export default function HomePage() {
                           Parent session: {historyDetail.parentSession.topic}
                         </button>
                       )}
+                      {historyDetail.resumeMeta?.resumedFromSessionId && (
+                        <button
+                          type="button"
+                          className="mt-1 block text-left text-[11px] underline rt-text-dim"
+                          onClick={() =>
+                            void loadHistory(historyDetail.resumeMeta!.resumedFromSessionId!)
+                          }
+                        >
+                          Resumed from: {historyDetail.resumeMeta.resumedFromSessionId}
+                        </button>
+                      )}
+                      {historyDetail.resumeMeta?.snapshot && (
+                        <div className="mt-2 rounded-lg border rt-border-soft p-2 text-[11px] rt-text-muted">
+                          <p className="font-semibold rt-text-strong">
+                            Resume decision: {historyDetail.resumeMeta.snapshot.nextPhase} / round{' '}
+                            {historyDetail.resumeMeta.snapshot.nextRound}
+                          </p>
+                          <p className="mt-1">
+                            Inherit:{' '}
+                            {historyDetail.resumeMeta.snapshot.inherited.join(', ') ||
+                              'none'}
+                          </p>
+                          <p className="mt-1">
+                            Discard:{' '}
+                            {historyDetail.resumeMeta.snapshot.discarded.join(', ') ||
+                              'none'}
+                          </p>
+                          <p className="mt-1">
+                            Reason: {historyDetail.resumeMeta.snapshot.reason}
+                          </p>
+                        </div>
+                      )}
+                      {historyDetail.degradeEvents.length > 0 && (
+                        <div className="mt-2 rounded-lg border rt-border-soft p-2 text-[11px] rt-text-muted">
+                          <p className="font-semibold rt-text-strong">
+                            Degrade events ({historyDetail.degradeEvents.length})
+                          </p>
+                          {historyDetail.degradeEvents.slice(-3).map((event) => (
+                            <p key={event.id} className="mt-1">
+                              {event.agentId ?? 'agent'} · {event.phase ?? 'unknown phase'} ·{' '}
+                              {event.timeoutType ?? 'error'}
+                            </p>
+                          ))}
+                        </div>
+                      )}
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         <Button
                           size="sm"
@@ -2799,6 +3052,16 @@ export default function HomePage() {
                         >
                           Use setup
                         </Button>
+                        {['failed', 'stopped'].includes(historyDetail.session.status) && (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => void handleResumeHistorySession()}
+                          >
+                            Resume safely
+                          </Button>
+                        )}
                         <Button
                           size="sm"
                           variant="ghost"
@@ -2838,6 +3101,47 @@ export default function HomePage() {
                         researchEvaluation={historyDetail.researchRun?.evaluation ?? null}
                       />
                     )}
+                    {historyDetail.decisionClaims.length > 0 && (
+                      <div className="rounded-xl border rt-surface p-2.5">
+                        <p className="rt-eyebrow">Claim Evidence Map</p>
+                        <div className="mt-2 space-y-1.5">
+                          {historyDetail.decisionClaims.map((claim) => (
+                            <div key={claim.id} className="rounded-lg border rt-border-soft p-2">
+                              <p className="text-xs font-medium rt-text-strong">{claim.claim}</p>
+                              <p className="mt-1 text-[11px] rt-text-dim">
+                                Sources: {claim.sourceIds.join(', ') || 'none'}
+                              </p>
+                              {claim.gapReason && (
+                                <p className="mt-1 text-[11px] rt-text-dim">
+                                  Gap: {claim.gapReason}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {(historyDetail.unresolvedEvidence?.length ?? 0) > 0 && (
+                      <div className="rounded-xl border rt-surface p-2.5">
+                        <p className="rt-eyebrow">Unresolved Evidence</p>
+                        <div className="mt-2 space-y-1.5">
+                          {historyDetail.unresolvedEvidence!.map((item, index) => (
+                            <div
+                              key={`${item.claim}-${index}`}
+                              className="rounded-lg border rt-border-soft p-2"
+                            >
+                              <p className="text-xs font-medium rt-text-strong">{item.claim}</p>
+                              <p className="mt-1 text-[11px] rt-text-dim">
+                                Source IDs: {item.sourceIds.join(', ') || 'none'}
+                              </p>
+                              <p className="mt-1 text-[11px] rt-text-dim">
+                                {item.gapReason || 'Evidence could not be resolved to persisted sources.'}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {historyDetail.researchRun && (
                       <ResearchPanel
@@ -2856,10 +3160,26 @@ export default function HomePage() {
                           )
                         }
                         onToggleSourceSelection={(sourceId, selected) =>
-                          void handleResearchSourceSelection(
+                          void handleResearchSourceUpdate(
                             historyDetail.session.id,
                             sourceId,
-                            selected
+                            {
+                              selected,
+                              excludedReason: selected ? '' : 'manual_exclude',
+                            }
+                          ).catch((error) =>
+                            setError(
+                              error instanceof Error
+                                ? error.message
+                                : String(error)
+                            )
+                          )
+                        }
+                        onPatchSource={(sourceId, patch) =>
+                          void handleResearchSourceUpdate(
+                            historyDetail.session.id,
+                            sourceId,
+                            patch
                           ).catch((error) =>
                             setError(
                               error instanceof Error
@@ -2872,126 +3192,26 @@ export default function HomePage() {
                     )}
 
                     {historyDetail.actionItems.length > 0 && (
-                      <div className="rounded-xl border rt-surface p-2.5">
-                        <div className="mb-2 flex items-center justify-between gap-2">
-                          <p className="rt-eyebrow">
-                            Execution Plan
-                          </p>
-                          <span className="text-[10px] rt-text-dim">
-                            {historyDetail.actionItems.length} items
-                          </span>
-                        </div>
-                        <div className="space-y-2">
-                          {historyDetail.actionItems.map((item) => (
-                            <div
-                              key={item.id}
-                              className="rounded-xl border rt-border-soft p-2.5"
-                            >
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="space-y-1">
-                                  <p className="text-sm font-medium rt-text-strong">
-                                    {item.content}
-                                  </p>
-                                  <div className="flex flex-wrap gap-1">
-                                    <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
-                                      {item.source === 'carried_forward'
-                                        ? 'Carried forward'
-                                        : 'Generated'}
-                                    </span>
-                                    {item.carriedFromSessionId && (
-                                      <button
-                                        type="button"
-                                        className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] underline rt-text-dim"
-                                        onClick={() =>
-                                          void loadHistory(item.carriedFromSessionId!)
-                                        }
-                                      >
-                                        From {item.carriedFromSessionId.slice(0, 8)}
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                                <Select
-                                  value={item.status}
-                                  onValueChange={(value) => {
-                                    const nextStatus = value as ActionItemStatus;
-                                    setHistoryDetail((prev) =>
-                                      prev && prev.session.id === historyDetail.session.id
-                                        ? {
-                                            ...prev,
-                                            actionItems: updateLocalActionItems(
-                                              prev.actionItems,
-                                              item.id,
-                                              { status: nextStatus }
-                                            ),
-                                          }
-                                        : prev
-                                    );
-                                    void handleActionItemUpdate(
-                                      historyDetail.session.id,
-                                      item.id,
-                                      { status: nextStatus }
-                                    ).catch((error) =>
-                                      setError(
-                                        error instanceof Error
-                                          ? error.message
-                                          : String(error)
-                                      )
-                                    );
-                                  }}
-                                >
-                                  <SelectTrigger className="rt-input h-8 w-[150px] text-xs">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {ACTION_ITEM_STATUS_OPTIONS.map((status) => (
-                                      <SelectItem
-                                        key={status}
-                                        value={status}
-                                        className="text-xs"
-                                      >
-                                        {ACTION_ITEM_STATUS_LABELS[status]}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <Textarea
-                                value={item.note ?? ''}
-                                onChange={(event) =>
-                                  setHistoryDetail((prev) =>
-                                    prev && prev.session.id === historyDetail.session.id
-                                      ? {
-                                          ...prev,
-                                          actionItems: updateLocalActionItems(
-                                            prev.actionItems,
-                                            item.id,
-                                            { note: event.target.value }
-                                          ),
-                                        }
-                                      : prev
-                                  )
+                      <ActionItemsBoard
+                        title="Execution Plan"
+                        items={historyDetail.actionItems}
+                        actionStats={historyDetail.actionStats ?? null}
+                        onItemsChange={(items) =>
+                          setHistoryDetail((prev) =>
+                            prev && prev.session.id === historyDetail.session.id
+                              ? {
+                                  ...prev,
+                                  actionItems: items,
+                                  actionStats: summarizeActionStats(items),
                                 }
-                                onBlur={(event) =>
-                                  void handleActionItemUpdate(
-                                    historyDetail.session.id,
-                                    item.id,
-                                    { note: event.target.value }
-                                  ).catch((error) =>
-                                    setError(
-                                      error instanceof Error
-                                        ? error.message
-                                        : String(error)
-                                    )
-                                  )
-                                }
-                                placeholder="Execution note, result, or owner"
-                                className="rt-input mt-2 min-h-[74px] text-xs"
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                              : prev
+                          )
+                        }
+                        onPatch={(itemId, patch) =>
+                          handleActionItemUpdate(historyDetail.session.id, itemId, patch)
+                        }
+                        onError={setError}
+                      />
                     )}
 
                     <div className="rounded-xl border rt-surface p-2.5">
@@ -2999,6 +3219,48 @@ export default function HomePage() {
                         Outcome Review
                       </p>
                       <div className="mt-2 space-y-2">
+                        <Textarea
+                          value={historyDetail.session.actualOutcome ?? ''}
+                          onChange={(event) =>
+                            setHistoryDetail((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    session: {
+                                      ...prev.session,
+                                      actualOutcome: event.target.value,
+                                    },
+                                  }
+                                : prev
+                            )
+                          }
+                          placeholder="What actual outcome was observed?"
+                          className="rt-input min-h-[64px] text-xs"
+                        />
+                        <Input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={historyDetail.session.outcomeConfidence ?? 0}
+                          onChange={(event) =>
+                            setHistoryDetail((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    session: {
+                                      ...prev.session,
+                                      outcomeConfidence: Math.max(
+                                        0,
+                                        Math.min(100, Number(event.target.value) || 0)
+                                      ),
+                                    },
+                                  }
+                                : prev
+                            )
+                          }
+                          className="rt-input h-8 text-xs"
+                          placeholder="Outcome confidence (0-100)"
+                        />
                         <Textarea
                           value={historyDetail.session.outcomeSummary ?? ''}
                           onChange={(event) =>
@@ -3041,6 +3303,9 @@ export default function HomePage() {
                             className="h-7 text-xs"
                             onClick={() =>
                               void handleSessionReviewUpdate(historyDetail.session.id, {
+                                actualOutcome: historyDetail.session.actualOutcome ?? '',
+                                outcomeConfidence:
+                                  historyDetail.session.outcomeConfidence ?? 0,
                                 outcomeSummary:
                                   historyDetail.session.outcomeSummary ?? '',
                                 retrospectiveNote:

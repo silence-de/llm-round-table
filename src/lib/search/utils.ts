@@ -10,7 +10,9 @@ export const DEFAULT_RESEARCH_CONFIG: ResearchConfig = {
   mode: 'auto',
   userQueries: [],
   preferredDomains: [],
+  domainPolicy: 'prefer',
   maxSources: 6,
+  maxReruns: 2,
 };
 
 export function normalizeResearchConfig(
@@ -21,7 +23,9 @@ export function normalizeResearchConfig(
     mode: value?.mode === 'guided' ? 'guided' : 'auto',
     userQueries: normalizeStringList(value?.userQueries),
     preferredDomains: normalizeDomainList(value?.preferredDomains),
+    domainPolicy: normalizeDomainPolicy(value?.domainPolicy),
     maxSources: normalizeMaxSources(value?.maxSources),
+    maxReruns: normalizeMaxReruns(value?.maxReruns),
   };
 }
 
@@ -58,7 +62,15 @@ export function evaluateResearchQuality(input: {
 }): ResearchEvaluation {
   const { brief, queryPlan, sources } = input;
   const domains = new Set(sources.map((source) => source.domain).filter(Boolean));
-  const recentSourceCount = sources.filter((source) => isRecent(source.publishedDate)).length;
+  const recentSourceCount = sources.filter((source) =>
+    isRecent(source.publishedDate, brief.decisionType)
+  ).length;
+  const staleSourceCount = sources.filter(
+    (source) => !isRecent(source.publishedDate, brief.decisionType)
+  ).length;
+  const missingPublishedDateCount = sources.filter(
+    (source) => !source.publishedDate
+  ).length;
   const coverageSignals = [
     queryPlan.some((query) => includesAny(query, [brief.topic])),
     brief.goal
@@ -95,6 +107,7 @@ export function evaluateResearchQuality(input: {
   );
 
   const gaps: string[] = [];
+  const staleFlags: string[] = [];
   if (sources.length < 3) {
     gaps.push('可用来源数量偏少，结论证据厚度不足。');
   }
@@ -110,6 +123,23 @@ export function evaluateResearchQuality(input: {
   if (diversityScore < 50) {
     gaps.push('来源域名过于集中，证据多样性不足。');
   }
+  if (sources.length > 0) {
+    const staleRatio = staleSourceCount / sources.length;
+    const missingDateRatio = missingPublishedDateCount / sources.length;
+    if (recentSourceCount === 0) {
+      staleFlags.push('no_recent_sources');
+    }
+    if (staleRatio >= 0.6) {
+      staleFlags.push('stale_majority');
+      gaps.push('多数来源时效性不足，建议补充更新证据。');
+    }
+    if (missingDateRatio >= 0.5) {
+      staleFlags.push('missing_publish_dates');
+      gaps.push('来源发布时间缺失较多，时效判断可靠性受限。');
+    }
+  } else {
+    staleFlags.push('no_sources');
+  }
 
   return {
     coverageScore,
@@ -117,6 +147,7 @@ export function evaluateResearchQuality(input: {
     diversityScore,
     overallConfidence,
     gaps,
+    staleFlags,
   };
 }
 
@@ -160,7 +191,11 @@ function normalizeStringList(value: unknown) {
 
 function normalizeDomainList(value: unknown) {
   return normalizeStringList(value).map((item) =>
-    item.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '')
+    item
+      .replace(/^https?:\/\//, '')
+      .replace(/^www\./, '')
+      .replace(/\/.*$/, '')
+      .toLowerCase()
   );
 }
 
@@ -168,6 +203,17 @@ function normalizeMaxSources(value: unknown) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return DEFAULT_RESEARCH_CONFIG.maxSources;
   return Math.max(3, Math.min(10, Math.round(numeric)));
+}
+
+function normalizeMaxReruns(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return DEFAULT_RESEARCH_CONFIG.maxReruns;
+  return Math.max(0, Math.min(5, Math.round(numeric)));
+}
+
+function normalizeDomainPolicy(value: unknown): ResearchConfig['domainPolicy'] {
+  if (value === 'any' || value === 'strict') return value;
+  return 'prefer';
 }
 
 function toScore(value: number) {
@@ -187,9 +233,21 @@ function extractMeaningfulTerms(text: string) {
     .slice(0, 5);
 }
 
-function isRecent(value?: string) {
+function isRecent(value?: string, decisionType: DecisionBrief['decisionType'] = 'general') {
   if (!value) return false;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return false;
-  return Date.now() - date.getTime() <= 180 * 24 * 60 * 60 * 1000;
+  return Date.now() - date.getTime() <= staleWindowMs(decisionType);
+}
+
+function staleWindowMs(decisionType: DecisionBrief['decisionType']) {
+  const windowDays =
+    decisionType === 'investment'
+      ? 45
+      : decisionType === 'product' || decisionType === 'risk'
+        ? 90
+        : decisionType === 'career'
+          ? 120
+          : 180;
+  return windowDays * 24 * 60 * 60 * 1000;
 }

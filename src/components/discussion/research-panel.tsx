@@ -14,6 +14,10 @@ interface ResearchPanelProps {
   busy?: boolean;
   onRerun?: (() => void) | null;
   onToggleSourceSelection?: ((sourceId: string, selected: boolean) => void) | null;
+  onPatchSource?: ((
+    sourceId: string,
+    patch: { pinned?: boolean; rank?: number; excludedReason?: string }
+  ) => void) | null;
 }
 
 export function ResearchPanel({
@@ -23,11 +27,16 @@ export function ResearchPanel({
   busy = false,
   onRerun = null,
   onToggleSourceSelection = null,
+  onPatchSource = null,
 }: ResearchPanelProps) {
   const [expanded, setExpanded] = useState(true);
 
   const visibleSources = useMemo(
-    () => (researchRun?.sources.length ? researchRun.sources : sources),
+    () =>
+      [...(researchRun?.sources.length ? researchRun.sources : sources)].sort((a, b) => {
+        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+        return a.rank - b.rank;
+      }),
     [researchRun, sources]
   );
   const selectedSources = useMemo(
@@ -139,6 +148,23 @@ export function ResearchPanel({
                   ))}
                 </div>
               )}
+              {researchRun.evaluation.staleFlags.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                    Staleness Flags
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {researchRun.evaluation.staleFlags.map((flag) => (
+                      <span
+                        key={`stale-${flag}`}
+                        className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim"
+                      >
+                        {flag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
               <p className="mt-2 text-[11px] rt-text-dim">
                 {researchRun.evaluation.overallConfidence >= 70
                   ? 'Evidence posture: solid enough to support a decision.'
@@ -226,6 +252,20 @@ export function ResearchPanel({
                               {source.selected ? 'Exclude' : 'Include'}
                             </Button>
                           )}
+                          {onPatchSource && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 px-2 text-[11px]"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onPatchSource(source.id, { pinned: !source.pinned });
+                              }}
+                            >
+                              {source.pinned ? 'Unpin' : 'Pin'}
+                            </Button>
+                          )}
                           <a
                             href={source.url}
                             target="_blank"
@@ -242,9 +282,22 @@ export function ResearchPanel({
                         <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
                           {source.selected ? 'selected' : 'excluded'}
                         </span>
+                        {source.pinned && (
+                          <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
+                            pinned
+                          </span>
+                        )}
+                        <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
+                          rank {source.rank}
+                        </span>
                         {source.publishedDate && (
                           <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
                             {source.publishedDate.slice(0, 10)}
+                          </span>
+                        )}
+                        {source.stale && (
+                          <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
+                            stale
                           </span>
                         )}
                         <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
@@ -259,10 +312,45 @@ export function ResearchPanel({
                           </span>
                         ))}
                       </div>
+                      {onPatchSource && (
+                        <div className="mt-1.5 flex gap-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 px-2 text-[10px]"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onPatchSource(source.id, {
+                                rank: Math.max(1, source.rank - 1),
+                              });
+                            }}
+                          >
+                            ↑ rank
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 px-2 text-[10px]"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onPatchSource(source.id, { rank: source.rank + 1 });
+                            }}
+                          >
+                            ↓ rank
+                          </Button>
+                        </div>
+                      )}
 
                       <p className="mt-1.5 line-clamp-3 text-xs leading-relaxed rt-text-muted">
                         {source.snippet}
                       </p>
+                      {!source.selected && source.excludedReason && (
+                        <p className="mt-1 text-[11px] rt-text-dim">
+                          excluded: {source.excludedReason}
+                        </p>
+                      )}
                     </div>
                   ))}
                 </div>

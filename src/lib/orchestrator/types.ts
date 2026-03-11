@@ -33,6 +33,8 @@ export interface DiscussionConfig {
   moderatorAgentId: string;
   maxDebateRounds: number;
   parentContext?: string;
+  resumeState?: DiscussionResumeState;
+  resumeSnapshot?: DiscussionResumeSnapshot;
   drainInterjections?: (
     context: { phase: string; round?: number }
   ) => Promise<UserInterjection[]> | UserInterjection[];
@@ -53,6 +55,9 @@ export interface DiscussionConfig {
   ) => Promise<void> | void;
   onUsagePersist?: (
     usage: { inputTokens?: number; outputTokens?: number }
+  ) => Promise<void> | void;
+  onSessionEventPersist?: (
+    event: DiscussionSessionEvent
   ) => Promise<void> | void;
 }
 
@@ -92,4 +97,56 @@ export interface PersistableMessage {
   phase: string;
   round?: number;
   content: string;
+}
+
+export interface DiscussionResumeState {
+  sourceSessionId: string;
+  nextPhase:
+    | DiscussionPhase.OPENING
+    | DiscussionPhase.INITIAL_RESPONSES
+    | DiscussionPhase.ANALYSIS
+    | DiscussionPhase.SUMMARY;
+  nextRound: number;
+  allMessages: Array<{
+    agentId: string;
+    displayName: string;
+    content: string;
+    phase: string;
+  }>;
+  agentResponses: AgentResponse[];
+  researchBrief?: string | null;
+  researchSources: ResearchSource[];
+  researchHandled: boolean;
+  parentContextAddendum?: string;
+}
+
+export interface DiscussionResumeSnapshot {
+  sourceSessionId: string;
+  nextPhase:
+    | DiscussionPhase.OPENING
+    | DiscussionPhase.INITIAL_RESPONSES
+    | DiscussionPhase.ANALYSIS
+    | DiscussionPhase.SUMMARY;
+  nextRound: number;
+  inherited: string[];
+  discarded: string[];
+  reason: string;
+}
+
+export interface DiscussionSessionEvent {
+  type:
+    | 'timeout'
+    | 'agent_degraded'
+    | 'action_updated'
+    | 'follow_up_inherited'
+    | 'resume_preview'
+    | 'resume_started'
+    | 'provider_error';
+  provider?: string;
+  modelId?: string;
+  phase?: string;
+  agentId?: string;
+  timeoutType?: 'startup' | 'idle' | 'request';
+  message?: string;
+  metadata?: Record<string, unknown>;
 }

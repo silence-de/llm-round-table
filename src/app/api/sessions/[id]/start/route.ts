@@ -1,6 +1,7 @@
 import { AGENT_CATALOG } from '@/lib/agents/registry';
 import { resolvePersonaText } from '@/lib/agents/persona-presets';
 import type { PersonaSelection, SessionAgent } from '@/lib/agents/types';
+import { apiError } from '@/lib/api/errors';
 import type { DecisionBrief, DiscussionAgenda } from '@/lib/decision/types';
 import {
   DEFAULT_DECISION_BRIEF,
@@ -10,6 +11,7 @@ import {
 } from '@/lib/decision/utils';
 import {
   appendMessage,
+  appendSessionEvent,
   createSession,
   drainPendingInterjections,
   getSessionDetail,
@@ -23,6 +25,7 @@ import {
   upsertResearchRun,
 } from '@/lib/db/repository';
 import { DiscussionOrchestrator } from '@/lib/orchestrator/orchestrator';
+import { buildResumePlan } from '@/lib/orchestrator/resume';
 import type { ResearchConfig } from '@/lib/search/types';
 import { normalizeResearchConfig } from '@/lib/search/utils';
 import { encodeSSE } from '@/lib/sse/types';
@@ -47,6 +50,8 @@ export async function POST(
     moderatorAgentId?: string;
     maxDebateRounds?: number;
     parentSessionId?: string | null;
+    resumeFromSessionId?: string | null;
+    carryForwardMode?: 'all_open' | 'high_priority_only';
   };
   const {
     topic: rawTopic,
@@ -60,6 +65,8 @@ export async function POST(
     moderatorAgentId = 'claude',
     maxDebateRounds: rawMaxDebateRounds = 2,
     parentSessionId = null,
+    resumeFromSessionId = null,
+    carryForwardMode = 'high_priority_only',
   } = body;
   const brief = normalizeDecisionBrief({
     ...DEFAULT_DECISION_BRIEF,
@@ -73,20 +80,20 @@ export async function POST(
   const researchConfig = normalizeResearchConfig(rawResearchConfig);
   const topic = brief.topic;
   const agentIds = Array.isArray(rawAgentIds) ? rawAgentIds : [];
+  const normalizedCarryForwardMode =
+    carryForwardMode === 'high_priority_only'
+      ? 'high_priority_only'
+      : 'all_open';
   const normalizedMaxDebateRounds = Number.isFinite(rawMaxDebateRounds)
     ? Math.max(1, Math.min(5, Math.floor(rawMaxDebateRounds)))
     : 2;
 
   if (!topic || !agentIds?.length) {
-    return new Response(JSON.stringify({ error: 'topic and agentIds required' }), {
-      status: 400,
-    });
+    return apiError(400, 'INVALID_INPUT', 'topic and agentIds required');
   }
 
   if (!id || id === '_') {
-    return new Response(JSON.stringify({ error: 'invalid session id' }), {
-      status: 400,
-    });
+    return apiError(400, 'INVALID_INPUT', 'invalid session id');
   }
 
   // Build session agents from catalog, skipping those without API keys
@@ -144,18 +151,37 @@ export async function POST(
   ).length;
   const hasModerator = agents.some((a) => a.definition.id === moderatorAgentId);
   if (!hasModerator || participantCount === 0) {
-    return new Response(
-      JSON.stringify({
-        error:
-          'No runnable agent set. Ensure moderator and at least one participant have valid API keys.',
-      }),
-      { status: 400 }
+    return apiError(
+      400,
+      'AUTH_MISSING_KEY',
+      'No runnable agent set. Ensure moderator and at least one participant have valid API keys.',
+      { moderatorAgentId, participantCount }
     );
   }
 
-  const parentDetail = parentSessionId
-    ? await getSessionDetail(parentSessionId)
+  const normalizedParentSessionId = parentSessionId ?? resumeFromSessionId ?? null;
+  const parentDetail = normalizedParentSessionId
+    ? await getSessionDetail(normalizedParentSessionId)
     : null;
+  const resumeDetail = resumeFromSessionId
+    ? await getSessionDetail(resumeFromSessionId)
+    : null;
+  if (resumeFromSessionId && !resumeDetail) {
+    return apiError(404, 'NOT_FOUND', 'resume source session not found');
+  }
+  if (
+    resumeDetail &&
+    !['failed', 'stopped'].includes(resumeDetail.session.status)
+  ) {
+    return apiError(
+      409,
+      'CONFLICT',
+      'only failed or stopped sessions can be resumed'
+    );
+  }
+  const resumePlan = resumeDetail ? buildResumePlan(resumeDetail) : undefined;
+  const resumeState = resumePlan?.state;
+  const resumeSnapshot = resumePlan?.snapshot;
   const parentContext = parentDetail
     ? [
         `这是一个 follow-up 讨论，延续自历史会话「${parentDetail.session.topic}」。`,
@@ -168,12 +194,15 @@ export async function POST(
         parentDetail.minutes?.content
           ? `上次纪要要点：${parentDetail.minutes.content.slice(0, 300)}`
           : '',
+        resumeState?.parentContextAddendum
+          ? `恢复策略：${resumeState.parentContextAddendum}`
+          : '',
       ]
         .filter(Boolean)
         .join('\n')
     : undefined;
 
-  await createSession({
+  const followUpResult = await createSession({
     id,
     brief,
     agenda,
@@ -184,8 +213,30 @@ export async function POST(
     personaSelections: resolvedPersonaSelections,
     personas: resolvedPersonas,
     researchConfig,
-    parentSessionId,
+    parentSessionId: normalizedParentSessionId,
+    resumedFromSessionId: resumeFromSessionId,
+    resumeSnapshot: resumeSnapshot ?? null,
+    carryForwardMode: normalizedCarryForwardMode,
   });
+  if (normalizedParentSessionId) {
+    await appendSessionEvent(id, {
+      type: 'follow_up_inherited',
+      message: `carry-forward mode: ${normalizedCarryForwardMode}`,
+      metadata: {
+        parentSessionId: normalizedParentSessionId,
+        carryForwardMode: normalizedCarryForwardMode,
+        inheritedActionCount: followUpResult.inheritedActionCount,
+        skippedReason: followUpResult.skippedReason,
+      },
+    });
+  }
+  if (resumeSnapshot) {
+    await appendSessionEvent(id, {
+      type: 'resume_started',
+      message: `resumed from ${resumeSnapshot.sourceSessionId}`,
+      metadata: resumeSnapshot as unknown as Record<string, unknown>,
+    });
+  }
 
   const orchestrator = new DiscussionOrchestrator({
     sessionId: id,
@@ -197,6 +248,7 @@ export async function POST(
     moderatorAgentId,
     maxDebateRounds: normalizedMaxDebateRounds,
     parentContext,
+    resumeState,
     drainInterjections: ({ phase, round }) =>
       drainPendingInterjections({ sessionId: id, phase, round }),
     shouldStop: () => isSessionStopRequested(id),
@@ -222,6 +274,7 @@ export async function POST(
         inputDelta: usage.inputTokens ?? 0,
         outputDelta: usage.outputTokens ?? 0,
       }),
+    onSessionEventPersist: (event) => appendSessionEvent(id, event),
   });
 
   const encoder = new TextEncoder();
@@ -233,6 +286,17 @@ export async function POST(
   const stream = new ReadableStream({
     async start(controller) {
       try {
+        if (resumeSnapshot) {
+          controller.enqueue(
+            encoder.encode(
+              encodeSSE({
+                type: 'resume_snapshot',
+                content: JSON.stringify(resumeSnapshot),
+                timestamp: Date.now(),
+              })
+            )
+          );
+        }
         for await (const event of orchestrator.run()) {
           controller.enqueue(encoder.encode(encodeSSE(event)));
         }
@@ -241,6 +305,10 @@ export async function POST(
       } catch (error) {
         const stopped = await isSessionStopRequested(id);
         await updateSessionStatus(id, stopped ? 'stopped' : 'failed');
+        await appendSessionEvent(id, {
+          type: 'provider_error',
+          message: error instanceof Error ? error.message : String(error),
+        });
         const errorEvent = encodeSSE({
           type: 'agent_error',
           content: error instanceof Error ? error.message : String(error),

@@ -19,6 +19,8 @@ export async function conductResearch(input: {
   config: ResearchConfig;
 }): Promise<ResearchExecutionResult> {
   const queryPlan = buildResearchQueryPlan(input.brief, input.config);
+  const includeDomains =
+    input.config.domainPolicy === 'strict' ? input.config.preferredDomains : [];
 
   const results = await Promise.allSettled(
     queryPlan.map((query) =>
@@ -26,7 +28,7 @@ export async function conductResearch(input: {
         query,
         maxResults: Math.max(4, input.config.maxSources),
         searchDepth: 'basic',
-        includeDomains: input.config.preferredDomains,
+        includeDomains,
       })
     )
   );
@@ -48,6 +50,7 @@ export async function conductResearch(input: {
         diversityScore: 0,
         overallConfidence: 0,
         gaps: ['research 查询全部失败，未获取到有效来源。'],
+        staleFlags: ['no_sources'],
       },
       sources: [],
     };
@@ -68,13 +71,19 @@ export async function conductResearch(input: {
         snippet: item.content.slice(0, MAX_SNIPPET_LENGTH).trim(),
         score: item.score,
         selected: true,
+        pinned: false,
+        rank: rawSources.length + 1,
+        excludedReason: '',
+        stale: isStale(item.published_date, input.brief.decisionType),
         qualityFlags: [],
         publishedDate: item.published_date,
       });
     }
   }
 
-  rawSources.sort((left, right) => bScore(right) - bScore(left));
+  rawSources.sort((left, right) =>
+    sourceRankScore(right, input.config) - sourceRankScore(left, input.config)
+  );
   const selectedSources = rawSources
     .slice(0, input.config.maxSources)
     .map((source, index, list) => {
@@ -84,6 +93,8 @@ export async function conductResearch(input: {
       return {
         ...source,
         id: `R${index + 1}`,
+        rank: index + 1,
+        stale: isStale(source.publishedDate, input.brief.decisionType),
         qualityFlags: buildSourceQualityFlags(source, duplicateDomainCount),
       };
     });
@@ -135,4 +146,32 @@ function extractDomain(url: string) {
 
 function bScore(source: ResearchSource) {
   return source.score + (source.publishedDate ? 0.05 : 0);
+}
+
+function sourceRankScore(source: ResearchSource, config: ResearchConfig) {
+  const domainBoost =
+    config.domainPolicy === 'prefer' &&
+    config.preferredDomains.includes(source.domain)
+      ? 0.08
+      : 0;
+  return bScore(source) + domainBoost;
+}
+
+function isStale(
+  publishedDate: string | undefined,
+  decisionType: DecisionBrief['decisionType'] = 'general'
+) {
+  if (!publishedDate) return true;
+  const date = new Date(publishedDate);
+  if (Number.isNaN(date.getTime())) return true;
+  const ageMs = Date.now() - date.getTime();
+  const maxAgeDays =
+    decisionType === 'investment'
+      ? 45
+      : decisionType === 'product' || decisionType === 'risk'
+        ? 90
+        : decisionType === 'career'
+          ? 120
+          : 180;
+  return ageMs > maxAgeDays * 24 * 60 * 60 * 1000;
 }

@@ -19,7 +19,9 @@ export interface ResearchConfig {
   mode: ResearchMode;
   userQueries: string[];
   preferredDomains: string[];
+  domainPolicy: 'any' | 'prefer' | 'strict';
   maxSources: number;
+  maxReruns: number;
 }
 
 export interface ResearchEvaluation {
@@ -28,6 +30,7 @@ export interface ResearchEvaluation {
   diversityScore: number;
   overallConfidence: number;
   gaps: string[];
+  staleFlags: string[];
 }
 
 export interface ResearchSource {
@@ -38,6 +41,10 @@ export interface ResearchSource {
   snippet: string;
   score: number;
   selected: boolean;
+  pinned: boolean;
+  rank: number;
+  excludedReason?: string;
+  stale: boolean;
   qualityFlags: string[];
   publishedDate?: string;
 }
@@ -49,6 +56,7 @@ export interface ResearchRunDetail {
   queryPlan: string[];
   searchConfig: ResearchConfig;
   summary: string;
+  rerunCount?: number;
   evaluation: ResearchEvaluation | null;
   sources: ResearchSource[];
   createdAt?: number | string;

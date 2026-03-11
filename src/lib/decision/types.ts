@@ -18,7 +18,8 @@ export type DecisionStatus =
   | 'completed'
   | 'adopted'
   | 'discarded'
-  | 'needs_follow_up';
+  | 'needs_follow_up'
+  | 'degraded';
 
 export type ActionItemStatus =
   | 'pending'
@@ -53,6 +54,7 @@ export interface DiscussionAgenda {
 export interface DecisionSummaryEvidence {
   claim: string;
   sourceIds: string[];
+  gapReason?: string;
   unresolvedSourceIndices?: number[];
 }
 
@@ -69,14 +71,39 @@ export interface DecisionSummary {
 
 export interface ActionItem {
   id: string;
+  sourceActionId?: string | null;
   content: string;
   status: ActionItemStatus;
   source: 'generated' | 'carried_forward';
   carriedFromSessionId?: string | null;
   note: string;
+  owner: string;
+  dueAt?: number | string | null;
+  verifiedAt?: number | string | null;
+  verificationNote: string;
+  priority: 'low' | 'medium' | 'high';
   sortOrder: number;
   createdAt?: number | string;
   updatedAt?: number | string;
+}
+
+export interface DecisionClaim {
+  id: string;
+  sessionId: string;
+  claim: string;
+  kind: 'evidence';
+  sourceIds: string[];
+  gapReason?: string;
+  createdAt?: number | string;
+}
+
+export interface ActionStats {
+  total: number;
+  pending: number;
+  inProgress: number;
+  verified: number;
+  discarded: number;
+  overdue: number;
 }
 
 export interface DecisionTemplate {

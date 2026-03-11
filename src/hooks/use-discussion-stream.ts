@@ -30,6 +30,8 @@ export function useDiscussionStream() {
       moderatorAgentId?: string;
       maxDebateRounds?: number;
       parentSessionId?: string | null;
+      resumeFromSessionId?: string | null;
+      carryForwardMode?: 'all_open' | 'high_priority_only';
     }) => {
       store.reset();
       store.setRunning(true);
@@ -188,6 +190,15 @@ function handleEvent(event: SSEEvent) {
       s.setError(event.content ?? 'Discussion failed.');
       break;
 
+    case 'agent_degraded':
+      if (event.agentId) {
+        s.addDegradedAgent(event.agentId);
+      }
+      if (event.content) {
+        s.setError(event.content);
+      }
+      break;
+
     case 'moderator_start':
       s.startModerator(useDiscussionStore.getState().phase);
       break;
@@ -203,6 +214,16 @@ function handleEvent(event: SSEEvent) {
     case 'discussion_complete':
       s.setRunning(false);
       void hydrateSessionArtifactsFromSession();
+      break;
+
+    case 'resume_snapshot':
+      if (event.content) {
+        try {
+          s.setResumeSnapshot(JSON.parse(event.content));
+        } catch {
+          // ignore malformed snapshot payload
+        }
+      }
       break;
 
     case 'user_interjection':
@@ -232,7 +253,8 @@ function handleEvent(event: SSEEvent) {
 
     case 'research_complete':
       if (event.content) {
-        s.setResearchStatus('completed');
+        const status = event.meta?.status;
+        s.setResearchStatus(status === 'partial' ? 'partial' : 'completed');
         s.setResearchBriefText(event.content);
       } else {
         s.setResearchStatus('skipped');
@@ -290,7 +312,15 @@ async function extractErrorMessage(response: Response): Promise<string> {
     }
 
     const parsed = JSON.parse(text) as { error?: string };
-    return parsed.error || text;
+    if (parsed && typeof parsed === 'object') {
+      const code =
+        'code' in parsed && typeof parsed.code === 'string'
+          ? parsed.code
+          : '';
+      const error = parsed.error || text;
+      return code ? `[${code}] ${error}` : error;
+    }
+    return text;
   } catch {
     return `HTTP ${response.status}: ${response.statusText}`;
   }

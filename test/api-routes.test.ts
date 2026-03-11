@@ -10,12 +10,16 @@ import {
 import { PATCH as patchActionItemRoute } from '@/app/api/sessions/[id]/action-items/[itemId]/route';
 import { POST as rerunResearchRoute } from '@/app/api/sessions/[id]/research/route';
 import { PATCH as patchResearchSourceRoute } from '@/app/api/sessions/[id]/research/sources/[sourceId]/route';
+import { POST as resumePreviewRoute } from '@/app/api/sessions/[id]/resume-preview/route';
+import { POST as followUpPreviewRoute } from '@/app/api/sessions/[id]/follow-up/route';
 import { POST as startSessionRoute } from '@/app/api/sessions/[id]/start/route';
 import { POST as stopSessionRoute } from '@/app/api/sessions/[id]/stop/route';
 import { POST as interjectionRoute } from '@/app/api/sessions/[id]/interjections/route';
 import {
+  appendMessage,
   createSession,
   getSessionStatus,
+  updateSessionStatus,
   upsertDecisionSummary,
 } from '@/lib/db/repository';
 import {
@@ -74,6 +78,8 @@ function withMockedTavilyResults(
 
 test('agents route exposes availability and persona presets', async () => {
   process.env.OPENAI_API_KEY = 'test-openai';
+  process.env.DEEPSEEK_API_KEY = 'test-deepseek';
+  process.env.MOONSHOT_API_KEY = 'test-moonshot';
 
   const response = await getAgents();
   const payload = await response.json();
@@ -82,6 +88,15 @@ test('agents route exposes availability and persona presets', async () => {
   assert.ok(Array.isArray(payload.personaPresets));
   assert.equal(
     payload.agents.find((agent: { id: string }) => agent.id === 'gpt')?.available,
+    true
+  );
+  assert.equal(
+    payload.agents.find((agent: { id: string }) => agent.id === 'deepseek')
+      ?.available,
+    true
+  );
+  assert.equal(
+    payload.agents.find((agent: { id: string }) => agent.id === 'kimi')?.available,
     true
   );
 });
@@ -315,7 +330,9 @@ test('start route persists research run, sources, and source-backed evidence', a
               mode: 'guided',
               userQueries: ['Research intelligence test 反例 风险'],
               preferredDomains: ['example.com', 'example.org'],
+              domainPolicy: 'prefer',
               maxSources: 4,
+              maxReruns: 2,
             },
             agentIds: ['claude', 'gpt'],
             moderatorAgentId: 'claude',
@@ -361,7 +378,9 @@ test('research rerun route refreshes sources and source selection persists', asy
       mode: 'guided',
       userQueries: ['research rerun manual query'],
       preferredDomains: ['example.com'],
+      domainPolicy: 'prefer',
       maxSources: 4,
+      maxReruns: 2,
     },
   });
 
@@ -402,7 +421,12 @@ test('research rerun route refreshes sources and source selection persists', asy
           `http://localhost/api/sessions/research-rerun-session/research/sources/${rerunPayload.sources[0].id}`,
           {
             method: 'PATCH',
-            body: JSON.stringify({ selected: false }),
+            body: JSON.stringify({
+              selected: false,
+              pinned: true,
+              rank: 1,
+              excludedReason: 'manual_exclude',
+            }),
             headers: { 'Content-Type': 'application/json' },
           }
         ),
@@ -417,6 +441,9 @@ test('research rerun route refreshes sources and source selection persists', asy
       assert.equal(sourceResponse.status, 200);
       const sourcePayload = await sourceResponse.json();
       assert.equal(sourcePayload.selected, false);
+      assert.equal(sourcePayload.pinned, true);
+      assert.equal(sourcePayload.rank, 1);
+      assert.equal(sourcePayload.excludedReason, 'manual_exclude');
     }
   );
 
@@ -427,7 +454,214 @@ test('research rerun route refreshes sources and source selection persists', asy
   const detail = await detailResponse.json();
 
   assert.equal(detail.researchRun.sources[0].selected, false);
+  assert.equal(detail.researchRun.sources[0].pinned, true);
+  assert.equal(detail.researchRun.sources[0].excludedReason, 'manual_exclude');
   assert.equal(detail.researchRun.queryPlan.length >= 3, true);
+});
+
+test('research rerun route enforces max rerun budget', async () => {
+  process.env.TAVILY_API_KEY = 'test-tavily';
+  await createSession({
+    id: 'research-rerun-budget-session',
+    topic: 'research budget',
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 2,
+    selectedAgentIds: ['claude', 'gpt'],
+    modelSelections: {},
+    personaSelections: {},
+    personas: {},
+    researchConfig: {
+      enabled: true,
+      mode: 'auto',
+      userQueries: [],
+      preferredDomains: [],
+      domainPolicy: 'prefer',
+      maxSources: 4,
+      maxReruns: 1,
+    },
+  });
+
+  await withMockedTavilyResults(
+    [
+      {
+        title: 'Budget doc',
+        url: 'https://example.com/rerun-budget',
+        content: 'rerun budget sample',
+        score: 0.8,
+        published_date: '2026-03-09',
+      },
+    ],
+    async () => {
+      const first = await rerunResearchRoute(
+        new Request(
+          'http://localhost/api/sessions/research-rerun-budget-session/research',
+          {
+            method: 'POST',
+            body: JSON.stringify({}),
+            headers: { 'Content-Type': 'application/json' },
+          }
+        ),
+        { params: Promise.resolve({ id: 'research-rerun-budget-session' }) }
+      );
+      assert.equal(first.status, 200);
+
+      const second = await rerunResearchRoute(
+        new Request(
+          'http://localhost/api/sessions/research-rerun-budget-session/research',
+          {
+            method: 'POST',
+            body: JSON.stringify({}),
+            headers: { 'Content-Type': 'application/json' },
+          }
+        ),
+        { params: Promise.resolve({ id: 'research-rerun-budget-session' }) }
+      );
+      assert.equal(second.status, 429);
+      const payload = await second.json();
+      assert.equal(payload.code, 'RATE_LIMITED');
+    }
+  );
+});
+
+test('start route can safely resume a failed session from the last stable phase', async () => {
+  process.env.ANTHROPIC_API_KEY = 'test-anthropic';
+  process.env.OPENAI_API_KEY = 'test-openai';
+
+  await createSession({
+    id: 'failed-source-session',
+    topic: 'resume test',
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 2,
+    selectedAgentIds: ['claude', 'gpt'],
+    modelSelections: {},
+    personaSelections: {},
+    personas: {},
+  });
+
+  await appendMessage({
+    sessionId: 'failed-source-session',
+    role: 'moderator',
+    agentId: 'moderator',
+    displayName: 'Moderator',
+    phase: 'opening',
+    content: '主持人开场',
+  });
+  await appendMessage({
+    sessionId: 'failed-source-session',
+    role: 'agent',
+    agentId: 'gpt',
+    displayName: 'GPT',
+    phase: 'initial_responses',
+    content: '参与者初始观点',
+  });
+  await updateSessionStatus('failed-source-session', 'failed');
+
+  const streamPrompts: string[] = [];
+  installFakeProviders(
+    new FakeProvider({
+      streamChat: async function* (params) {
+        streamPrompts.push(params.messages[0]?.content ?? '');
+        if (params.messages[0]?.content.includes('会议纪要')) {
+          yield* streamText('# 恢复后的纪要');
+          return;
+        }
+
+        yield* streamText('不应重新执行 opening 或 initial');
+      },
+      chat: async () => ({
+        content: JSON.stringify({
+          agreements: [],
+          disagreements: [],
+          shouldConverge: true,
+          moderatorNarrative: '恢复后直接从分析继续。',
+        }),
+        usage: { inputTokens: 8, outputTokens: 12 },
+      }),
+    })
+  );
+
+  const response = await startSessionRoute(
+    new Request('http://localhost/api/sessions/resumed-session/start', {
+      method: 'POST',
+      body: JSON.stringify({
+        topic: 'resume test',
+        agentIds: ['claude', 'gpt'],
+        moderatorAgentId: 'claude',
+        resumeFromSessionId: 'failed-source-session',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    }),
+    { params: Promise.resolve({ id: 'resumed-session' }) }
+  );
+
+  assert.equal(response.status, 200);
+  const events = await readSSEEvents(response);
+  assert.equal(events.at(-1)?.type, 'discussion_complete');
+
+  const detailResponse = await getSessionRoute(
+    new Request('http://localhost/api/sessions/resumed-session'),
+    { params: Promise.resolve({ id: 'resumed-session' }) }
+  );
+  const detail = await detailResponse.json();
+
+  assert.equal(detail.parentSession.id, 'failed-source-session');
+  assert.equal(detail.resumeMeta.snapshot.nextPhase, 'analysis');
+  assert.equal(detail.resumeMeta.snapshot.inherited.includes('opening'), true);
+  assert.equal(detail.resumeMeta.snapshot.discarded.includes('analysis'), true);
+  assert.equal(
+    detail.messages.some((message: { phase: string }) => message.phase === 'opening'),
+    false
+  );
+  assert.equal(
+    detail.messages.some(
+      (message: { phase: string }) => message.phase === 'initial_responses'
+    ),
+    false
+  );
+  assert.equal(
+    detail.messages.some((message: { phase: string }) => message.phase === 'analysis'),
+    true
+  );
+  assert.equal(
+    streamPrompts.some((prompt) => prompt.includes('请就以下议题发表你的观点')),
+    false
+  );
+});
+
+test('resume preview route returns explainable snapshot for failed sessions', async () => {
+  await createSession({
+    id: 'resume-preview-source',
+    topic: 'resume preview',
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 2,
+    selectedAgentIds: ['claude', 'gpt'],
+    modelSelections: {},
+    personaSelections: {},
+    personas: {},
+  });
+  await appendMessage({
+    sessionId: 'resume-preview-source',
+    role: 'moderator',
+    agentId: 'moderator',
+    displayName: 'Moderator',
+    phase: 'opening',
+    content: '主持人开场',
+  });
+  await updateSessionStatus('resume-preview-source', 'failed');
+
+  const response = await resumePreviewRoute(
+    new Request('http://localhost/api/sessions/preview-target/resume-preview', {
+      method: 'POST',
+      body: JSON.stringify({ resumeFromSessionId: 'resume-preview-source' }),
+      headers: { 'Content-Type': 'application/json' },
+    }),
+    { params: Promise.resolve({ id: 'preview-target' }) }
+  );
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.resumeSnapshot.nextPhase, 'initial_responses');
+  assert.equal(payload.resumeSnapshot.discarded.includes('analysis'), true);
+  assert.equal(payload.resumeSnapshot.reason.length > 0, true);
 });
 
 test('stop and interjection routes handle running, completed, and missing sessions', async () => {
@@ -547,6 +781,16 @@ test('follow-up sessions carry forward unfinished action items', async () => {
     new Request(`http://localhost/api/sessions/parent-session/action-items/${secondItemId}`, {
       method: 'PATCH',
       body: JSON.stringify({
+        status: 'in_progress',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    }),
+    { params: Promise.resolve({ id: 'parent-session', itemId: secondItemId }) }
+  );
+  await patchActionItemRoute(
+    new Request(`http://localhost/api/sessions/parent-session/action-items/${secondItemId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
         status: 'verified',
       }),
       headers: { 'Content-Type': 'application/json' },
@@ -564,6 +808,7 @@ test('follow-up sessions carry forward unfinished action items', async () => {
     personaSelections: {},
     personas: {},
     parentSessionId: 'parent-session',
+    carryForwardMode: 'all_open',
   });
 
   const childDetailResponse = await getSessionRoute(
@@ -579,6 +824,92 @@ test('follow-up sessions carry forward unfinished action items', async () => {
   assert.equal(childDetail.actionItems[0].status, 'in_progress');
   assert.equal(childDetail.actionItems[0].carriedFromSessionId, 'parent-session');
   assert.equal(childDetail.actionItems[0].note, 'Owner: PM');
+});
+
+test('follow-up sessions can inherit only high-priority open action items', async () => {
+  await createSession({
+    id: 'priority-parent-session',
+    topic: 'parent',
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 2,
+    selectedAgentIds: ['claude', 'gpt'],
+    modelSelections: {},
+    personaSelections: {},
+    personas: {},
+  });
+
+  await upsertDecisionSummary('priority-parent-session', {
+    summary: 'summary',
+    recommendedOption: 'option',
+    why: [],
+    risks: [],
+    openQuestions: [],
+    nextActions: ['High impact follow-up', 'Routine cleanup'],
+    confidence: 75,
+    evidence: [],
+  });
+
+  const parentDetailResponse = await getSessionRoute(
+    new Request('http://localhost/api/sessions/priority-parent-session'),
+    { params: Promise.resolve({ id: 'priority-parent-session' }) }
+  );
+  const parentDetail = await parentDetailResponse.json();
+
+  await patchActionItemRoute(
+    new Request(
+      `http://localhost/api/sessions/priority-parent-session/action-items/${parentDetail.actionItems[0].id}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ priority: 'high' }),
+        headers: { 'Content-Type': 'application/json' },
+      }
+    ),
+    {
+      params: Promise.resolve({
+        id: 'priority-parent-session',
+        itemId: parentDetail.actionItems[0].id,
+      }),
+    }
+  );
+  await patchActionItemRoute(
+    new Request(
+      `http://localhost/api/sessions/priority-parent-session/action-items/${parentDetail.actionItems[1].id}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ priority: 'medium' }),
+        headers: { 'Content-Type': 'application/json' },
+      }
+    ),
+    {
+      params: Promise.resolve({
+        id: 'priority-parent-session',
+        itemId: parentDetail.actionItems[1].id,
+      }),
+    }
+  );
+
+  await createSession({
+    id: 'priority-child-session',
+    topic: 'child',
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 2,
+    selectedAgentIds: ['claude', 'gpt'],
+    modelSelections: {},
+    personaSelections: {},
+    personas: {},
+    parentSessionId: 'priority-parent-session',
+    carryForwardMode: 'high_priority_only',
+  });
+
+  const childDetailResponse = await getSessionRoute(
+    new Request('http://localhost/api/sessions/priority-child-session'),
+    { params: Promise.resolve({ id: 'priority-child-session' }) }
+  );
+  const childDetail = await childDetailResponse.json();
+
+  assert.equal(childDetail.actionItems.length, 1);
+  assert.equal(childDetail.actionItems[0].content, 'High impact follow-up');
+  assert.equal(childDetail.actionItems[0].priority, 'high');
 });
 
 test('session patch route persists review fields and action item route updates execution items', async () => {
@@ -609,6 +940,8 @@ test('session patch route persists review fields and action item route updates e
       method: 'PATCH',
       body: JSON.stringify({
         decisionStatus: 'needs_follow_up',
+        actualOutcome: 'Rollout stabilized after hotfix.',
+        outcomeConfidence: 68,
         outcomeSummary: 'Initial rollout completed.',
         retrospectiveNote: 'Need stronger ownership mapping.',
       }),
@@ -624,6 +957,16 @@ test('session patch route persists review fields and action item route updates e
   );
   const detail = await detailResponse.json();
   const itemId = detail.actionItems[0].id as string;
+  await patchActionItemRoute(
+    new Request(`http://localhost/api/sessions/review-session/action-items/${itemId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        status: 'in_progress',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    }),
+    { params: Promise.resolve({ id: 'review-session', itemId }) }
+  );
 
   const actionItemResponse = await patchActionItemRoute(
     new Request(`http://localhost/api/sessions/review-session/action-items/${itemId}`, {
@@ -631,6 +974,9 @@ test('session patch route persists review fields and action item route updates e
       body: JSON.stringify({
         status: 'verified',
         note: 'Closed on March 10, 2026.',
+        owner: 'Eng Lead',
+        priority: 'high',
+        verificationNote: 'Validated with production telemetry.',
       }),
       headers: { 'Content-Type': 'application/json' },
     }),
@@ -640,6 +986,10 @@ test('session patch route persists review fields and action item route updates e
   const updatedItem = await actionItemResponse.json();
   assert.equal(updatedItem.status, 'verified');
   assert.equal(updatedItem.note, 'Closed on March 10, 2026.');
+  assert.equal(updatedItem.owner, 'Eng Lead');
+  assert.equal(updatedItem.priority, 'high');
+  assert.equal(updatedItem.verificationNote, 'Validated with production telemetry.');
+  assert.ok(updatedItem.verifiedAt);
 
   const refreshedResponse = await getSessionRoute(
     new Request('http://localhost/api/sessions/review-session'),
@@ -648,6 +998,8 @@ test('session patch route persists review fields and action item route updates e
   const refreshed = await refreshedResponse.json();
 
   assert.equal(refreshed.session.decisionStatus, 'needs_follow_up');
+  assert.equal(refreshed.session.actualOutcome, 'Rollout stabilized after hotfix.');
+  assert.equal(refreshed.session.outcomeConfidence, 68);
   assert.equal(refreshed.session.outcomeSummary, 'Initial rollout completed.');
   assert.equal(
     refreshed.session.retrospectiveNote,
@@ -655,6 +1007,178 @@ test('session patch route persists review fields and action item route updates e
   );
   assert.equal(refreshed.actionItems[0].status, 'verified');
   assert.equal(refreshed.actionItems[0].note, 'Closed on March 10, 2026.');
+  assert.equal(refreshed.actionItems[0].owner, 'Eng Lead');
+  assert.equal(refreshed.actionStats.total, refreshed.actionItems.length);
+  assert.equal(refreshed.actionStats.verified, 1);
+});
+
+test('action item route enforces transition rules and discard validation', async () => {
+  await createSession({
+    id: 'action-validation-session',
+    topic: 'validation',
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 2,
+    selectedAgentIds: ['claude', 'gpt'],
+    modelSelections: {},
+    personaSelections: {},
+    personas: {},
+  });
+
+  await upsertDecisionSummary('action-validation-session', {
+    summary: 'summary',
+    recommendedOption: 'option',
+    why: [],
+    risks: [],
+    openQuestions: [],
+    nextActions: ['Validate integration'],
+    confidence: 70,
+    evidence: [],
+  });
+
+  const detailResponse = await getSessionRoute(
+    new Request('http://localhost/api/sessions/action-validation-session'),
+    { params: Promise.resolve({ id: 'action-validation-session' }) }
+  );
+  const detail = await detailResponse.json();
+  const itemId = detail.actionItems[0].id as string;
+
+  const invalidTransition = await patchActionItemRoute(
+    new Request(
+      `http://localhost/api/sessions/action-validation-session/action-items/${itemId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'verified' }),
+        headers: { 'Content-Type': 'application/json' },
+      }
+    ),
+    {
+      params: Promise.resolve({
+        id: 'action-validation-session',
+        itemId,
+      }),
+    }
+  );
+  assert.equal(invalidTransition.status, 409);
+  const invalidPayload = await invalidTransition.json();
+  assert.equal(invalidPayload.code, 'ACTION_INVALID_TRANSITION');
+
+  await patchActionItemRoute(
+    new Request(
+      `http://localhost/api/sessions/action-validation-session/action-items/${itemId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'in_progress' }),
+        headers: { 'Content-Type': 'application/json' },
+      }
+    ),
+    {
+      params: Promise.resolve({
+        id: 'action-validation-session',
+        itemId,
+      }),
+    }
+  );
+
+  const missingDiscardNote = await patchActionItemRoute(
+    new Request(
+      `http://localhost/api/sessions/action-validation-session/action-items/${itemId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'discarded' }),
+        headers: { 'Content-Type': 'application/json' },
+      }
+    ),
+    {
+      params: Promise.resolve({
+        id: 'action-validation-session',
+        itemId,
+      }),
+    }
+  );
+  assert.equal(missingDiscardNote.status, 400);
+  const missingDiscardNotePayload = await missingDiscardNote.json();
+  assert.equal(missingDiscardNotePayload.code, 'ACTION_VALIDATION_FAILED');
+
+  const discardedResponse = await patchActionItemRoute(
+    new Request(
+      `http://localhost/api/sessions/action-validation-session/action-items/${itemId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          status: 'discarded',
+          verificationNote: 'Blocked by legal dependency',
+        }),
+        headers: { 'Content-Type': 'application/json' },
+      }
+    ),
+    {
+      params: Promise.resolve({
+        id: 'action-validation-session',
+        itemId,
+      }),
+    }
+  );
+  assert.equal(discardedResponse.status, 200);
+});
+
+test('follow-up preview route reports inheritance counts and skip reasons', async () => {
+  await createSession({
+    id: 'followup-preview-parent',
+    topic: 'parent',
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 2,
+    selectedAgentIds: ['claude', 'gpt'],
+    modelSelections: {},
+    personaSelections: {},
+    personas: {},
+  });
+
+  await upsertDecisionSummary('followup-preview-parent', {
+    summary: 'summary',
+    recommendedOption: 'option',
+    why: [],
+    risks: [],
+    openQuestions: [],
+    nextActions: ['High priority item', 'Medium priority item'],
+    confidence: 80,
+    evidence: [],
+  });
+
+  const parentDetailResponse = await getSessionRoute(
+    new Request('http://localhost/api/sessions/followup-preview-parent'),
+    { params: Promise.resolve({ id: 'followup-preview-parent' }) }
+  );
+  const parentDetail = await parentDetailResponse.json();
+
+  await patchActionItemRoute(
+    new Request(
+      `http://localhost/api/sessions/followup-preview-parent/action-items/${parentDetail.actionItems[0].id}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ priority: 'high', status: 'in_progress' }),
+        headers: { 'Content-Type': 'application/json' },
+      }
+    ),
+    {
+      params: Promise.resolve({
+        id: 'followup-preview-parent',
+        itemId: parentDetail.actionItems[0].id,
+      }),
+    }
+  );
+
+  const previewResponse = await followUpPreviewRoute(
+    new Request('http://localhost/api/sessions/followup-preview-parent/follow-up', {
+      method: 'POST',
+      body: JSON.stringify({ carryForwardMode: 'high_priority_only' }),
+      headers: { 'Content-Type': 'application/json' },
+    }),
+    { params: Promise.resolve({ id: 'followup-preview-parent' }) }
+  );
+  assert.equal(previewResponse.status, 200);
+  const previewPayload = await previewResponse.json();
+  assert.equal(previewPayload.inheritedActionCount, 1);
+  assert.ok(Array.isArray(previewPayload.skippedReason));
 });
 
 test('session detail and delete routes cover found and missing history', async () => {

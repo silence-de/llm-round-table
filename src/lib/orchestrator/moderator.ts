@@ -236,7 +236,8 @@ ${researchSection}
   "evidence": [
     {
       "claim": "哪条结论受到了 evidence 支撑",
-      "sourceIds": ["R1", "R2"]
+      "sourceIds": ["R1", "R2"],
+      "gapReason": "若暂无可引用证据，说明为什么缺失"
     }
   ]
 }
@@ -244,6 +245,7 @@ ${researchSection}
 要求：
 - 如果 agenda.requestRecommendation 为 false，也要给出当前最优倾向，但要明确说明不确定性。
 - confidence 用 0-100 的整数。
+- 每条 evidence 至少满足以下之一：sourceIds 非空；或给出 gapReason。
 - 所有文本都用中文。`;
 }
 

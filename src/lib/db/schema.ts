@@ -12,9 +12,13 @@ export const sessions = sqliteTable('sessions', {
   agendaConfig: text('agenda_config').notNull().default('{}'),
   researchConfig: text('research_config').notNull().default('{}'),
   parentSessionId: text('parent_session_id'),
+  resumedFromSessionId: text('resumed_from_session_id'),
+  resumeSnapshot: text('resume_snapshot'),
   decisionStatus: text('decision_status').notNull().default('draft'),
   retrospectiveNote: text('retrospective_note').notNull().default(''),
   outcomeSummary: text('outcome_summary').notNull().default(''),
+  actualOutcome: text('actual_outcome').notNull().default(''),
+  outcomeConfidence: integer('outcome_confidence').notNull().default(0),
   moderatorAgentId: text('moderator_agent_id').notNull(),
   maxDebateRounds: integer('max_debate_rounds').notNull(),
   selectedAgentIds: text('selected_agent_ids').notNull().default('[]'),
@@ -63,6 +67,7 @@ export const researchRuns = sqliteTable('research_runs', {
   searchConfig: text('search_config').notNull().default('{}'),
   summary: text('summary').notNull().default(''),
   evaluation: text('evaluation'),
+  rerunCount: integer('rerun_count').notNull().default(0),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });
@@ -76,6 +81,10 @@ export const researchSources = sqliteTable('research_sources', {
   snippet: text('snippet').notNull().default(''),
   score: real('score').notNull().default(0),
   selected: integer('selected').notNull().default(1),
+  pinned: integer('pinned').notNull().default(0),
+  rank: integer('rank').notNull().default(0),
+  excludedReason: text('excluded_reason').notNull().default(''),
+  stale: integer('stale').notNull().default(0),
   qualityFlags: text('quality_flags').notNull().default('[]'),
   publishedDate: text('published_date'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
@@ -84,14 +93,50 @@ export const researchSources = sqliteTable('research_sources', {
 export const actionItems = sqliteTable('action_items', {
   id: text('id').primaryKey(),
   sessionId: text('session_id').notNull(),
+  sourceActionId: text('source_action_id'),
   content: text('content').notNull(),
   status: text('status').notNull().default('pending'),
   source: text('source').notNull().default('generated'),
   carriedFromSessionId: text('carried_from_session_id'),
   note: text('note').notNull().default(''),
+  owner: text('owner').notNull().default(''),
+  dueAt: integer('due_at', { mode: 'timestamp_ms' }),
+  verifiedAt: integer('verified_at', { mode: 'timestamp_ms' }),
+  verificationNote: text('verification_note').notNull().default(''),
+  priority: text('priority').notNull().default('medium'),
   sortOrder: integer('sort_order').notNull().default(0),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
+export const decisionClaims = sqliteTable('decision_claims', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull(),
+  claim: text('claim').notNull(),
+  kind: text('kind').notNull().default('evidence'),
+  gapReason: text('gap_reason').notNull().default(''),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
+export const claimSourceLinks = sqliteTable('claim_source_links', {
+  id: text('id').primaryKey(),
+  claimId: text('claim_id').notNull(),
+  sourceId: text('source_id').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
+export const sessionEvents = sqliteTable('session_events', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull(),
+  type: text('type').notNull(),
+  provider: text('provider'),
+  modelId: text('model_id'),
+  phase: text('phase'),
+  agentId: text('agent_id'),
+  timeoutType: text('timeout_type'),
+  message: text('message').notNull().default(''),
+  metadata: text('metadata').notNull().default('{}'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 });
 
 export const interjections = sqliteTable('interjections', {

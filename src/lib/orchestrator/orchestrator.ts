@@ -2,12 +2,15 @@ import type { SSEEvent } from '../sse/types';
 import type {
   DiscussionConfig,
   AgentResponse,
+  DiscussionResumeState,
   ModeratorAnalysis,
   PersistableMessage,
 } from './types';
 import { DiscussionPhase } from './types';
 import { getProvider } from '../llm/provider-registry';
 import { getModelId } from '../agents/registry';
+import type { ProviderType, SessionAgent } from '../agents/types';
+import type { StreamChunk } from '../llm/types';
 import { multiplexStreams } from './stream-multiplexer';
 import {
   buildOpeningPrompt,
@@ -23,6 +26,22 @@ import { conductResearch } from '../search/research';
 import type { ResearchRunStatus, ResearchSource } from '../search/types';
 import { formatControlInstruction } from '../decision/utils';
 
+interface StreamTimeoutConfig {
+  requestTimeoutMs: number;
+  startupTimeoutMs: number;
+  idleTimeoutMs: number;
+}
+
+interface ScheduledAgentStream {
+  agentId: string;
+  provider: ProviderType;
+  modelId: string;
+  phase: DiscussionPhase;
+  stream: AsyncIterable<StreamChunk>;
+  startupTimeoutMs: number;
+  idleTimeoutMs: number;
+}
+
 export class DiscussionOrchestrator {
   private config: DiscussionConfig;
   private agentResponses: Map<string, AgentResponse> = new Map();
@@ -37,9 +56,16 @@ export class DiscussionOrchestrator {
   private stopState = { checkedAt: 0, value: false };
   private researchBrief: string | null = null;
   private researchSources: ResearchSource[] = [];
+  private agentTimeoutCount: Map<string, number> = new Map();
+  private degradedAgentIds: Set<string> = new Set();
+  private degradedThreshold = Math.max(
+    1,
+    Number(process.env.ROUND_TABLE_AGENT_DEGRADE_TIMEOUT_THRESHOLD ?? 2)
+  );
 
   constructor(config: DiscussionConfig) {
     this.config = config;
+    this.seedResumeState(config.resumeState);
   }
 
   async *run(): AsyncIterable<SSEEvent> {
@@ -48,32 +74,76 @@ export class DiscussionOrchestrator {
       return;
     }
 
-    // Phase 0: Web Research (skipped gracefully if TAVILY_API_KEY not set)
-    yield* this.phaseResearch();
-    if (await this.shouldStop()) {
-      yield* this.emitStopped();
-      return;
-    }
+    const resume = this.config.resumeState;
 
-    // Phase 1: Opening
-    yield* this.phaseOpening();
-    if (await this.shouldStop()) {
-      yield* this.emitStopped();
-      return;
-    }
-
-    // Phase 2: Initial Responses (parallel)
-    yield* this.phaseInitialResponses();
-    if (await this.shouldStop()) {
-      yield* this.emitStopped();
-      return;
-    }
-
-    // Phase 3+4: Analysis and Debate loop
-    for (let round = 0; round < this.config.maxDebateRounds; round++) {
+    if (!resume) {
+      // Phase 0: Web Research (skipped gracefully if TAVILY_API_KEY not set)
+      yield* this.phaseResearch();
       if (await this.shouldStop()) {
         yield* this.emitStopped();
         return;
+      }
+
+      // Phase 1: Opening
+      yield* this.phaseOpening();
+      if (await this.shouldStop()) {
+        yield* this.emitStopped();
+        return;
+      }
+
+      // Phase 2: Initial Responses (parallel)
+      yield* this.phaseInitialResponses();
+      if (await this.shouldStop()) {
+        yield* this.emitStopped();
+        return;
+      }
+    } else {
+      if (
+        resume.nextPhase === DiscussionPhase.OPENING ||
+        resume.nextPhase === DiscussionPhase.INITIAL_RESPONSES
+      ) {
+        if (
+          !resume.researchHandled &&
+          this.config.agenda.requireResearch &&
+          this.config.researchConfig.enabled
+        ) {
+          yield* this.phaseResearch();
+          if (await this.shouldStop()) {
+            yield* this.emitStopped();
+            return;
+          }
+        }
+
+        if (resume.nextPhase === DiscussionPhase.OPENING) {
+          yield* this.phaseOpening();
+          if (await this.shouldStop()) {
+            yield* this.emitStopped();
+            return;
+          }
+        }
+
+        yield* this.phaseInitialResponses();
+        if (await this.shouldStop()) {
+          yield* this.emitStopped();
+          return;
+        }
+      }
+    }
+
+    const startRound =
+      resume?.nextPhase === DiscussionPhase.ANALYSIS ||
+      resume?.nextPhase === DiscussionPhase.SUMMARY
+        ? resume.nextRound
+        : 0;
+
+    // Phase 3+4: Analysis and Debate loop
+    for (let round = startRound; round < this.config.maxDebateRounds; round++) {
+      if (await this.shouldStop()) {
+        yield* this.emitStopped();
+        return;
+      }
+      if (resume?.nextPhase === DiscussionPhase.SUMMARY) {
+        break;
       }
       yield* this.consumeInterjections(DiscussionPhase.ANALYSIS, round);
       if (await this.shouldStop()) {
@@ -123,6 +193,17 @@ export class DiscussionOrchestrator {
       timestamp: Date.now(),
     };
     yield { type: 'discussion_complete', timestamp: Date.now() };
+  }
+
+  private seedResumeState(resumeState?: DiscussionResumeState) {
+    if (!resumeState) return;
+
+    this.researchBrief = resumeState.researchBrief ?? null;
+    this.researchSources = resumeState.researchSources;
+    this.allMessages = [...resumeState.allMessages];
+    this.agentResponses = new Map(
+      resumeState.agentResponses.map((response) => [response.agentId, response])
+    );
   }
 
   private async *consumeInterjections(
@@ -190,15 +271,202 @@ export class DiscussionOrchestrator {
     await this.config.onUsagePersist(delta);
   }
 
+  private async persistSessionEvent(event: {
+    type: 'timeout' | 'agent_degraded' | 'provider_error';
+    provider?: string;
+    modelId?: string;
+    phase?: string;
+    agentId?: string;
+    timeoutType?: 'startup' | 'idle' | 'request';
+    message?: string;
+    metadata?: Record<string, unknown>;
+  }) {
+    if (!this.config.onSessionEventPersist) return;
+    await this.config.onSessionEventPersist(event);
+  }
+
+  private getActiveParticipants() {
+    return this.config.agents.filter(
+      (agent) =>
+        agent.definition.id !== this.config.moderatorAgentId &&
+        !this.degradedAgentIds.has(agent.definition.id)
+    );
+  }
+
   private estimateTokens(text: string): number {
     return Math.max(1, Math.ceil(text.length / 4));
   }
 
-  private getAgentTimeoutMs(agentId: string, phase: string): number {
-    if (agentId === 'qwen') {
-      return phase === DiscussionPhase.DEBATE ? 30_000 : 40_000;
+  private getStreamTimeoutConfig(
+    agent: SessionAgent,
+    phase: string
+  ): StreamTimeoutConfig {
+    const { provider, id } = agent.definition;
+    const isDebate = phase === DiscussionPhase.DEBATE;
+    const isSummaryLike =
+      phase === DiscussionPhase.SUMMARY || phase === DiscussionPhase.OPENING;
+
+    if (provider === 'siliconflow') {
+      if (id === 'qwen') {
+        return {
+          requestTimeoutMs: isDebate ? 240_000 : 300_000,
+          startupTimeoutMs: isDebate ? 180_000 : 240_000,
+          idleTimeoutMs: isDebate ? 75_000 : 90_000,
+        };
+      }
+
+      return {
+        requestTimeoutMs: isDebate ? 180_000 : 240_000,
+        startupTimeoutMs: isDebate ? 120_000 : 180_000,
+        idleTimeoutMs: isDebate ? 60_000 : 75_000,
+      };
     }
-    return phase === DiscussionPhase.DEBATE ? 45_000 : 60_000;
+
+    if (provider === 'deepseek') {
+      return {
+        requestTimeoutMs: isDebate ? 120_000 : isSummaryLike ? 150_000 : 135_000,
+        startupTimeoutMs: isDebate ? 90_000 : 120_000,
+        idleTimeoutMs: isDebate ? 45_000 : 60_000,
+      };
+    }
+
+    if (provider === 'moonshot') {
+      return {
+        requestTimeoutMs: isDebate ? 120_000 : isSummaryLike ? 150_000 : 135_000,
+        startupTimeoutMs: isDebate ? 90_000 : 120_000,
+        idleTimeoutMs: isDebate ? 45_000 : 60_000,
+      };
+    }
+
+    return {
+      requestTimeoutMs: isDebate ? 90_000 : isSummaryLike ? 120_000 : 105_000,
+      startupTimeoutMs: isDebate ? 60_000 : 90_000,
+      idleTimeoutMs: isDebate ? 45_000 : 60_000,
+    };
+  }
+
+  private getCompletionTimeoutMs(agent: SessionAgent, phase: string): number {
+    const { requestTimeoutMs } = this.getStreamTimeoutConfig(agent, phase);
+    return requestTimeoutMs;
+  }
+
+  private getProviderBatchLimit(provider: ProviderType): number {
+    if (provider === 'siliconflow') {
+      return Math.max(
+        1,
+        Number(
+          process.env.ROUND_TABLE_SILICONFLOW_BATCH_SIZE ??
+            process.env.SILICONFLOW_MAX_CONCURRENCY ??
+            1
+        )
+      );
+    }
+    return Number.POSITIVE_INFINITY;
+  }
+
+  private async *runScheduledAgentStreams(
+    streams: ScheduledAgentStream[]
+  ): AsyncIterable<SSEEvent> {
+    if (streams.length === 0) return;
+    const streamMeta = new Map(
+      streams.map((stream) => [
+        stream.agentId,
+        { provider: stream.provider, modelId: stream.modelId, phase: stream.phase },
+      ])
+    );
+
+    const directStreams = streams.filter((stream) => stream.provider !== 'siliconflow');
+    const siliconflowStreams = streams.filter(
+      (stream) => stream.provider === 'siliconflow'
+    );
+    const siliconflowBatchSize = this.getProviderBatchLimit('siliconflow');
+    const siliconflowBatches = chunkBySize(siliconflowStreams, siliconflowBatchSize);
+
+    const firstBatch = [...directStreams, ...(siliconflowBatches.shift() ?? [])];
+    if (firstBatch.length > 0) {
+      for await (const event of multiplexStreams(firstBatch)) {
+        yield* this.handleScheduledStreamEvent(event, streamMeta);
+      }
+    }
+
+    for (const batch of siliconflowBatches) {
+      if (await this.shouldStop()) {
+        return;
+      }
+      for await (const event of multiplexStreams(batch)) {
+        yield* this.handleScheduledStreamEvent(event, streamMeta);
+      }
+    }
+  }
+
+  private async *handleScheduledStreamEvent(
+    event: SSEEvent,
+    streamMeta: Map<string, { provider: ProviderType; modelId: string; phase: DiscussionPhase }>
+  ): AsyncIterable<SSEEvent> {
+    if (event.type === 'agent_done' && event.agentId) {
+      this.agentTimeoutCount.set(event.agentId, 0);
+      yield event;
+      return;
+    }
+
+    if (event.type !== 'agent_error' || !event.agentId) {
+      yield event;
+      return;
+    }
+
+    const meta = streamMeta.get(event.agentId);
+    const errorCode = event.meta?.errorCode;
+    const timeoutType = normalizeTimeoutType(event.meta?.timeoutType);
+
+    if (timeoutType) {
+      const timeoutCount = (this.agentTimeoutCount.get(event.agentId) ?? 0) + 1;
+      this.agentTimeoutCount.set(event.agentId, timeoutCount);
+      await this.persistSessionEvent({
+        type: 'timeout',
+        provider: meta?.provider,
+        modelId: meta?.modelId,
+        phase: meta?.phase,
+        agentId: event.agentId,
+        timeoutType,
+        message: event.content,
+        metadata: { errorCode, timeoutCount },
+      });
+
+      if (
+        timeoutCount >= this.degradedThreshold &&
+        !this.degradedAgentIds.has(event.agentId)
+      ) {
+        this.degradedAgentIds.add(event.agentId);
+        await this.persistSessionEvent({
+          type: 'agent_degraded',
+          provider: meta?.provider,
+          modelId: meta?.modelId,
+          phase: meta?.phase,
+          agentId: event.agentId,
+          timeoutType,
+          message: `agent degraded after ${timeoutCount} consecutive timeouts`,
+          metadata: { timeoutCount },
+        });
+        yield {
+          type: 'agent_degraded',
+          agentId: event.agentId,
+          content: `Agent degraded after ${timeoutCount} timeouts and will be skipped in later rounds.`,
+          timestamp: Date.now(),
+        };
+      }
+    } else if (errorCode === 'provider_error') {
+      await this.persistSessionEvent({
+        type: 'provider_error',
+        provider: meta?.provider,
+        modelId: meta?.modelId,
+        phase: meta?.phase,
+        agentId: event.agentId,
+        message: event.content,
+        metadata: { errorCode },
+      });
+    }
+
+    yield event;
   }
 
   private async *phaseResearch(): AsyncIterable<SSEEvent> {
@@ -264,6 +532,22 @@ export class DiscussionOrchestrator {
         timestamp: Date.now(),
       };
 
+      if (result.status === 'partial' || result.status === 'failed') {
+        await this.persistSessionEvent({
+          type: 'provider_error',
+          phase: DiscussionPhase.RESEARCH,
+          message:
+            result.status === 'partial'
+              ? 'research finished with partial sources'
+              : 'research failed',
+          metadata: {
+            status: result.status,
+            sourceCount: result.sources.length,
+            queryPlanLength: result.queryPlan.length,
+          },
+        });
+      }
+
       if (result.status === 'failed') {
         yield {
           type: 'research_failed',
@@ -276,6 +560,7 @@ export class DiscussionOrchestrator {
       yield {
         type: 'research_complete',
         content: result.summary,
+        meta: { status: result.status },
         timestamp: Date.now(),
       };
     } catch (err) {
@@ -291,6 +576,7 @@ export class DiscussionOrchestrator {
           diversityScore: 0,
           overallConfidence: 0,
           gaps: [err instanceof Error ? err.message : String(err)],
+          staleFlags: ['no_sources'],
         },
       });
       yield {
@@ -332,6 +618,10 @@ export class DiscussionOrchestrator {
     }
 
     yield { type: 'moderator_start', agentId: 'moderator', timestamp: Date.now() };
+    const timeoutConfig = this.getStreamTimeoutConfig(
+      moderator,
+      DiscussionPhase.OPENING
+    );
 
     let fullContent = '';
     for await (const chunk of provider.streamChat({
@@ -339,7 +629,7 @@ export class DiscussionOrchestrator {
       messages: [{ role: 'user', content: prompt }],
       temperature: moderator.definition.defaultTemperature,
       maxTokens: moderator.definition.maxTokens,
-      timeoutMs: 60_000,
+      timeoutMs: timeoutConfig.requestTimeoutMs,
     })) {
       if (await this.shouldStop()) {
         break;
@@ -352,6 +642,24 @@ export class DiscussionOrchestrator {
           content: chunk.content,
           timestamp: Date.now(),
         };
+      } else if (chunk.type === 'error') {
+        await this.persistSessionEvent({
+          type: chunk.timeoutType ? 'timeout' : 'provider_error',
+          provider: moderator.definition.provider,
+          modelId,
+          phase: DiscussionPhase.OPENING,
+          agentId: 'moderator',
+          timeoutType: normalizeTimeoutType(chunk.timeoutType),
+          message: chunk.content,
+          metadata: { errorCode: chunk.errorCode },
+        });
+        yield {
+          type: 'agent_error',
+          agentId: 'moderator',
+          content: chunk.content,
+          timestamp: Date.now(),
+        };
+        break;
       }
     }
 
@@ -380,9 +688,15 @@ export class DiscussionOrchestrator {
       timestamp: Date.now(),
     };
 
-    const participants = this.config.agents.filter(
-      (a) => a.definition.id !== this.config.moderatorAgentId
-    );
+    const participants = this.getActiveParticipants();
+    if (participants.length === 0) {
+      yield {
+        type: 'agent_error',
+        content: 'No active participants available after degradation filtering.',
+        timestamp: Date.now(),
+      };
+      return;
+    }
     if (await this.shouldStop()) {
       return;
     }
@@ -400,8 +714,8 @@ export class DiscussionOrchestrator {
         this.researchBrief ?? undefined
       );
       const userPrompt = `请就以下议题发表你的观点：「${this.config.topic}」`;
-      const timeoutMs = this.getAgentTimeoutMs(
-        agent.definition.id,
+      const timeoutConfig = this.getStreamTimeoutConfig(
+        agent,
         DiscussionPhase.INITIAL_RESPONSES
       );
 
@@ -414,7 +728,11 @@ export class DiscussionOrchestrator {
 
       return {
         agentId: agent.definition.id,
-        timeoutMs,
+        provider: agent.definition.provider,
+        modelId,
+        phase: DiscussionPhase.INITIAL_RESPONSES,
+        startupTimeoutMs: timeoutConfig.startupTimeoutMs,
+        idleTimeoutMs: timeoutConfig.idleTimeoutMs,
         stream: provider.streamChat({
           model: modelId,
           messages: [
@@ -426,12 +744,12 @@ export class DiscussionOrchestrator {
           systemPrompt,
           temperature: agent.definition.defaultTemperature,
           maxTokens: agent.definition.maxTokens,
-          timeoutMs,
+          timeoutMs: timeoutConfig.requestTimeoutMs,
         }),
       };
     });
 
-    for await (const event of multiplexStreams(agentStreams)) {
+    for await (const event of this.runScheduledAgentStreams(agentStreams)) {
       if (await this.shouldStop()) {
         break;
       }
@@ -504,23 +822,52 @@ export class DiscussionOrchestrator {
     }
 
     yield { type: 'moderator_start', agentId: 'moderator', timestamp: Date.now() };
+    const timeoutMs = this.getCompletionTimeoutMs(
+      moderator,
+      DiscussionPhase.ANALYSIS
+    );
 
-    const result = await provider.chat({
-      model: modelId,
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.3,
-      maxTokens: 2000,
-      timeoutMs: 45_000,
-    });
+    let analysis: ModeratorAnalysis;
+    try {
+      const result = await provider.chat({
+        model: modelId,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3,
+        maxTokens: 2000,
+        timeoutMs,
+      });
+      analysis = parseAnalysis(result.content);
+      await this.persistUsage({
+        inputTokens: result.usage?.inputTokens ?? this.estimateTokens(prompt),
+        outputTokens:
+          result.usage?.outputTokens ??
+          this.estimateTokens(analysis.moderatorNarrative),
+      });
+    } catch (error) {
+      await this.persistSessionEvent({
+        type: 'provider_error',
+        provider: moderator.definition.provider,
+        modelId,
+        phase: DiscussionPhase.ANALYSIS,
+        agentId: 'moderator',
+        timeoutType: 'request',
+        message: error instanceof Error ? error.message : String(error),
+      });
+      analysis = {
+        agreements: [],
+        disagreements: [],
+        shouldConverge: true,
+        moderatorNarrative: '分析阶段出现异常，主持人将直接进入总结。',
+      };
+      yield {
+        type: 'agent_error',
+        agentId: 'moderator',
+        content: analysis.moderatorNarrative,
+        timestamp: Date.now(),
+      };
+    }
 
-    const analysis = parseAnalysis(result.content);
     this.lastAnalysis = analysis;
-    await this.persistUsage({
-      inputTokens: result.usage?.inputTokens ?? this.estimateTokens(prompt),
-      outputTokens:
-        result.usage?.outputTokens ??
-        this.estimateTokens(analysis.moderatorNarrative),
-    });
 
     // Stream the narrative to the client
     for (const char of analysis.moderatorNarrative) {
@@ -560,9 +907,10 @@ export class DiscussionOrchestrator {
       timestamp: Date.now(),
     };
 
-    const participants = this.config.agents.filter(
-      (a) => a.definition.id !== this.config.moderatorAgentId
-    );
+    const participants = this.getActiveParticipants();
+    if (participants.length === 0) {
+      return;
+    }
 
     for (const disagreement of this.lastAnalysis.disagreements.slice(0, 2)) {
       const contentCollectors = new Map<string, string>();
@@ -571,12 +919,20 @@ export class DiscussionOrchestrator {
         const provider = getProvider(agent.definition.provider);
         const modelId = getModelId(agent.definition, agent.selectedModelId);
         const previousResponse = this.agentResponses.get(agent.definition.id);
+        const timeoutConfig = this.getStreamTimeoutConfig(
+          agent,
+          DiscussionPhase.DEBATE
+        );
 
         contentCollectors.set(agent.definition.id, '');
 
         return {
           agentId: agent.definition.id,
-          timeoutMs: this.getAgentTimeoutMs(agent.definition.id, DiscussionPhase.DEBATE),
+          provider: agent.definition.provider,
+          modelId,
+          phase: DiscussionPhase.DEBATE,
+          startupTimeoutMs: timeoutConfig.startupTimeoutMs,
+          idleTimeoutMs: timeoutConfig.idleTimeoutMs,
           stream: provider.streamChat({
             model: modelId,
             messages: [
@@ -602,12 +958,12 @@ export class DiscussionOrchestrator {
             ),
             temperature: agent.definition.defaultTemperature,
             maxTokens: 1500,
-            timeoutMs: this.getAgentTimeoutMs(agent.definition.id, DiscussionPhase.DEBATE),
+            timeoutMs: timeoutConfig.requestTimeoutMs,
           }),
         };
       });
 
-      for await (const event of multiplexStreams(agentStreams)) {
+      for await (const event of this.runScheduledAgentStreams(agentStreams)) {
         if (await this.shouldStop()) {
           break;
         }
@@ -674,6 +1030,10 @@ export class DiscussionOrchestrator {
     }
 
     yield { type: 'moderator_start', agentId: 'moderator', timestamp: Date.now() };
+    const timeoutConfig = this.getStreamTimeoutConfig(
+      moderator,
+      DiscussionPhase.SUMMARY
+    );
 
     let fullContent = '';
     for await (const chunk of provider.streamChat({
@@ -681,7 +1041,7 @@ export class DiscussionOrchestrator {
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.3,
       maxTokens: 4096,
-      timeoutMs: 70_000,
+      timeoutMs: timeoutConfig.requestTimeoutMs,
     })) {
       if (await this.shouldStop()) {
         break;
@@ -694,6 +1054,24 @@ export class DiscussionOrchestrator {
           content: chunk.content,
           timestamp: Date.now(),
         };
+      } else if (chunk.type === 'error') {
+        await this.persistSessionEvent({
+          type: chunk.timeoutType ? 'timeout' : 'provider_error',
+          provider: moderator.definition.provider,
+          modelId,
+          phase: DiscussionPhase.SUMMARY,
+          agentId: 'moderator',
+          timeoutType: normalizeTimeoutType(chunk.timeoutType),
+          message: chunk.content,
+          metadata: { errorCode: chunk.errorCode },
+        });
+        yield {
+          type: 'agent_error',
+          agentId: 'moderator',
+          content: chunk.content,
+          timestamp: Date.now(),
+        };
+        break;
       }
     }
 
@@ -741,12 +1119,16 @@ export class DiscussionOrchestrator {
       researchSources: this.researchSources,
     });
     try {
+      const timeoutMs = this.getCompletionTimeoutMs(
+        moderator,
+        DiscussionPhase.SUMMARY
+      );
       const result = await provider.chat({
         model: modelId,
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.2,
         maxTokens: 1800,
-        timeoutMs: 45_000,
+        timeoutMs,
       });
 
       await this.persistUsage({
@@ -757,7 +1139,16 @@ export class DiscussionOrchestrator {
       await this.config.onDecisionSummaryPersist(
         parseDecisionSummaryContent(result.content, minutes, this.researchSources)
       );
-    } catch {
+    } catch (error) {
+      await this.persistSessionEvent({
+        type: 'provider_error',
+        provider: moderator.definition.provider,
+        modelId,
+        phase: DiscussionPhase.SUMMARY,
+        agentId: 'moderator',
+        timeoutType: 'request',
+        message: error instanceof Error ? error.message : String(error),
+      });
       await this.config.onDecisionSummaryPersist(
         parseDecisionSummaryContent('', minutes, this.researchSources)
       );
@@ -774,6 +1165,7 @@ export class DiscussionOrchestrator {
       diversityScore: number;
       overallConfidence: number;
       gaps: string[];
+      staleFlags: string[];
     } | null;
   }) {
     if (!this.config.onResearchRunPersist) return;
@@ -789,4 +1181,25 @@ export class DiscussionOrchestrator {
       updatedAt: Date.now(),
     });
   }
+}
+
+function chunkBySize<T>(items: T[], size: number) {
+  if (!Number.isFinite(size) || size <= 0) {
+    return items.length > 0 ? [items] : [];
+  }
+
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function normalizeTimeoutType(
+  value: unknown
+): 'startup' | 'idle' | 'request' | undefined {
+  if (value === 'startup' || value === 'idle' || value === 'request') {
+    return value;
+  }
+  return undefined;
 }

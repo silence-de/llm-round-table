@@ -111,6 +111,7 @@ export function buildExecutionChecklistMarkdown(input: {
   status?: string;
   actionItems: ActionItem[];
 }) {
+  const sortedItems = [...input.actionItems].sort(compareActionItemsForExport);
   const topic = input.topic.trim() || 'Untitled session';
   const status = input.status?.trim() || 'unknown';
   const lines = [
@@ -121,17 +122,17 @@ export function buildExecutionChecklistMarkdown(input: {
     '',
     '## Meta',
     `- Status: ${status}`,
-    `- Items: ${input.actionItems.length}`,
+    `- Items: ${sortedItems.length}`,
     '',
     '## Checklist',
   ];
 
-  if (input.actionItems.length === 0) {
+  if (sortedItems.length === 0) {
     lines.push('', '_No action items captured._');
     return `${lines.join('\n').trim()}\n`;
   }
 
-  for (const item of input.actionItems) {
+  for (const item of sortedItems) {
     const mark =
       item.status === 'verified'
         ? '[x]'
@@ -140,6 +141,10 @@ export function buildExecutionChecklistMarkdown(input: {
           : '[ ]';
     const meta = [
       `status=${item.status}`,
+      `priority=${item.priority}`,
+      item.owner ? `owner=${item.owner}` : '',
+      item.dueAt ? `due=${formatTimestamp(item.dueAt)}` : '',
+      item.verifiedAt ? `verifiedAt=${formatTimestamp(item.verifiedAt)}` : '',
       `source=${item.source}`,
       item.carriedFromSessionId ? `from=${item.carriedFromSessionId}` : '',
     ]
@@ -150,7 +155,39 @@ export function buildExecutionChecklistMarkdown(input: {
     if (item.note.trim()) {
       lines.push(`  - note: ${item.note.trim()}`);
     }
+    if (item.verificationNote.trim()) {
+      lines.push(`  - verification: ${item.verificationNote.trim()}`);
+    }
   }
 
   return `${lines.join('\n').trim()}\n`;
+}
+
+function compareActionItemsForExport(left: ActionItem, right: ActionItem) {
+  const priorityOrder = { high: 0, medium: 1, low: 2 } as const;
+  const leftPriority = priorityOrder[left.priority] ?? 1;
+  const rightPriority = priorityOrder[right.priority] ?? 1;
+  if (leftPriority !== rightPriority) {
+    return leftPriority - rightPriority;
+  }
+
+  const leftDue = toTimestamp(left.dueAt, Number.POSITIVE_INFINITY);
+  const rightDue = toTimestamp(right.dueAt, Number.POSITIVE_INFINITY);
+  if (leftDue !== rightDue) {
+    return leftDue - rightDue;
+  }
+
+  const leftCreatedAt = toTimestamp(left.createdAt, Number.POSITIVE_INFINITY);
+  const rightCreatedAt = toTimestamp(right.createdAt, Number.POSITIVE_INFINITY);
+  return leftCreatedAt - rightCreatedAt;
+}
+
+function toTimestamp(
+  value: number | string | null | undefined,
+  fallback: number
+) {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const parsed = new Date(String(value));
+  return Number.isNaN(parsed.getTime()) ? fallback : parsed.getTime();
 }
