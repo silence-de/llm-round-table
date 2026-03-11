@@ -51,7 +51,7 @@ const components: Components = {
   code: ({ inline, children, ...props }: { inline?: boolean; children?: React.ReactNode; className?: string }) =>
     inline ? (
       <code
-        className="rounded px-1.5 py-0.5 font-mono text-[0.82em] bg-[color-mix(in_srgb,var(--rt-hh6-primary)_15%,transparent)] text-[var(--rt-hh6-primary)] border border-[color-mix(in_srgb,var(--rt-hh6-primary)_20%,transparent)]"
+        className="rounded px-1.5 font-mono text-[0.82em] bg-[color-mix(in_srgb,var(--rt-hh6-primary)_15%,transparent)] text-[var(--rt-hh6-primary)] border border-[color-mix(in_srgb,var(--rt-hh6-primary)_20%,transparent)] box-decoration-clone"
         {...props}
       >
         {children}

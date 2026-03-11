@@ -1,6 +1,6 @@
 'use client';
 
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { PixelAgentAvatar } from '@/components/discussion/pixel-agent-avatar';
 import type { AgentMessage, StageMode } from '@/stores/discussion-store';
 
@@ -70,10 +70,10 @@ export function RoundTableStage({
         <div className="rt-stage-grid pointer-events-none absolute inset-0 bg-[length:20px_20px] opacity-20" />
 
         {/* Header row */}
-        <div className="relative z-10 flex items-center justify-between">
+        <div className="relative z-10 flex items-baseline justify-between">
           <div>
             <p className="rt-eyebrow">Bridge Stage</p>
-            <h2 className="rt-text-strong mt-0.5 text-sm font-semibold">{labelPhase(phase)}</h2>
+            <h2 className="rt-text-strong text-sm font-semibold">{labelPhase(phase)}</h2>
           </div>
           <span className="rt-chip-live rounded-full border px-3 py-1 text-xs font-semibold">
             {isRunning ? 'Live' : 'Idle'}
@@ -214,16 +214,19 @@ export function RoundTableStage({
                 animate={{ scale: isActive ? 1.08 : 1 }}
                 transition={stageSpring}
               >
-                {/* Glow wrapper */}
-                <motion.div
-                  animate={
-                    isActive
-                      ? { boxShadow: `0 0 0 1.5px ${agent.accentGlow ?? agent.color}, 0 0 22px ${agent.accentGlow ?? agent.color}55` }
-                      : { boxShadow: '0 0 0 1px var(--rt-border-soft)' }
-                  }
-                  className="rt-surface-glass flex flex-col items-center gap-1.5 rounded-2xl border px-3 py-2.5"
+                {/* Card container — static border; active glow handled by opacity-only overlay */}
+                <div
+                  className="rt-surface-glass relative flex flex-col items-center gap-1.5 rounded-2xl border px-3 py-2.5"
                   style={{ minWidth: 80 }}
                 >
+                  {/* Glow overlay — opacity-only animation avoids per-frame boxShadow GPU repaint */}
+                  <motion.div
+                    className="pointer-events-none absolute inset-0 rounded-2xl"
+                    style={{ boxShadow: `0 0 0 1.5px ${agent.accentGlow ?? agent.color}, 0 0 22px ${agent.accentGlow ?? agent.color}55` }}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: isActive ? 1 : 0 }}
+                    transition={{ duration: 0.2 }}
+                  />
                   <div className="relative">
                     <PixelAgentAvatar
                       seed={agent.id}
@@ -231,16 +234,24 @@ export function RoundTableStage({
                       size={40}
                       sprite={agent.sprite}
                     />
-                    {isActive && (
-                      <span className="absolute -right-1 -top-1 flex h-2.5 w-2.5 items-center justify-center">
+                    <AnimatePresence>
+                      {isActive && (
                         <motion.span
-                          className="absolute inline-flex h-full w-full rounded-full bg-[var(--rt-live-state)]"
-                          animate={{ opacity: [0.5, 0, 0.5], scale: [1, 1.8, 1] }}
-                          transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut' }}
-                        />
-                        <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--rt-live-state)] shadow-[0_0_6px_2px_color-mix(in_srgb,var(--rt-live-state)_60%,transparent)]" />
-                      </span>
-                    )}
+                          className="absolute -right-1 -top-1 flex h-2.5 w-2.5 items-center justify-center"
+                          initial={{ scale: 0, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          exit={{ scale: 0, opacity: 0 }}
+                          transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                        >
+                          <motion.span
+                            className="absolute inline-flex h-full w-full rounded-full bg-[var(--rt-live-state)]"
+                            animate={{ opacity: [0.5, 0, 0.5], scale: [1, 1.8, 1] }}
+                            transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut' }}
+                          />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--rt-live-state)] shadow-[0_0_6px_2px_color-mix(in_srgb,var(--rt-live-state)_60%,transparent)]" />
+                        </motion.span>
+                      )}
+                    </AnimatePresence>
                     {agent.message?.isStreaming && !isActive && (
                       <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-[color-mix(in_srgb,var(--rt-warning-state)_80%,transparent)]" />
                     )}
@@ -250,12 +261,20 @@ export function RoundTableStage({
                     {agent.displayName}
                   </span>
 
-                  {isActive && (
-                    <span className="rt-chip-live rounded-full border px-1.5 py-0.5 text-[8px] font-medium tracking-wide">
-                      Live
-                    </span>
-                  )}
-                </motion.div>
+                  <AnimatePresence>
+                    {isActive && (
+                      <motion.span
+                        initial={{ scale: 0.7, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0.7, opacity: 0 }}
+                        transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                        className="rt-chip-live rounded-full border px-1.5 py-0.5 text-[8px] font-medium tracking-wide"
+                      >
+                        Live
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
+                </div>
               </motion.div>
             </div>
           );

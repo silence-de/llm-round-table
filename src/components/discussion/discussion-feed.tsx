@@ -259,7 +259,7 @@ function FeedBubble({
             className={[
               'px-4 py-3 text-sm border-l-2',
               'border-l-[color-mix(in_srgb,var(--rt-hh6-primary)_35%,transparent)]',
-              'bg-[color-mix(in_srgb,var(--rt-hh6-primary)_5%,transparent)]',
+              'bg-[color-mix(in_srgb,var(--rt-hh6-primary)_5%,transparent)] backdrop-blur-md',
               showHeader ? 'rounded-tr-2xl rounded-br-xl' : 'rounded-r-xl',
               roundBottom ? 'rounded-br-2xl' : '',
             ]
