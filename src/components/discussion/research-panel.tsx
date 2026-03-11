@@ -193,11 +193,11 @@ export function ResearchPanel({
               {[1, 2, 3].map((index) => (
                 <div
                   key={index}
-                  className="rt-surface animate-pulse rounded-xl border p-3"
+                  className="rt-surface rounded-xl border p-3"
                 >
-                  <div className="mb-2 h-3 w-3/4 rounded bg-[color-mix(in_srgb,var(--rt-text-strong)_10%,transparent)]" />
-                  <div className="h-2.5 w-full rounded bg-[color-mix(in_srgb,var(--rt-text-strong)_7%,transparent)]" />
-                  <div className="mt-1 h-2.5 w-5/6 rounded bg-[color-mix(in_srgb,var(--rt-text-strong)_7%,transparent)]" />
+                  <div className="mb-2 h-3 w-3/4 rounded rt-shimmer" />
+                  <div className="h-2.5 w-full rounded rt-shimmer" />
+                  <div className="mt-1 h-2.5 w-5/6 rounded rt-shimmer" />
                 </div>
               ))}
             </div>

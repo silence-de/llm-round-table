@@ -446,6 +446,22 @@
   }
 }
 
+@keyframes rt-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+.rt-shimmer {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--rt-text-strong) 6%,  transparent) 25%,
+    color-mix(in srgb, var(--rt-text-strong) 13%, transparent) 50%,
+    color-mix(in srgb, var(--rt-text-strong) 6%,  transparent) 75%
+  );
+  background-size: 200% 100%;
+  animation: rt-shimmer 1.6s ease-in-out infinite;
+}
+
 @keyframes rt-caret-blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }

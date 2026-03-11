@@ -228,7 +228,10 @@ export function RoundTableStage({
                       sprite={agent.sprite}
                     />
                     {isActive && (
-                      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 animate-pulse rounded-full bg-[var(--rt-live-state)] shadow-[0_0_8px_color-mix(in_srgb,var(--rt-live-state)_88%,transparent)]" />
+                      <span className="absolute -right-1 -top-1 flex h-2.5 w-2.5 items-center justify-center">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--rt-live-state)] opacity-40" style={{ animationDuration: '1.8s' }} />
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--rt-live-state)] shadow-[0_0_6px_2px_color-mix(in_srgb,var(--rt-live-state)_60%,transparent)]" />
+                      </span>
                     )}
                     {agent.message?.isStreaming && !isActive && (
                       <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-[color-mix(in_srgb,var(--rt-warning-state)_80%,transparent)]" />
