@@ -1547,7 +1547,7 @@ export default function HomePage() {
         ───────────────────────────────────────────────────────────────── */}
         <aside className="flex min-h-0 flex-col gap-2 overflow-hidden">
           {/* ── Tab navigation ── */}
-          <div className="shrink-0 flex border-b rt-border-soft gap-0">
+          <div className="shrink-0 flex h-10 border-b rt-border-soft gap-0">
             {([
               { id: 'brief', icon: FileText, label: 'Brief' },
               { id: 'council', icon: Users, label: 'Council' },
@@ -1556,7 +1556,7 @@ export default function HomePage() {
               <button
                 key={id}
                 onClick={() => setLeftTab(id)}
-                className={`flex flex-1 items-center justify-center gap-1.5 py-2 text-xs font-medium transition-all border-b-2 -mb-px ${
+                className={`flex h-full flex-1 items-center justify-center gap-1.5 text-xs font-medium transition-all border-b-2 -mb-px ${
                   leftTab === id
                     ? 'border-[var(--rt-hh6-primary)] rt-text-strong'
                     : 'border-transparent rt-text-dim hover:rt-text-muted'
@@ -2245,7 +2245,7 @@ export default function HomePage() {
         <div className="flex min-h-0 flex-col gap-2 overflow-hidden">
           {/* Feed header */}
           <div className="shrink-0 space-y-1.5">
-            <div className="flex items-center gap-2 border-b rt-border-soft px-1 py-1.5">
+            <div className="flex h-10 items-center gap-2 border-b rt-border-soft px-1">
               <h2 className="min-w-0 flex-1 truncate text-sm font-semibold rt-text-strong">
                 {historyDetail
                   ? historyDetail.session.topic
@@ -2550,12 +2550,12 @@ export default function HomePage() {
         ───────────────────────────────────────────────────────────────── */}
         <div className="hidden xl:flex min-h-0 flex-col gap-2 overflow-hidden">
           {/* Tab switcher */}
-          <div className="shrink-0 flex border-b rt-border-soft gap-0">
+          <div className="shrink-0 flex h-10 border-b rt-border-soft gap-0">
             {(['context', 'history'] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setRightTab(tab)}
-                className={`flex flex-1 items-center justify-center py-2 text-xs font-medium capitalize transition-all border-b-2 -mb-px ${
+                className={`flex h-full flex-1 items-center justify-center text-xs font-medium capitalize transition-all border-b-2 -mb-px ${
                   rightTab === tab
                     ? 'border-[var(--rt-hh6-primary)] rt-text-strong'
                     : 'border-transparent rt-text-dim hover:rt-text-muted'
