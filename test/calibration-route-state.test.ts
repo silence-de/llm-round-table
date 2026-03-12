@@ -32,6 +32,8 @@ test('calibration route returns a stable empty-state payload', async () => {
   assert.equal(payload.confidencePenaltyGuidance.length >= 1, true);
   assert.equal(payload.mostReliableTemplate, '');
   assert.equal(payload.largestBlindSpot, '');
+  assert.equal(payload.sampleLabel, 'insufficient');
+  assert.equal(typeof payload.sampleNote, 'string');
 });
 
 test('calibration route keeps low-data breakdowns well-formed', async () => {
@@ -98,4 +100,6 @@ test('calibration route keeps low-data breakdowns well-formed', async () => {
   assert.equal(typeof payload.sourcedVsUnsourced.delta, 'number');
   assert.equal(payload.timeline.length, 1);
   assert.equal(payload.agentModelDrift.length, 1);
+  assert.equal(payload.sampleLabel, 'insufficient');
+  assert.equal(typeof payload.sampleNote, 'string');
 });

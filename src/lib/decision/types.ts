@@ -62,6 +62,25 @@ export interface DecisionSummaryEvidence {
   unresolvedSourceIndices?: number[];
 }
 
+export interface DecisionConfidenceAdjustment {
+  kind: 'unsupported_claims' | 'stale_sources' | 'single_domain_sources';
+  label: string;
+  reason: string;
+  delta: number;
+}
+
+export interface DecisionConfidenceMeta {
+  rawConfidence: number;
+  adjustedConfidence: number;
+  totalPenalty: number;
+  adjustments: DecisionConfidenceAdjustment[];
+  evidenceBackedClaims: number;
+  unsupportedClaims: number;
+  citedSources: number;
+  citedDomains: number;
+  staleSources: number;
+}
+
 export interface DecisionSummary {
   summary: string;
   recommendedOption: string;
@@ -72,6 +91,7 @@ export interface DecisionSummary {
   alternativesRejected: string[];
   redLines: string[];
   revisitTriggers: string[];
+  rawConfidence?: number;
   confidence: number;
   evidence: DecisionSummaryEvidence[];
 }

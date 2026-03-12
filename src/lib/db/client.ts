@@ -78,6 +78,11 @@ CREATE TABLE IF NOT EXISTS minutes (
 CREATE TABLE IF NOT EXISTS decision_summaries (
   session_id TEXT PRIMARY KEY,
   content TEXT NOT NULL,
+  predicted_confidence INTEGER NOT NULL DEFAULT 0,
+  supported_only INTEGER NOT NULL DEFAULT 0,
+  evidence_source_count INTEGER NOT NULL DEFAULT 0,
+  unsupported_claim_count INTEGER NOT NULL DEFAULT 0,
+  unresolved_evidence_count INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -218,6 +223,31 @@ ensureColumn(
 ensureColumn('sessions', 'template_id', 'TEXT');
 ensureColumn('sessions', 'agenda_config', "TEXT NOT NULL DEFAULT '{}'");
 ensureColumn('sessions', 'research_config', "TEXT NOT NULL DEFAULT '{}'");
+ensureColumn(
+  'decision_summaries',
+  'predicted_confidence',
+  'INTEGER NOT NULL DEFAULT 0'
+);
+ensureColumn(
+  'decision_summaries',
+  'supported_only',
+  'INTEGER NOT NULL DEFAULT 0'
+);
+ensureColumn(
+  'decision_summaries',
+  'evidence_source_count',
+  'INTEGER NOT NULL DEFAULT 0'
+);
+ensureColumn(
+  'decision_summaries',
+  'unsupported_claim_count',
+  'INTEGER NOT NULL DEFAULT 0'
+);
+ensureColumn(
+  'decision_summaries',
+  'unresolved_evidence_count',
+  'INTEGER NOT NULL DEFAULT 0'
+);
 ensureColumn('sessions', 'parent_session_id', 'TEXT');
 ensureColumn('sessions', 'resumed_from_session_id', 'TEXT');
 ensureColumn('sessions', 'resume_snapshot', 'TEXT');

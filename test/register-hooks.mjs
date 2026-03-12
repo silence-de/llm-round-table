@@ -2,9 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { registerHooks } from 'node:module';
+import { createRequire, registerHooks } from 'node:module';
 
 const rootDir = process.cwd();
+const moduleRequire = createRequire(import.meta.url);
 
 if (!process.env.ROUND_TABLE_DB_PATH) {
   process.env.ROUND_TABLE_DB_PATH = path.join(
@@ -13,7 +14,7 @@ if (!process.env.ROUND_TABLE_DB_PATH) {
   );
 }
 
-const nextServerPath = path.join(rootDir, 'node_modules', 'next', 'server.js');
+const nextServerPath = resolvePackageSubpath('next/server');
 
 function resolveWithTsExtension(basePath) {
   const candidates = [
@@ -28,6 +29,18 @@ function resolveWithTsExtension(basePath) {
   ];
 
   return candidates.find((candidate) => fs.existsSync(candidate));
+}
+
+function resolvePackageSubpath(specifier) {
+  const candidates = [specifier, `${specifier}.js`, `${specifier}.mjs`];
+  for (const candidate of candidates) {
+    try {
+      return moduleRequire.resolve(candidate);
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return path.join(rootDir, 'node_modules', ...specifier.split('/'));
 }
 
 registerHooks({

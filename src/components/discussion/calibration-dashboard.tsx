@@ -9,6 +9,9 @@ interface CalibrationDashboardProps {
     averageOutcomeConfidence: number;
     averageOverconfidence: number;
     averageCalibrationGap: number;
+    sampleLabel: 'insufficient' | 'emerging' | 'directional' | 'stable';
+    sampleNote: string;
+    minimumReliableSample: number;
     byTemplate: Array<{
       templateId: string;
       reviewedSessions: number;
@@ -74,7 +77,7 @@ export function CalibrationDashboard({
       <Card className="rt-panel">
         <CardHeader className="px-3 pb-1.5 pt-3">
           <CardTitle className="text-sm rt-text-strong">
-            How accurate have recent recommendations been?
+            Calibration snapshot
           </CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-2 px-3 pb-3">
@@ -82,6 +85,20 @@ export function CalibrationDashboard({
           <Metric label="Predicted" value={data.averagePredictedConfidence} />
           <Metric label="Outcome" value={data.averageOutcomeConfidence} />
           <Metric label="Gap" value={data.averageCalibrationGap} suffix="pt" />
+        </CardContent>
+      </Card>
+
+      <Card className="rt-panel">
+        <CardHeader className="px-3 pb-1.5 pt-3">
+          <CardTitle className="text-sm rt-text-strong">Sample reliability</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 px-3 pb-3">
+          <MetricRow label="Sample label" value={data.sampleLabel} />
+          <MetricRow
+            label="Reliable sample target"
+            value={`${data.minimumReliableSample} reviewed sessions`}
+          />
+          <p className="text-[11px] rt-text-dim">{data.sampleNote}</p>
         </CardContent>
       </Card>
 
@@ -115,7 +132,7 @@ export function CalibrationDashboard({
       <Card className="rt-panel">
         <CardHeader className="px-3 pb-1.5 pt-3">
           <CardTitle className="text-sm rt-text-strong">
-            Which templates hold up better after review?
+            Which templates look more reliable?
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-1.5 px-3 pb-3">
@@ -178,7 +195,7 @@ export function CalibrationDashboard({
 
       <Card className="rt-panel">
         <CardHeader className="px-3 pb-1.5 pt-3">
-          <CardTitle className="text-sm rt-text-strong">Recent calibration timeline</CardTitle>
+          <CardTitle className="text-sm rt-text-strong">Recent prediction vs outcome</CardTitle>
         </CardHeader>
         <CardContent className="space-y-1.5 px-3 pb-3">
           {data.timeline.map((item) => (

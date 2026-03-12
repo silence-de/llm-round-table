@@ -5,6 +5,7 @@ export type ApiErrorCode =
   | 'NOT_FOUND'
   | 'CONFLICT'
   | 'AUTH_MISSING_KEY'
+  | 'UNAUTHORIZED'
   | 'PROVIDER_UNAVAILABLE'
   | 'TIMEOUT_STARTUP'
   | 'TIMEOUT_IDLE'

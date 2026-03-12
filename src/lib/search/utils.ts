@@ -193,7 +193,7 @@ export function buildResearchSummaryText(sources: ResearchSource[], topic: strin
           : '';
       const verificationLabel =
         source.sourceType === 'browser_verification'
-          ? ` [browser verification${source.verificationProfile ? `:${source.verificationProfile}` : ''}]`
+          ? ` [captured page${source.verificationProfile ? `:${source.verificationProfile}` : ''}]`
           : '';
       const verifiedFacts =
         source.verifiedFields && source.verifiedFields.length > 0

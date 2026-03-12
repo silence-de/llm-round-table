@@ -1,8 +1,8 @@
 'use client';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import type { DecisionSummary } from '@/lib/decision/types';
-import { classifyEvidenceStatus } from '@/lib/decision/utils';
+import type { DecisionConfidenceMeta, DecisionSummary } from '@/lib/decision/types';
+import { buildDecisionConfidenceMeta, classifyEvidenceStatus } from '@/lib/decision/utils';
 import type { ResearchEvaluation, ResearchSource } from '@/lib/search/types';
 import { findResearchSourceByCitation, getResearchSourceCitationLabel } from '@/lib/search/utils';
 
@@ -11,7 +11,7 @@ interface DecisionSummaryCardProps {
   decisionSummary: DecisionSummary;
   researchSources?: ResearchSource[];
   researchEvaluation?: ResearchEvaluation | null;
-  confidencePenalty?: number;
+  confidenceMeta?: DecisionConfidenceMeta | null;
   researchStatus?: 'running' | 'completed' | 'partial' | 'skipped' | 'failed' | 'idle';
   footer?: React.ReactNode;
 }
@@ -21,7 +21,7 @@ export function DecisionSummaryCard({
   decisionSummary,
   researchSources = [],
   researchEvaluation = null,
-  confidencePenalty = 0,
+  confidenceMeta = null,
   researchStatus = 'idle',
   footer,
 }: DecisionSummaryCardProps) {
@@ -30,15 +30,27 @@ export function DecisionSummaryCard({
     researchSources,
     researchEvaluation
   );
-  const suggestedAdjustedConfidence = Math.max(
-    0,
-    Math.min(100, decisionSummary.confidence - Math.max(0, Math.round(confidencePenalty)))
-  );
+  const resolvedConfidenceMeta =
+    confidenceMeta ??
+    buildDecisionConfidenceMeta(
+      decisionSummary.rawConfidence ?? decisionSummary.confidence,
+      decisionSummary.evidence,
+      researchSources
+    );
   const selectedResearchSources = researchSources.filter((source) => source.selected);
   const isResearchMissing =
     researchStatus === 'skipped' ||
     researchStatus === 'failed' ||
     selectedResearchSources.length === 0;
+  const browserVerificationCount = selectedResearchSources.filter(
+    (source) => source.sourceType === 'browser_verification'
+  ).length;
+  const manualReviewRequiredCount = selectedResearchSources.filter(
+    (source) =>
+      source.sourceType === 'browser_verification' &&
+      (source.qualityFlags.includes('manual_review_required') ||
+        (source.verifiedFields?.length ?? 0) === 0)
+  ).length;
 
   return (
     <Card className="rt-surface-minutes">
@@ -57,11 +69,11 @@ export function DecisionSummaryCard({
               </>
             )}
             <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
-              confidence raw {decisionSummary.confidence}%
+              confidence raw {resolvedConfidenceMeta.rawConfidence}%
             </span>
-            {confidencePenalty > 0 && (
+            {resolvedConfidenceMeta.totalPenalty > 0 && (
               <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
-                suggested adjusted {suggestedAdjustedConfidence}% (-{Math.round(confidencePenalty)}pt)
+                confidence adjusted {resolvedConfidenceMeta.adjustedConfidence}% (-{resolvedConfidenceMeta.totalPenalty}pt)
               </span>
             )}
           </div>
@@ -71,6 +83,41 @@ export function DecisionSummaryCard({
         {isResearchMissing && (
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/8 p-2 text-[11px] text-amber-100">
             本次结论缺少可用外部证据（research skipped/failed 或无选中来源），建议仅作为模型推理草案并人工复核。
+          </div>
+        )}
+        <div className="rounded-xl border rt-border-soft p-2 text-[11px] rt-text-dim">
+          <p className="font-semibold rt-text-strong">
+            Confidence explanation
+          </p>
+          <p className="mt-1">
+            Model output started at {resolvedConfidenceMeta.rawConfidence}% and is shown as{' '}
+            {resolvedConfidenceMeta.adjustedConfidence}% after evidence coverage checks.
+          </p>
+          {resolvedConfidenceMeta.adjustments.length > 0 ? (
+            <ul className="mt-1 space-y-1 pl-4">
+              {resolvedConfidenceMeta.adjustments.map((item) => (
+                <li key={item.kind} className="list-disc">
+                  {item.label}: -{item.delta}pt. {item.reason}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-1">
+              No automatic evidence penalty was applied to this decision card.
+            </p>
+          )}
+        </div>
+        {browserVerificationCount > 0 && (
+          <div className="rounded-xl border rt-border-soft p-2 text-[11px] rt-text-dim">
+            <p className="font-semibold rt-text-strong">Browser verification semantics</p>
+            <p className="mt-1">
+              Browser verification means the page was captured and selected facts may have been
+              extracted. It does not mean every claim is fully verified.
+            </p>
+            <p className="mt-1">
+              Captured pages: {browserVerificationCount}. Manual review still required for{' '}
+              {manualReviewRequiredCount} page(s).
+            </p>
           </div>
         )}
         <Section heading="Summary" body={decisionSummary.summary} />
@@ -153,7 +200,7 @@ export function DecisionSummaryCard({
                             className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim hover:underline"
                           >
                             {getResearchSourceCitationLabel(source)}
-                            {source.sourceType === 'browser_verification' ? ' verify' : ''}: {' '}
+                            {source.sourceType === 'browser_verification' ? ' captured' : ''}: {' '}
                             {source.domain || source.title}
                           </a>
                         ) : (

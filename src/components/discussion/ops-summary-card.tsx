@@ -12,6 +12,11 @@ interface OpsSummaryCardProps {
       agentDegradedRate: number;
       unresolvedEvidenceRate: number;
     };
+    researchBudget: {
+      reruns: number;
+      recentQueries: number;
+      providerErrors: number;
+    };
     recentFailures: Array<{
       sessionId: string;
       status: string;
@@ -84,6 +89,13 @@ export function OpsSummaryCard({ summary }: OpsSummaryCardProps) {
           />
         </div>
 
+        <div className="space-y-1">
+          <SectionTitle icon={Activity} label="Research Budget" />
+          <p className="text-[11px] rt-text-dim">
+            reruns {summary.researchBudget.reruns} · recent queries {summary.researchBudget.recentQueries} · provider errors {summary.researchBudget.providerErrors}
+          </p>
+        </div>
+
         {summary.recentFailures.length > 0 && (
           <div className="space-y-1">
             <SectionTitle icon={AlertTriangle} label="Recent Failures" />
@@ -141,8 +153,8 @@ export function OpsSummaryCard({ summary }: OpsSummaryCardProps) {
               />
             </div>
             <p className="text-[11px] rt-text-dim">
-              Sourced avg {summary.calibration.sourcedVsUnsourcedOutcomeGap.sourcedAverage}% ·
-              Unsourced avg {summary.calibration.sourcedVsUnsourcedOutcomeGap.unsourcedAverage}% ·
+              Source-backed avg {summary.calibration.sourcedVsUnsourcedOutcomeGap.sourcedAverage}% ·
+              Mixed/unsupported avg {summary.calibration.sourcedVsUnsourcedOutcomeGap.unsourcedAverage}% ·
               Delta {summary.calibration.sourcedVsUnsourcedOutcomeGap.delta}pt
             </p>
             {summary.calibration.templateHitRates.length > 0 && (

@@ -1,5 +1,6 @@
 import type {
   ActionItemStatus,
+  DecisionConfidenceMeta,
   DecisionBrief,
   DecisionControlType,
   DecisionSummaryEvidence,
@@ -168,6 +169,12 @@ export function parseDecisionSummary(
     }
 
     const parsed = JSON.parse(jsonStr) as Partial<DecisionSummary>;
+    const evidence = normalizeEvidence(parsed.evidence, researchSources);
+    const confidenceMeta = buildDecisionConfidenceMeta(
+      parsed.rawConfidence ?? parsed.confidence,
+      evidence,
+      researchSources
+    );
     return ensureDecisionDossierMinimums(
       {
       summary: parsed.summary?.trim() || fallbackSummary || '未能生成结构化总结。',
@@ -179,12 +186,9 @@ export function parseDecisionSummary(
       alternativesRejected: normalizeStringArray(parsed.alternativesRejected),
       redLines: normalizeStringArray(parsed.redLines),
       revisitTriggers: normalizeStringArray(parsed.revisitTriggers),
-      evidence: normalizeEvidence(parsed.evidence, researchSources),
-      confidence: normalizeEvidenceConfidence(
-        parsed.confidence,
-        normalizeEvidence(parsed.evidence, researchSources),
-        researchSources
-      ),
+      evidence,
+      rawConfidence: confidenceMeta.rawConfidence,
+      confidence: confidenceMeta.adjustedConfidence,
     },
       brief
     );
@@ -200,6 +204,7 @@ export function parseDecisionSummary(
       alternativesRejected: [],
       redLines: [],
       revisitTriggers: [],
+      rawConfidence: 40,
       confidence: 40,
       evidence: [],
     },
@@ -213,6 +218,12 @@ export function normalizePersistedDecisionSummary(
   researchSources: ResearchSource[] = [],
   brief?: DecisionBrief
 ): DecisionSummary {
+  const evidence = normalizeEvidence(value.evidence, researchSources);
+  const confidenceMeta = buildDecisionConfidenceMeta(
+    value.rawConfidence ?? value.confidence,
+    evidence,
+    researchSources
+  );
   return ensureDecisionDossierMinimums({
     ...value,
     summary: value.summary?.trim() || '未能生成结构化总结。',
@@ -224,12 +235,9 @@ export function normalizePersistedDecisionSummary(
     alternativesRejected: normalizeStringArray(value.alternativesRejected),
     redLines: normalizeStringArray(value.redLines),
     revisitTriggers: normalizeStringArray(value.revisitTriggers),
-    evidence: normalizeEvidence(value.evidence, researchSources),
-    confidence: normalizeEvidenceConfidence(
-      value.confidence,
-      normalizeEvidence(value.evidence, researchSources),
-      researchSources
-    ),
+    evidence,
+    rawConfidence: confidenceMeta.rawConfidence,
+    confidence: confidenceMeta.adjustedConfidence,
   }, brief);
 }
 
@@ -383,34 +391,79 @@ function normalizeEvidenceItem(
   };
 }
 
-function normalizeEvidenceConfidence(
+export function buildDecisionConfidenceMeta(
   value: unknown,
   evidence: DecisionSummaryEvidence[],
   researchSources: ResearchSource[]
-) {
-  let confidence = normalizeConfidence(value);
+) : DecisionConfidenceMeta {
+  const rawConfidence = normalizeConfidence(value);
+  let adjustedConfidence = rawConfidence;
   if (evidence.length === 0) {
-    return confidence;
+    return {
+      rawConfidence,
+      adjustedConfidence,
+      totalPenalty: 0,
+      adjustments: [],
+      evidenceBackedClaims: 0,
+      unsupportedClaims: 0,
+      citedSources: 0,
+      citedDomains: 0,
+      staleSources: 0,
+    };
   }
 
   const unsupportedClaims = evidence.filter((item) => item.sourceIds.length === 0).length;
-  confidence -= Math.min(unsupportedClaims * 8, 24);
-
   const citedSources = evidence
     .flatMap((item) =>
       item.sourceIds
         .map((sourceId) => findResearchSourceByCitation(sourceId, researchSources))
         .filter((source): source is ResearchSource => Boolean(source))
     );
+  const uniqueCitedSources = new Map(citedSources.map((source) => [source.id, source]));
   const uniqueDomains = new Set(citedSources.map((source) => source.domain).filter(Boolean));
   const staleCount = citedSources.filter((source) => source.stale).length;
+  const adjustments = [];
+
+  if (unsupportedClaims > 0) {
+    const delta = Math.min(unsupportedClaims * 8, 24);
+    adjustedConfidence -= delta;
+    adjustments.push({
+      kind: 'unsupported_claims' as const,
+      label: 'Unsupported claims',
+      reason: `${unsupportedClaims} claim(s) have no persisted citation mapping.`,
+      delta,
+    });
+  }
 
   if (citedSources.length > 0 && staleCount / citedSources.length >= 0.5) {
-    confidence -= 10;
+    adjustedConfidence -= 10;
+    adjustments.push({
+      kind: 'stale_sources' as const,
+      label: 'Stale sources',
+      reason: 'At least half of the cited sources are marked stale for this decision type.',
+      delta: 10,
+    });
   }
   if (citedSources.length >= 2 && uniqueDomains.size <= 1) {
-    confidence -= 6;
+    adjustedConfidence -= 6;
+    adjustments.push({
+      kind: 'single_domain_sources' as const,
+      label: 'Low source diversity',
+      reason: 'Multiple citations collapse to a single domain, so source diversity is weak.',
+      delta: 6,
+    });
   }
 
-  return normalizeConfidence(confidence);
+  const normalizedAdjusted = normalizeConfidence(adjustedConfidence);
+  return {
+    rawConfidence,
+    adjustedConfidence: normalizedAdjusted,
+    totalPenalty: Math.max(0, rawConfidence - normalizedAdjusted),
+    adjustments,
+    evidenceBackedClaims: Math.max(0, evidence.length - unsupportedClaims),
+    unsupportedClaims,
+    citedSources: uniqueCitedSources.size,
+    citedDomains: uniqueDomains.size,
+    staleSources: staleCount,
+  };
 }

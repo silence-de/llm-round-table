@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Activity,
   Cpu,
@@ -41,24 +41,27 @@ import { MarkdownContent } from '@/components/ui/markdown-content';
 import { DiscussionFeed } from '@/components/discussion/discussion-feed';
 import { DecisionSummaryCard } from '@/components/discussion/decision-summary-card';
 import { OpsSummaryCard } from '@/components/discussion/ops-summary-card';
-import { CalibrationDashboard } from '@/components/discussion/calibration-dashboard';
 import { ActionItemsBoard } from '@/components/discussion/action-items-board';
+import { CalibrationPanel } from '@/components/workspace/calibration-panel';
+import { HistoryPanel } from '@/components/workspace/history-panel';
+import { LiveSessionPanel } from '@/components/workspace/live-session-panel';
+import { SetupPanel } from '@/components/workspace/setup-panel';
+import { WorkspaceShell } from '@/components/workspace/workspace-shell';
 import type { FeedMessage } from '@/components/discussion/discussion-feed';
-import type { PersonaPreset, PersonaSelection } from '@/lib/agents/types';
+import type { PersonaSelection } from '@/lib/agents/types';
 import {
   DECISION_TEMPLATES,
 } from '@/lib/decision/templates';
 import type {
   ActionStats,
-  DecisionClaim,
   ActionItem,
   DecisionBrief,
   DecisionControlType,
   DecisionStatus,
-  DecisionSummary,
   DiscussionAgenda,
 } from '@/lib/decision/types';
 import {
+  buildDecisionConfidenceMeta,
   DECISION_CONTROL_LABELS,
   DECISION_STATUS_OPTIONS,
   DEFAULT_DECISION_BRIEF,
@@ -79,276 +82,18 @@ import {
   normalizeResearchConfig,
 } from '@/lib/search/utils';
 import type { DiscussionResumeSnapshot } from '@/lib/orchestrator/types';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface AgentInfo {
-  id: string;
-  displayName: string;
-  provider: string;
-  modelId: string;
-  color: string;
-  sprite: string;
-  accentGlow?: string;
-  recommendedPersonaPresetIds?: string[];
-  available: boolean;
-  missingKey: string | null;
-  availableModels: Array<{ id: string; label: string }>;
-}
-
-interface SessionRecord {
-  id: string;
-  topic: string;
-  status: string;
-  goal: string;
-  background: string;
-  constraints: string;
-  timeHorizon: string;
-  nonNegotiables: string;
-  acceptableDownside: string;
-  reviewAt?: string | null;
-  retrospectiveNote?: string;
-  outcomeSummary?: string;
-  actualOutcome?: string;
-  outcomeConfidence?: number;
-  decisionType: string;
-  desiredOutput: string;
-  templateId?: string | null;
-  agendaConfig?: string;
-  researchConfig?: string;
-  parentSessionId?: string | null;
-  decisionStatus: DecisionStatus;
-  createdAt: number | string;
-  moderatorAgentId: string;
-  maxDebateRounds: number;
-  selectedAgentIds?: string;
-  modelSelections?: string;
-  personaSelections?: string;
-  usageInputTokens: number;
-  usageOutputTokens: number;
-}
-
-interface SessionDetail {
-  session: SessionRecord;
-  messages: Array<{
-    id: string;
-    role: string;
-    phase: string;
-    content: string;
-    displayName?: string | null;
-    agentId?: string | null;
-    createdAt: number | string;
-  }>;
-  minutes: { content: string } | null;
-  decisionSummary: DecisionSummary | null;
-  actionItems: ActionItem[];
-  actionStats?: ActionStats;
-  researchRun: ResearchRunDetail | null;
-  interjections: Array<{
-    id: string;
-    content: string;
-    controlType?: DecisionControlType;
-    phaseHint?: string | null;
-    roundHint?: number | null;
-    createdAt: number | string;
-  }>;
-  decisionClaims: DecisionClaim[];
-  unresolvedEvidence?: Array<{
-    claim: string;
-    sourceIds: string[];
-    unresolvedSourceIndices: number[];
-    gapReason: string;
-  }>;
-  calibrationContext: {
-    reviewedSessions: number;
-    averageOverconfidence: number;
-    templateHitRate: number;
-    penalty: number;
-    basedOn: 'template' | 'decisionType';
-  };
-  resumeMeta:
-    | {
-        resumedFromSessionId?: string | null;
-        snapshot?: DiscussionResumeSnapshot | null;
-        events?: Array<{
-          id: string;
-          type: string;
-          message: string;
-          createdAt: number | string;
-        }>;
-      }
-    | null;
-  degradeEvents: Array<{
-    id: string;
-    type: string;
-    provider?: string;
-    modelId?: string;
-    phase?: string;
-    agentId?: string;
-    timeoutType?: string;
-    message: string;
-    createdAt: number | string;
-  }>;
-  parentSession:
-    | {
-        id: string;
-        topic: string;
-        templateId?: string | null;
-        decisionType: string;
-        decisionStatus: DecisionStatus;
-        createdAt: number | string;
-      }
-    | null;
-  parentReviewComparison:
-    | {
-        sessionId: string;
-        topic: string;
-        recommendedOption: string;
-        predictedConfidence: number;
-        outcomeSummary?: string;
-        actualOutcome?: string;
-        outcomeConfidence?: number;
-        retrospectiveNote?: string;
-      }
-    | null;
-  childSessions: Array<{
-    id: string;
-    topic: string;
-    templateId?: string | null;
-    decisionType: string;
-    decisionStatus: DecisionStatus;
-    createdAt: number | string;
-  }>;
-}
-
-interface OpsSummary {
-  sessionsAnalyzed: number;
-  metrics: {
-    timeoutRate: number;
-    resumeSuccessRate: number;
-    agentDegradedRate: number;
-    unresolvedEvidenceRate: number;
-  };
-  recentFailures: Array<{
-    sessionId: string;
-    status: string;
-    createdAt?: number | string;
-  }>;
-  degradedAgentSessions: Array<{
-    sessionId: string;
-    status?: string;
-    createdAt?: number | string;
-    degradedEventCount?: number;
-  }>;
-  unresolvedEvidenceSessions: Array<{
-    sessionId: string;
-    unresolvedEvidenceCount: number;
-    createdAt?: number | string;
-  }>;
-  calibration: {
-    reviewedSessions: number;
-    averagePredictedConfidence: number;
-    averageOutcomeConfidence: number;
-    averageOverconfidence: number;
-    averageCalibrationGap: number;
-    sourcedVsUnsourcedOutcomeGap: {
-      sourcedAverage: number;
-      unsourcedAverage: number;
-      delta: number;
-    };
-    templateHitRates: Array<{
-      templateId: string;
-      reviewedSessions: number;
-      hitRate: number;
-    }>;
-    agentModelOverconfidence: Array<{
-      agentId: string;
-      modelId: string;
-      reviewedSessions: number;
-      averageDelta: number;
-      averageOutcomeConfidence: number;
-    }>;
-    overconfidenceTrend: Array<{
-      sessionId: string;
-      createdAt?: number | string;
-      predictedConfidence: number;
-      outcomeConfidence: number;
-      delta: number;
-    }>;
-  };
-}
-
-interface CalibrationDashboardData {
-  window: '30d' | '90d' | '180d' | 'all';
-  reviewedSessions: number;
-  averagePredictedConfidence: number;
-  averageOutcomeConfidence: number;
-  averageOverconfidence: number;
-  averageCalibrationGap: number;
-  byTemplate: Array<{
-    templateId: string;
-    reviewedSessions: number;
-    averagePredictedConfidence: number;
-    averageOutcomeConfidence: number;
-    averageOverconfidence: number;
-    hitRate: number;
-  }>;
-  byDecisionType: Array<{
-    decisionType: string;
-    reviewedSessions: number;
-    averagePredictedConfidence: number;
-    averageOutcomeConfidence: number;
-    averageOverconfidence: number;
-    hitRate: number;
-  }>;
-  sourcedVsUnsourced: {
-    sourcedSessions: number;
-    unsourcedSessions: number;
-    sourcedAverage: number;
-    unsourcedAverage: number;
-    delta: number;
-  };
-  agentModelDrift: Array<{
-    agentId: string;
-    modelId: string;
-    reviewedSessions: number;
-    averageDelta: number;
-    averageOutcomeConfidence: number;
-  }>;
-  timeline: Array<{
-    sessionId: string;
-    createdAt?: number | string;
-    predictedConfidence: number;
-    outcomeConfidence: number;
-    delta: number;
-    templateId: string;
-    decisionType: string;
-  }>;
-  confidencePenaltyGuidance: string[];
-  mostReliableTemplate: string;
-  largestBlindSpot: string;
-}
+import type {
+  AgentInfo,
+  OpsSummary,
+  SessionDetail,
+  SessionRecord,
+} from '@/lib/session/types';
+import { useArtifactExports } from '@/hooks/use-artifact-exports';
+import { useCalibrationData } from '@/hooks/use-calibration-data';
+import { useSessionHistory } from '@/hooks/use-session-history';
+import { useWorkspaceBootstrap } from '@/hooks/use-workspace-bootstrap';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function downloadMarkdown(filename: string, content: string) {
-  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function downloadFromUrl(url: string) {
-  const a = document.createElement('a');
-  a.href = url;
-  a.rel = 'noopener noreferrer';
-  a.click();
-}
 
 function parseAgentList(value?: string | null): string[] {
   if (!value) return [];
@@ -430,14 +175,7 @@ export default function HomePage() {
   const [interjection, setInterjection] = useState('');
   const [interjectionControlType, setInterjectionControlType] =
     useState<DecisionControlType>('general');
-  const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [selectedAgents, setSelectedAgents] = useState<Set<string>>(new Set());
-  const [modelSelections, setModelSelections] = useState<Record<string, string>>({});
-  const [personaSelections, setPersonaSelections] = useState<Record<string, PersonaSelection>>({});
-  const [personaPresets, setPersonaPresets] = useState<PersonaPreset[]>([]);
-  const [moderatorAgentId, setModeratorAgentId] = useState<string>('claude');
   const [maxDebateRounds, setMaxDebateRounds] = useState<number>(2);
-  const [loadingAgents, setLoadingAgents] = useState(true);
 
   const [leftTab, setLeftTab] = useState<'brief' | 'council' | 'research'>('brief');
   const [rightTab, setRightTab] = useState<'context' | 'history' | 'calibration'>(
@@ -463,27 +201,35 @@ export default function HomePage() {
     skippedReason: string[];
     parentReviewComparison?: SessionDetail['parentReviewComparison'];
   } | null>(null);
-  const [compareSessionIds, setCompareSessionIds] = useState<string[]>([]);
-  const [compareDetails, setCompareDetails] = useState<SessionDetail[]>([]);
-
-  const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [opsSummary, setOpsSummary] = useState<OpsSummary | null>(null);
-  const [calibrationWindow, setCalibrationWindow] = useState<
-    CalibrationDashboardData['window']
-  >('90d');
-  const [calibrationTemplateFilter, setCalibrationTemplateFilter] = useState('all');
-  const [calibrationDecisionTypeFilter, setCalibrationDecisionTypeFilter] =
-    useState<string>('all');
-  const [calibrationData, setCalibrationData] =
-    useState<CalibrationDashboardData | null>(null);
-  const [calibrationLoading, setCalibrationLoading] = useState(false);
-  const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
-  const [historyDetail, setHistoryDetail] = useState<SessionDetail | null>(null);
-  const [loadingHistory, setLoadingHistory] = useState(false);
   const [researchBusySessionId, setResearchBusySessionId] = useState<string | null>(
     null
   );
-  const loadHistoryRequestRef = useRef(0);
+
+  const {
+    agents,
+    selectedAgents,
+    setSelectedAgents,
+    modelSelections,
+    setModelSelections,
+    personaSelections,
+    setPersonaSelections,
+    personaPresets,
+    moderatorAgentId,
+    setModeratorAgentId,
+    loadingAgents,
+  } = useWorkspaceBootstrap();
+  const {
+    calibrationWindow,
+    setCalibrationWindow,
+    calibrationTemplateFilter,
+    setCalibrationTemplateFilter,
+    calibrationDecisionTypeFilter,
+    setCalibrationDecisionTypeFilter,
+    calibrationData,
+    calibrationLoading,
+    refreshCalibration,
+  } = useCalibrationData();
 
   // ── Store ────────────────────────────────────────────────────────────────
   const {
@@ -519,17 +265,32 @@ export default function HomePage() {
 
   const { startDiscussion, stopDiscussion, sendStructuredInterjection } =
     useDiscussionStream();
+  const { downloadMarkdown, downloadFromUrl } = useArtifactExports();
+  const {
+    sessions,
+    refreshSessions,
+    activeHistoryId,
+    setActiveHistoryId,
+    historyDetail,
+    setHistoryDetail,
+    loadingHistory,
+    loadHistory,
+    deleteHistory,
+    compareSessionIds,
+    setCompareSessionIds,
+    compareDetails,
+  } = useSessionHistory({
+    onError: (message) => setError(message),
+    onLoadStart: () => {
+      setAutoScroll('follow');
+      resetReplay();
+    },
+    onLoaded: () => {
+      setRightTab('history');
+    },
+  });
 
   // ── Data fetching ────────────────────────────────────────────────────────
-
-  // ── Data fetching ────────────────────────────────────────────────────────
-
-  const refreshSessions = useCallback(async () => {
-    const res = await fetch('/api/sessions');
-    if (!res.ok) return;
-    const data = (await res.json()) as SessionRecord[];
-    setSessions([...data].reverse());
-  }, []);
 
   const refreshOpsSummary = useCallback(async () => {
     const res = await fetch('/api/sessions/ops?limit=20');
@@ -538,112 +299,12 @@ export default function HomePage() {
     setOpsSummary(data);
   }, []);
 
-  const refreshCalibration = useCallback(async () => {
-    setCalibrationLoading(true);
-    try {
-      const search = new URLSearchParams({
-        window: calibrationWindow,
-      });
-      if (calibrationDecisionTypeFilter !== 'all') {
-        search.set('decisionType', calibrationDecisionTypeFilter);
-      }
-      if (calibrationTemplateFilter !== 'all') {
-        search.set('templateId', calibrationTemplateFilter);
-      }
-      const res = await fetch(`/api/sessions/calibration?${search.toString()}`);
-      if (!res.ok) return;
-      const data = (await res.json()) as CalibrationDashboardData;
-      setCalibrationData(data);
-    } finally {
-      setCalibrationLoading(false);
-    }
-  }, [calibrationDecisionTypeFilter, calibrationTemplateFilter, calibrationWindow]);
-
-  const loadHistory = useCallback(
-    async (id: string) => {
-      const requestId = ++loadHistoryRequestRef.current;
-      setLoadingHistory(true);
-      setActiveHistoryId(id);
-      setAutoScroll('follow');
-      resetReplay();
-      try {
-        const res = await fetch(`/api/sessions/${id}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as SessionDetail;
-        if (requestId !== loadHistoryRequestRef.current) return;
-        setHistoryDetail(data);
-      } catch (err) {
-        if (requestId !== loadHistoryRequestRef.current) return;
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        if (requestId !== loadHistoryRequestRef.current) return;
-        setLoadingHistory(false);
-      }
-    },
-    [resetReplay, setAutoScroll, setError]
-  );
-
-  const deleteHistory = useCallback(
-    async (id: string) => {
-      const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
-      if (!res.ok) {
-        setError(`Delete failed: ${res.status}`);
-        return;
-      }
-      if (activeHistoryId === id) {
-        setActiveHistoryId(null);
-        setHistoryDetail(null);
-        resetReplay();
-      }
-      await refreshSessions();
-    },
-    [activeHistoryId, refreshSessions, resetReplay, setError]
-  );
-
   // ── Bootstrap ────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    fetch('/api/agents')
-      .then((r) => r.json())
-      .then(
-        (
-          payload:
-            | AgentInfo[]
-            | { agents: AgentInfo[]; personaPresets?: PersonaPreset[] }
-        ) => {
-          const data = Array.isArray(payload) ? payload : payload.agents;
-          const presets = Array.isArray(payload) ? [] : (payload.personaPresets ?? []);
-          setAgents(data);
-          setPersonaPresets(presets);
-          const available = data.filter((a) => a.available);
-          setSelectedAgents(new Set(available.map((a) => a.id)));
-
-          const preferredMod = available.find((a) => a.id === 'claude') ?? available[0];
-          if (preferredMod) setModeratorAgentId(preferredMod.id);
-
-          const defaults: Record<string, string> = {};
-          const defaultPersonaSelections: Record<string, PersonaSelection> = {};
-          const presetIds = new Set(presets.map((preset) => preset.id));
-          for (const a of data) {
-            defaults[a.id] = a.modelId;
-            const recommended = (a.recommendedPersonaPresetIds ?? []).find(
-              (id) => presetIds.has(id)
-            );
-            defaultPersonaSelections[a.id] = recommended
-              ? { presetId: recommended, customNote: '' }
-              : { customNote: '' };
-          }
-          setModelSelections(defaults);
-          setPersonaSelections(defaultPersonaSelections);
-          setLoadingAgents(false);
-        }
-      )
-      .catch(() => setLoadingAgents(false));
-
     void refreshSessions();
     void refreshOpsSummary();
-    void refreshCalibration();
-  }, [refreshCalibration, refreshOpsSummary, refreshSessions]);
+  }, [refreshOpsSummary, refreshSessions]);
 
   useEffect(() => {
     if (!isRunning) {
@@ -652,10 +313,6 @@ export default function HomePage() {
       void refreshCalibration();
     }
   }, [isRunning, refreshCalibration, refreshOpsSummary, refreshSessions]);
-
-  useEffect(() => {
-    void refreshCalibration();
-  }, [refreshCalibration]);
 
   // ── Right-panel tab auto-switching ───────────────────────────────────────
 
@@ -666,27 +323,6 @@ export default function HomePage() {
   useEffect(() => {
     if (isRunning) setRightTab('context');
   }, [isRunning]);
-
-  useEffect(() => {
-    if (compareSessionIds.length === 0) {
-      setCompareDetails([]);
-      return;
-    }
-
-    void Promise.all(
-      compareSessionIds.map(async (id) => {
-        const response = await fetch(`/api/sessions/${id}`);
-        if (!response.ok) {
-          throw new Error(`Failed to load comparison session ${id}`);
-        }
-        return (await response.json()) as SessionDetail;
-      })
-    )
-      .then(setCompareDetails)
-      .catch((error) =>
-        setError(error instanceof Error ? error.message : String(error))
-      );
-  }, [compareSessionIds, setError]);
 
   useEffect(() => {
     if (!followUpParentSession || followUpParentSession.mode !== 'follow_up') {
@@ -803,12 +439,12 @@ export default function HomePage() {
         return next;
       });
     },
-    [agents, moderatorAgentId]
+    [agents, moderatorAgentId, setSelectedAgents]
   );
 
   const handleModelChange = useCallback((agentId: string, modelId: string) => {
     setModelSelections((prev) => ({ ...prev, [agentId]: modelId }));
-  }, []);
+  }, [setModelSelections]);
 
   const handlePersonaPresetChange = useCallback(
     (agentId: string, presetId?: string) => {
@@ -817,7 +453,7 @@ export default function HomePage() {
         [agentId]: { ...prev[agentId], presetId },
       }));
     },
-    []
+    [setPersonaSelections]
   );
 
   // ── Session actions ──────────────────────────────────────────────────────
@@ -865,6 +501,8 @@ export default function HomePage() {
     personaSelections,
     researchConfig,
     resetReplay,
+    setActiveHistoryId,
+    setHistoryDetail,
     selectedAgents,
     startDiscussion,
   ]);
@@ -1346,7 +984,7 @@ export default function HomePage() {
         messages: liveTranscriptMessages,
       })
     );
-  }, [brief.topic, isRunning, liveTranscriptMessages, phase, sessionId]);
+  }, [brief.topic, downloadMarkdown, isRunning, liveTranscriptMessages, phase, sessionId]);
 
   const handleExportLiveDecisionCard = useCallback(() => {
     if (!decisionSummary) return;
@@ -1358,7 +996,7 @@ export default function HomePage() {
         decisionSummary,
       })
     );
-  }, [brief.topic, decisionSummary, isRunning, phase, sessionId]);
+  }, [brief.topic, decisionSummary, downloadMarkdown, isRunning, phase, sessionId]);
 
   const handleExportLiveDossier = useCallback(() => {
     if (!decisionSummary) return;
@@ -1389,6 +1027,7 @@ export default function HomePage() {
     review.outcomeSummary,
     review.retrospectiveNote,
     sessionId,
+    downloadMarkdown,
   ]);
 
   const handleExportLiveChecklist = useCallback(() => {
@@ -1401,12 +1040,12 @@ export default function HomePage() {
         actionItems,
       })
     );
-  }, [actionItems, brief.topic, isRunning, phase, sessionId]);
+  }, [actionItems, brief.topic, downloadMarkdown, isRunning, phase, sessionId]);
 
   const handleExportLivePdf = useCallback(() => {
     if (!sessionId || !decisionSummary) return;
     downloadFromUrl(`/api/sessions/${sessionId}/artifact-file`);
-  }, [decisionSummary, sessionId]);
+  }, [decisionSummary, downloadFromUrl, sessionId]);
 
   const handleExportHistoryTranscript = useCallback(() => {
     if (!historyDetail) return;
@@ -1424,7 +1063,7 @@ export default function HomePage() {
         })),
       })
     );
-  }, [historyDetail]);
+  }, [downloadMarkdown, historyDetail]);
 
   const handleExportHistoryDecisionCard = useCallback(() => {
     if (!historyDetail?.decisionSummary) return;
@@ -1436,7 +1075,7 @@ export default function HomePage() {
         decisionSummary: historyDetail.decisionSummary,
       })
     );
-  }, [historyDetail]);
+  }, [downloadMarkdown, historyDetail]);
 
   const handleExportHistoryDossier = useCallback(() => {
     if (!historyDetail?.decisionSummary) return;
@@ -1465,7 +1104,7 @@ export default function HomePage() {
         },
       })
     );
-  }, [historyDetail]);
+  }, [downloadMarkdown, historyDetail]);
 
   const handleExportHistoryChecklist = useCallback(() => {
     if (!historyDetail || historyDetail.actionItems.length === 0) return;
@@ -1477,12 +1116,12 @@ export default function HomePage() {
         actionItems: historyDetail.actionItems,
       })
     );
-  }, [historyDetail]);
+  }, [downloadMarkdown, historyDetail]);
 
   const handleExportHistoryPdf = useCallback(() => {
     if (!historyDetail?.decisionSummary) return;
     downloadFromUrl(`/api/sessions/${historyDetail.session.id}/artifact-file`);
-  }, [historyDetail]);
+  }, [downloadFromUrl, historyDetail]);
 
   const handleReuseHistorySetup = useCallback(() => {
     if (!historyDetail) return;
@@ -1558,8 +1197,14 @@ export default function HomePage() {
     historyPersonaSelections,
     moderatorAgentId,
     resetReplay,
+    setActiveHistoryId,
     setAutoScroll,
     setError,
+    setHistoryDetail,
+    setModelSelections,
+    setModeratorAgentId,
+    setPersonaSelections,
+    setSelectedAgents,
   ]);
 
   const handleResumeHistorySession = useCallback(async () => {
@@ -1650,7 +1295,7 @@ export default function HomePage() {
       await refreshSessions();
       return updated;
     },
-    [refreshSessions, sessionId, setActionItems]
+    [refreshSessions, sessionId, setActionItems, setHistoryDetail]
   );
 
   const handleSessionReviewUpdate = useCallback(
@@ -1709,7 +1354,7 @@ export default function HomePage() {
       await refreshSessions();
       await refreshCalibration();
     },
-    [refreshCalibration, refreshSessions, sessionId, setReview]
+    [refreshCalibration, refreshSessions, sessionId, setHistoryDetail, setReview]
   );
 
   const handleResearchRerun = useCallback(
@@ -1752,7 +1397,7 @@ export default function HomePage() {
         setResearchBusySessionId(null);
       }
     },
-    [refreshSessions, sessionId, setResearchRun, setResearchStatus]
+    [refreshSessions, sessionId, setHistoryDetail, setResearchRun, setResearchStatus]
   );
 
   const handleResearchSourceUpdate = useCallback(
@@ -1807,7 +1452,7 @@ export default function HomePage() {
         }
       }
     },
-    [sessionId, setResearchRun]
+    [sessionId, setHistoryDetail, setResearchRun]
   );
 
   const handleResearchVerify = useCallback(
@@ -1849,7 +1494,7 @@ export default function HomePage() {
         setResearchBusySessionId(null);
       }
     },
-    [sessionId, setResearchRun]
+    [sessionId, setHistoryDetail, setResearchRun]
   );
 
   const handleDecisionStatusChange = useCallback(
@@ -1871,68 +1516,94 @@ export default function HomePage() {
       }
       return [...prev, sessionIdToToggle];
     });
-  }, []);
+  }, [setCompareSessionIds]);
+
+  const handleDeleteHistory = useCallback(
+    async (sessionIdToDelete: string) => {
+      const deleted = await deleteHistory(sessionIdToDelete);
+      if (deleted && sessionIdToDelete === activeHistoryId) {
+        resetReplay();
+      }
+    },
+    [activeHistoryId, deleteHistory, resetReplay]
+  );
 
   // ─────────────────────────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden rt-shell">
-      {/* ── Header ── */}
-      <header className="shrink-0 border-b rt-surface-glass px-4 py-2.5 md:px-5">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h1 className="text-lg font-bold tracking-tight rt-text-strong">
-              Round Table
-            </h1>
-            <p className="hidden text-xs rt-text-dim sm:block font-normal">
-              Multi-agent council · strategy &amp; decisions
-            </p>
+    <WorkspaceShell
+      header={
+        <header className="shrink-0 border-b rt-surface-glass px-4 py-2.5 md:px-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h1 className="text-lg font-bold tracking-tight rt-text-strong">
+                Round Table
+              </h1>
+              <p className="hidden text-xs rt-text-dim sm:block font-normal">
+                Multi-agent council · strategy &amp; decisions
+              </p>
+            </div>
+            <div className="flex min-w-0 items-center gap-2">
+              <PhaseIndicator
+                phase={phase}
+                round={round}
+                isRunning={isRunning}
+                moderator={stageModerator.displayName}
+              />
+              <ThemeToggle />
+            </div>
           </div>
-          <div className="flex min-w-0 items-center gap-2">
-            <PhaseIndicator
-              phase={phase}
-              round={round}
-              isRunning={isRunning}
-              moderator={stageModerator.displayName}
-            />
-            <ThemeToggle />
-          </div>
-        </div>
-      </header>
-
-      {/* ── 3-column main grid ── */}
+        </header>
+      }
+    >
       <main className="flex-1 overflow-hidden grid gap-2 p-3 lg:grid-cols-[minmax(240px,260px)_minmax(0,1fr)] xl:grid-cols-[minmax(260px,280px)_minmax(0,1fr)_minmax(300px,340px)]">
 
         {/* ─────────────────────────────────────────────────────────────────
             LEFT PANEL: Session Setup + Compact Agent Config
         ───────────────────────────────────────────────────────────────── */}
-        <aside className="flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden">
-          {/* ── Tab navigation ── */}
-          <div className="shrink-0 flex h-10 border-b rt-border-soft gap-0">
-            {([
-              { id: 'brief', icon: FileText, label: 'Brief' },
-              { id: 'council', icon: Users, label: 'Council' },
-              { id: 'research', icon: Search, label: 'Research' },
-            ] as const).map(({ id, icon: Icon, label }) => (
-              <button
-                key={id}
-                onClick={() => setLeftTab(id)}
-                className={`flex h-full flex-1 items-center justify-center gap-1.5 text-xs font-medium transition-all border-b-2 -mb-px ${
-                  leftTab === id
-                    ? 'border-[var(--rt-hh6-primary)] rt-text-strong'
-                    : 'border-transparent rt-text-dim hover:rt-text-muted'
-                }`}
-              >
-                <Icon className="h-3.5 w-3.5 shrink-0" />
-                <span>{label}</span>
-              </button>
-            ))}
-          </div>
+        <SetupPanel
+          tabs={[
+            { id: 'brief', label: 'Brief', icon: <FileText className="h-3.5 w-3.5 shrink-0" /> },
+            { id: 'council', label: 'Council', icon: <Users className="h-3.5 w-3.5 shrink-0" /> },
+            { id: 'research', label: 'Research', icon: <Search className="h-3.5 w-3.5 shrink-0" /> },
+          ]}
+          activeTab={leftTab}
+          onChangeTab={(tabId) => setLeftTab(tabId as typeof leftTab)}
+          footer={
+            <>
+              <div className="flex gap-2">
+                <Button
+                  onClick={handleStart}
+                  disabled={isRunning || !brief.topic.trim() || selectedAgents.size < 2}
+                  className="h-10 flex-1 rounded-2xl text-sm"
+                >
+                  <Play className="h-4 w-4" />
+                  Start Session
+                </Button>
+                {isRunning && (
+                  <Button variant="destructive" className="h-10" onClick={stopDiscussion}>
+                    Stop
+                  </Button>
+                )}
+              </div>
 
-          {/* Scrollable tab content */}
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-0.5">
+              {isRunning && interjections.length > 0 && (
+                <div className="flex items-center gap-1.5 rounded-lg border rt-surface px-2.5 py-1.5 text-xs rt-text-dim">
+                  <Zap className="h-3 w-3 text-[var(--rt-live-state)]" />
+                  <span>{interjections.length} queued</span>
+                </div>
+              )}
+              {isRunning && degradedAgents.length > 0 && (
+                <div className="flex items-center gap-1.5 rounded-lg border rt-surface px-2.5 py-1.5 text-xs rt-text-dim">
+                  <Activity className="h-3 w-3 text-[var(--rt-warning-state)]" />
+                  <span>Degraded agents: {degradedAgents.join(', ')}</span>
+                </div>
+              )}
+            </>
+          }
+        >
 
             {/* ── Brief Tab ── */}
             {leftTab === 'brief' && <>
@@ -2708,46 +2379,12 @@ export default function HomePage() {
               </div>
             )}
             </>}
-          </div>
-
-          {/* Sticky bottom: Start / Stop */}
-          <div className="shrink-0 space-y-2">
-            <div className="flex gap-2">
-              <Button
-                onClick={handleStart}
-                disabled={isRunning || !brief.topic.trim() || selectedAgents.size < 2}
-                className="h-10 flex-1 rounded-2xl text-sm"
-              >
-                <Play className="h-4 w-4" />
-                Start Session
-              </Button>
-              {isRunning && (
-                <Button variant="destructive" className="h-10" onClick={stopDiscussion}>
-                  Stop
-                </Button>
-              )}
-            </div>
-
-            {/* Live status badge when running */}
-            {isRunning && interjections.length > 0 && (
-              <div className="flex items-center gap-1.5 rounded-lg border rt-surface px-2.5 py-1.5 text-xs rt-text-dim">
-                <Zap className="h-3 w-3 text-[var(--rt-live-state)]" />
-                <span>{interjections.length} queued</span>
-              </div>
-            )}
-            {isRunning && degradedAgents.length > 0 && (
-              <div className="flex items-center gap-1.5 rounded-lg border rt-surface px-2.5 py-1.5 text-xs rt-text-dim">
-                <Activity className="h-3 w-3 text-[var(--rt-warning-state)]" />
-                <span>Degraded agents: {degradedAgents.join(', ')}</span>
-              </div>
-            )}
-          </div>
-        </aside>
+        </SetupPanel>
 
         {/* ─────────────────────────────────────────────────────────────────
             CENTER PANEL: Unified Discussion Feed
         ───────────────────────────────────────────────────────────────── */}
-        <div className="flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden">
+        <LiveSessionPanel>
           {/* Feed header */}
           <div className="shrink-0 space-y-1.5">
             <div className="flex h-10 items-center gap-2 border-b rt-border-soft px-1">
@@ -3079,35 +2716,20 @@ export default function HomePage() {
               />
             )}
           </div>
-        </div>
+        </LiveSessionPanel>
 
         {/* ─────────────────────────────────────────────────────────────────
             RIGHT PANEL: Context | History | Calibration (xl+ only)
         ───────────────────────────────────────────────────────────────── */}
-        <div className="hidden xl:flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden">
-          {/* Tab switcher */}
-          <div className="shrink-0 flex h-10 border-b rt-border-soft gap-0">
-            {(['context', 'history', 'calibration'] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setRightTab(tab)}
-                className={`flex h-full flex-1 items-center justify-center text-xs font-medium capitalize transition-all border-b-2 -mb-px ${
-                  rightTab === tab
-                    ? 'border-[var(--rt-hh6-primary)] rt-text-strong'
-                    : 'border-transparent rt-text-dim hover:rt-text-muted'
-                }`}
-              >
-                {tab === 'context'
-                  ? 'Context'
-                  : tab === 'history'
-                    ? 'History'
-                    : 'Calibration'}
-              </button>
-            ))}
-          </div>
-
-          {/* Tab content */}
-          <div className="min-h-0 flex-1 overflow-y-auto space-y-3 pr-0.5">
+        <HistoryPanel
+          tabs={[
+            { id: 'context', label: 'Context' },
+            { id: 'history', label: 'History' },
+            { id: 'calibration', label: 'Calibration' },
+          ]}
+          activeTab={rightTab}
+          onChangeTab={setRightTab}
+        >
 
             {/* ── Context Tab ── */}
             {rightTab === 'context' && (
@@ -3226,6 +2848,11 @@ export default function HomePage() {
                     decisionSummary={decisionSummary}
                     researchSources={research.run?.sources ?? research.sources}
                     researchEvaluation={research.run?.evaluation ?? null}
+                    confidenceMeta={buildDecisionConfidenceMeta(
+                      decisionSummary.rawConfidence ?? decisionSummary.confidence,
+                      decisionSummary.evidence,
+                      research.run?.sources ?? research.sources
+                    )}
                     researchStatus={research.run?.status ?? research.status}
                     footer={
                       <div className="flex gap-2">
@@ -3538,7 +3165,7 @@ export default function HomePage() {
                                 size="sm"
                                 variant="ghost"
                                 className="h-6 px-2 text-[10px] rt-error hover:bg-[color-mix(in_srgb,var(--rt-stage-glow-secondary)_18%,transparent)]"
-                                onClick={() => void deleteHistory(session.id)}
+                                onClick={() => void handleDeleteHistory(session.id)}
                               >
                                 Delete
                               </Button>
@@ -3786,7 +3413,7 @@ export default function HomePage() {
                         decisionSummary={historyDetail.decisionSummary}
                         researchSources={historyDetail.researchRun?.sources ?? []}
                         researchEvaluation={historyDetail.researchRun?.evaluation ?? null}
-                        confidencePenalty={historyDetail.calibrationContext.penalty}
+                        confidenceMeta={historyDetail.confidenceMeta}
                         researchStatus={historyDetail.researchRun?.status ?? 'idle'}
                       />
                     )}
@@ -4217,125 +3844,25 @@ export default function HomePage() {
             )}
 
             {rightTab === 'calibration' && (
-              <div className="space-y-3">
-                <div className="rounded-xl border rt-surface p-2.5">
-                  <div className="mb-2 flex items-center gap-2">
-                    <Activity className="h-3.5 w-3.5 rt-text-muted" />
-                    <p className="rt-eyebrow">Decision Quality</p>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <span className="rt-eyebrow pl-0.5">Window</span>
-                      <Select
-                        value={calibrationWindow}
-                        onValueChange={(value) => {
-                          if (!value) return;
-                          setCalibrationWindow(value as CalibrationDashboardData['window']);
-                        }}
-                      >
-                        <SelectTrigger className="rt-input h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="30d" className="text-xs">
-                            30d
-                          </SelectItem>
-                          <SelectItem value="90d" className="text-xs">
-                            90d
-                          </SelectItem>
-                          <SelectItem value="180d" className="text-xs">
-                            180d
-                          </SelectItem>
-                          <SelectItem value="all" className="text-xs">
-                            All
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <span className="rt-eyebrow pl-0.5">Decision Type</span>
-                      <Select
-                        value={calibrationDecisionTypeFilter}
-                        onValueChange={(value) =>
-                          setCalibrationDecisionTypeFilter(value ?? 'all')
-                        }
-                      >
-                        <SelectTrigger className="rt-input h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all" className="text-xs">
-                            All types
-                          </SelectItem>
-                          {calibrationDecisionTypeOptions.map((decisionType) => (
-                            <SelectItem
-                              key={decisionType}
-                              value={decisionType}
-                              className="text-xs"
-                            >
-                              {decisionType}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <span className="rt-eyebrow pl-0.5">Template</span>
-                      <Select
-                        value={calibrationTemplateFilter}
-                        onValueChange={(value) => setCalibrationTemplateFilter(value ?? 'all')}
-                      >
-                        <SelectTrigger className="rt-input h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all" className="text-xs">
-                            All templates
-                          </SelectItem>
-                          {historyTemplateOptions.map((templateId) => (
-                            <SelectItem key={templateId} value={templateId} className="text-xs">
-                              {templateMap.get(templateId)?.label ?? templateId}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </div>
-
-                {historyDetail?.calibrationContext.reviewedSessions ? (
-                  <div className="rounded-xl border rt-surface p-2.5">
-                    <p className="rt-eyebrow">Current Session Baseline</p>
-                    <div className="mt-2 space-y-1 text-xs rt-text-muted">
-                      <p>
-                        Raw confidence is shown on the card. Suggested adjustment is{' '}
-                        -{historyDetail.calibrationContext.penalty}pt based on{' '}
-                        {historyDetail.calibrationContext.reviewedSessions} reviewed session(s).
-                      </p>
-                      <p>
-                        Baseline source: {historyDetail.calibrationContext.basedOn} · average
-                        overconfidence {historyDetail.calibrationContext.averageOverconfidence}pt
-                        · hit rate {historyDetail.calibrationContext.templateHitRate}%
-                      </p>
-                    </div>
-                  </div>
-                ) : null}
-
-                {calibrationLoading ? (
-                  <p className="text-sm rt-text-muted">Loading calibration…</p>
-                ) : (
-                  <CalibrationDashboard
-                    data={calibrationData}
-                    templateLabelFor={(templateId) =>
-                      templateMap.get(templateId)?.label ?? templateId
-                    }
-                  />
-                )}
-              </div>
+              <CalibrationPanel
+                calibrationWindow={calibrationWindow}
+                onChangeWindow={setCalibrationWindow}
+                calibrationDecisionTypeFilter={calibrationDecisionTypeFilter}
+                onChangeDecisionTypeFilter={setCalibrationDecisionTypeFilter}
+                calibrationDecisionTypeOptions={calibrationDecisionTypeOptions}
+                calibrationTemplateFilter={calibrationTemplateFilter}
+                onChangeTemplateFilter={setCalibrationTemplateFilter}
+                historyTemplateOptions={historyTemplateOptions}
+                calibrationLoading={calibrationLoading}
+                calibrationData={calibrationData}
+                historyDetail={historyDetail}
+                templateLabelFor={(templateId) =>
+                  templateMap.get(templateId)?.label ?? templateId
+                }
+              />
             )}
-          </div>
-        </div>
+        </HistoryPanel>
       </main>
-    </div>
+    </WorkspaceShell>
   );
 }

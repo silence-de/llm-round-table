@@ -58,12 +58,27 @@ It is optimized for:
 ## Quick Start
 
 ```bash
-npm install
+nvm use
+npm ci
 cp .env.example .env.local
+npm run doctor
 npm run dev
+npm run gate
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
+
+Recommended private-beta defaults:
+
+- set `ROUND_TABLE_ACCESS_TOKEN` before any non-localhost deployment
+- set `ROUND_TABLE_PDF_CJK_FONT` to a valid CJK `.ttf` / `.otf` font for readable PDF exports
+- keep `ROUND_TABLE_DATA_DIR` on local disk; SQLite and browser-capture artifacts are file-backed
+
+Fresh machine? See [docs/local-setup.md](/Users/zhouchengxi/projects/llm-round-table/docs/local-setup.md) or run:
+
+```bash
+bash ./scripts/bootstrap-macos.sh
+```
 
 ## Environment Variables
 
@@ -71,9 +86,16 @@ Required keys depend on the agents you intend to run.
 
 Common:
 
+- `ROUND_TABLE_ACCESS_TOKEN`
+- `ROUND_TABLE_DB_PATH`
+- `ROUND_TABLE_DATA_DIR`
+- `ROUND_TABLE_PDF_CJK_FONT`
+- `TAVILY_API_KEY`
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`
 - `SILICONFLOW_API_KEY`
+- `DEEPSEEK_API_KEY`
+- `MOONSHOT_API_KEY`
 
 Optional model overrides:
 
@@ -96,9 +118,29 @@ Optional runtime tuning:
 - `MAX_DEBATE_ROUNDS`
 - `DEFAULT_TEMPERATURE`
 - `MAX_CONCURRENT_AGENTS`
+- `ROUND_TABLE_AGENT_DEGRADE_TIMEOUT_THRESHOLD`
+- `ROUND_TABLE_SILICONFLOW_BATCH_SIZE`
 - `SILICONFLOW_MAX_CONCURRENCY`
 - `SILICONFLOW_TIMEOUT_MS`
 - `SILICONFLOW_QWEN_TIMEOUT_MS`
+- `DEEPSEEK_TIMEOUT_MS`
+- `DEEPSEEK_REASONER_TIMEOUT_MS`
+- `MOONSHOT_TIMEOUT_MS`
+
+Capture controls:
+
+- `ROUND_TABLE_DISABLE_PLAYWRIGHT_DOM_CAPTURE`
+- `ROUND_TABLE_DISABLE_SCREENSHOT_CAPTURE`
+
+Runtime note:
+
+- Tests use Node's ESM + `--experimental-transform-types` path. Use the version from [.nvmrc](/Users/zhouchengxi/projects/llm-round-table/.nvmrc) or a compatible Node `20.19.x`, `22.13.x`, or `24+`.
+
+Local machine dependencies:
+
+- `playwright` package + `npx playwright install chromium` for browser DOM capture
+- Poppler (`pdfinfo`, `pdftoppm`, `pdftotext`) for PDF smoke checks and text extraction
+- a local `.ttf` / `.otf` font path in `ROUND_TABLE_PDF_CJK_FONT` for readable Chinese PDF export
 
 ## Core Flows
 
@@ -111,6 +153,7 @@ Optional runtime tuning:
 ## Scripts
 
 ```bash
+npm run doctor
 npm run dev
 npm run build
 npm run start
@@ -118,6 +161,22 @@ npm run lint
 npm run test
 npm run gate
 ```
+
+`npm run doctor` checks local prerequisites and prints actionable warnings for:
+
+1. unsupported Node versions
+2. missing `.env.local`
+3. missing provider or Tavily keys
+4. missing Playwright / Chromium
+5. missing Poppler PDF tools
+6. missing CJK PDF font configuration
+
+`npm run gate` currently runs:
+
+1. `npm run test`
+2. `npm run lint`
+3. `npm run build`
+4. `npm run test:smoke-api`
 
 ## UI Validation
 
@@ -139,4 +198,4 @@ npx -y playwright screenshot --viewport-size=390,844 "http://127.0.0.1:3000" out
 - `src/lib/db/*`: schema, repository, calibration, follow-up persistence
 - `test/*`: route, repository, orchestrator, artifact, and regression tests
 
-See [ARCHITECTURE.md](/Users/chengxi-mba/Projects/round-table/ARCHITECTURE.md) for subsystem details.
+See [ARCHITECTURE.md](/Users/zhouchengxi/projects/llm-round-table/ARCHITECTURE.md) for subsystem details.

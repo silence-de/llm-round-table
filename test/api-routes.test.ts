@@ -1280,6 +1280,15 @@ test('browser verification route appends a pinned verification source', async ()
     assert.equal(run.sources[0].note, 'Critical product page');
     assert.equal(run.sources[0].verifiedFields.length >= 2, true);
     assert.equal(typeof run.sources[0].snapshotPath, 'string');
+
+    const detailResponse = await getSessionRoute(
+      new Request('http://localhost/api/sessions/browser-verify-session'),
+      { params: Promise.resolve({ id: 'browser-verify-session' }) }
+    );
+    assert.equal(detailResponse.status, 200);
+    const detailPayload = await detailResponse.json();
+    assert.equal(detailPayload.verificationMeta.capturedSources, 1);
+    assert.equal(detailPayload.verificationMeta.extractedSources, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1582,6 +1591,9 @@ test('session detail exposes calibration penalty guidance without mutating raw c
   assert.equal(payload.calibrationContext.reviewedSessions, 2);
   assert.equal(payload.calibrationContext.penalty > 0, true);
   assert.equal(payload.decisionSummary.confidence, 76);
+  assert.equal(payload.confidenceMeta.rawConfidence, 84);
+  assert.equal(payload.confidenceMeta.adjustedConfidence, 76);
+  assert.equal(payload.confidenceMeta.totalPenalty, 8);
 });
 
 test('calibration route aggregates template, sourcing, and agent/model drift', async () => {
@@ -1702,6 +1714,11 @@ test('calibration route aggregates template, sourcing, and agent/model drift', a
   assert.equal(payload.agentModelDrift.length >= 1, true);
   assert.equal(typeof payload.sourcedVsUnsourced.delta, 'number');
   assert.equal(payload.confidencePenaltyGuidance.length >= 1, true);
+  assert.equal(typeof payload.sampleNote, 'string');
+  assert.equal(
+    ['insufficient', 'emerging', 'directional', 'stable'].includes(payload.sampleLabel),
+    true
+  );
 });
 
 test('session detail and delete routes cover found and missing history', async () => {
@@ -1723,6 +1740,8 @@ test('session detail and delete routes cover found and missing history', async (
   assert.equal(foundResponse.status, 200);
   const foundPayload = await foundResponse.json();
   assert.equal(foundPayload.parentSession, null);
+  assert.equal(foundPayload.confidenceMeta, null);
+  assert.equal(foundPayload.verificationMeta, null);
 
   const patchResponse = await patchSessionRoute(
     new Request('http://localhost/api/sessions/history-session', {

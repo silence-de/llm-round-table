@@ -59,6 +59,11 @@ export const minutes = sqliteTable('minutes', {
 export const decisionSummaries = sqliteTable('decision_summaries', {
   sessionId: text('session_id').primaryKey(),
   content: text('content').notNull(),
+  predictedConfidence: integer('predicted_confidence').notNull().default(0),
+  supportedOnly: integer('supported_only').notNull().default(0),
+  evidenceSourceCount: integer('evidence_source_count').notNull().default(0),
+  unsupportedClaimCount: integer('unsupported_claim_count').notNull().default(0),
+  unresolvedEvidenceCount: integer('unresolved_evidence_count').notNull().default(0),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });

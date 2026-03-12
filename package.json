@@ -2,7 +2,13 @@
   "name": "round-table-init",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20.19.0 <21 || >=22.13.0 <23 || >=24"
+  },
   "scripts": {
+    "doctor": "node ./scripts/doctor.mjs",
+    "predev": "npm run doctor",
+    "prestart": "npm run doctor",
     "dev": "next dev",
     "build": "next build --webpack",
     "start": "next start",
@@ -45,6 +51,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "playwright": "^1.58.2",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

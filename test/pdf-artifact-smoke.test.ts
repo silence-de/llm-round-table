@@ -5,7 +5,21 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { buildSessionArtifactFile } from '@/lib/session-artifact-files';
 
-test('decision dossier PDF passes pdfinfo and rendered-page smoke checks', async () => {
+function hasCommand(command: string) {
+  try {
+    execFileSync('which', [command], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test('decision dossier PDF passes pdfinfo and rendered-page smoke checks', async (t) => {
+  if (!hasCommand('pdfinfo') || !hasCommand('pdftoppm')) {
+    t.skip('pdfinfo/pdftoppm not available in this environment.');
+    return;
+  }
+
   const artifact = await buildSessionArtifactFile({
     session: {
       id: 'pdf-smoke-session',

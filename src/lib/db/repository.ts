@@ -15,6 +15,7 @@ import type {
   DiscussionAgenda,
 } from '../decision/types';
 import {
+  buildDecisionConfidenceMeta,
   normalizeActionItemStatus,
   normalizeDecisionBrief,
   normalizeDecisionStatus,
@@ -40,6 +41,7 @@ import type {
   DiscussionSessionEvent,
 } from '../orchestrator/types';
 import { DiscussionPhase } from '../orchestrator/types';
+import type { SessionVerificationMeta } from '../session/types';
 import { db, sqliteDb } from './client';
 import {
   actionItems,
@@ -254,6 +256,7 @@ export async function upsertDecisionSummary(
 ) {
   const now = new Date();
   const serialized = JSON.stringify(summary);
+  const analytics = buildDecisionSummaryAnalytics(summary);
   const existing = await db
     .select({ sessionId: decisionSummaries.sessionId })
     .from(decisionSummaries)
@@ -263,7 +266,15 @@ export async function upsertDecisionSummary(
   if (existing.length > 0) {
     await db
       .update(decisionSummaries)
-      .set({ content: serialized, updatedAt: now })
+      .set({
+        content: serialized,
+        predictedConfidence: analytics.predictedConfidence,
+        supportedOnly: analytics.supportedOnly ? 1 : 0,
+        evidenceSourceCount: analytics.evidenceSourceCount,
+        unsupportedClaimCount: analytics.unsupportedClaimCount,
+        unresolvedEvidenceCount: analytics.unresolvedEvidenceCount,
+        updatedAt: now,
+      })
       .where(eq(decisionSummaries.sessionId, sessionId));
     await syncGeneratedActionItems(sessionId, summary.nextActions);
     await replaceDecisionClaims(sessionId, summary.evidence);
@@ -273,6 +284,11 @@ export async function upsertDecisionSummary(
   await db.insert(decisionSummaries).values({
     sessionId,
     content: serialized,
+    predictedConfidence: analytics.predictedConfidence,
+    supportedOnly: analytics.supportedOnly ? 1 : 0,
+    evidenceSourceCount: analytics.evidenceSourceCount,
+    unsupportedClaimCount: analytics.unsupportedClaimCount,
+    unresolvedEvidenceCount: analytics.unresolvedEvidenceCount,
     createdAt: now,
     updatedAt: now,
   });
@@ -701,6 +717,14 @@ export async function getSessionDetail(sessionId: string) {
         }
       )
     : null;
+  const confidenceMeta =
+    baseDecisionSummary
+      ? buildDecisionConfidenceMeta(
+          baseDecisionSummary.rawConfidence ?? baseDecisionSummary.confidence,
+          baseDecisionSummary.evidence,
+          researchRun?.sources ?? []
+        )
+      : null;
   const calibrationContext = await getSessionCalibrationContext(
     session.id,
     session.templateId ?? null,
@@ -727,6 +751,8 @@ export async function getSessionDetail(sessionId: string) {
     messages: sessionMessages,
     minutes: sessionMinutes ?? null,
     decisionSummary: normalizedDecisionSummary,
+    confidenceMeta,
+    verificationMeta: buildSessionVerificationMeta(researchRun?.sources ?? []),
     researchRun,
     interjections: sessionInterjections,
     actionItems: sessionActionItems,
@@ -783,6 +809,11 @@ export async function getOperationalSummary(limit = 20) {
         agentDegradedRate: 0,
         unresolvedEvidenceRate: 0,
       },
+      researchBudget: {
+        reruns: 0,
+        recentQueries: 0,
+        providerErrors: 0,
+      },
       providerHotspots: [],
       degradedAgentSessions: [],
       unresolvedEvidenceSessions: [],
@@ -813,6 +844,7 @@ export async function getOperationalSummary(limit = 20) {
 
   const timeoutEvents = events.filter((event) => event.type === 'timeout');
   const degradedEvents = events.filter((event) => event.type === 'agent_degraded');
+  const providerErrorEvents = events.filter((event) => event.type === 'provider_error');
   const resumeStarted = events.filter((event) => event.type === 'resume_started');
   const resumedSessionIds = new Set(resumeStarted.map((event) => event.sessionId));
   const resumedSuccess = recentSessions.filter(
@@ -853,18 +885,47 @@ export async function getOperationalSummary(limit = 20) {
           .select({
             sessionId: decisionSummaries.sessionId,
             content: decisionSummaries.content,
+            predictedConfidence: decisionSummaries.predictedConfidence,
+            supportedOnly: decisionSummaries.supportedOnly,
+            evidenceSourceCount: decisionSummaries.evidenceSourceCount,
+            unsupportedClaimCount: decisionSummaries.unsupportedClaimCount,
+            unresolvedEvidenceCount: decisionSummaries.unresolvedEvidenceCount,
           })
           .from(decisionSummaries)
           .where(inArray(decisionSummaries.sessionId, sessionIds))
       : [];
   const summaryBySessionId = new Map(
-    summaryRows.map((row) => [row.sessionId, row.content])
+    summaryRows.map((row) => [
+      row.sessionId,
+      toDecisionSummaryAnalytics(row),
+    ])
+  );
+  const researchRunRows =
+    sessionIds.length > 0
+      ? await db
+          .select({
+            sessionId: researchRuns.sessionId,
+            rerunCount: researchRuns.rerunCount,
+            queryPlan: researchRuns.queryPlan,
+          })
+          .from(researchRuns)
+          .where(inArray(researchRuns.sessionId, sessionIds))
+      : [];
+  const researchBudget = researchRunRows.reduce(
+    (acc, row) => {
+      acc.reruns += row.rerunCount ?? 0;
+      acc.recentQueries += parseJsonArray(row.queryPlan).length;
+      return acc;
+    },
+    {
+      reruns: 0,
+      recentQueries: 0,
+      providerErrors: providerErrorEvents.length,
+    }
   );
 
   for (const session of recentSessions) {
-    const parsedSummary = parseDecisionSummaryAnalytics(
-      summaryBySessionId.get(session.id)
-    );
+    const parsedSummary = summaryBySessionId.get(session.id) ?? null;
     if (!parsedSummary) continue;
 
     if (parsedSummary.unresolvedEvidenceCount > 0) {
@@ -917,6 +978,7 @@ export async function getOperationalSummary(limit = 20) {
         recentSessions.length
       ),
     },
+    researchBudget,
     providerHotspots: Array.from(providerCounts.entries())
       .map(([provider, count]) => ({ provider, count }))
       .sort((left, right) => right.count - left.count)
@@ -965,6 +1027,11 @@ export async function getCalibrationDashboard(input?: {
       modelSelections: sessions.modelSelections,
       selectedAgentIds: sessions.selectedAgentIds,
       summaryContent: decisionSummaries.content,
+      predictedConfidence: decisionSummaries.predictedConfidence,
+      supportedOnly: decisionSummaries.supportedOnly,
+      evidenceSourceCount: decisionSummaries.evidenceSourceCount,
+      unsupportedClaimCount: decisionSummaries.unsupportedClaimCount,
+      unresolvedEvidenceCount: decisionSummaries.unresolvedEvidenceCount,
     })
     .from(sessions)
     .leftJoin(decisionSummaries, eq(decisionSummaries.sessionId, sessions.id))
@@ -999,7 +1066,7 @@ export async function getCalibrationDashboard(input?: {
   }> = [];
 
   for (const row of filteredRows) {
-    const parsedSummary = parseDecisionSummaryAnalytics(row.summaryContent);
+    const parsedSummary = toDecisionSummaryAnalytics(row);
     if (!parsedSummary) continue;
     const hasReview =
       (row.outcomeConfidence ?? 0) > 0 ||
@@ -1043,6 +1110,9 @@ export async function getCalibrationDashboard(input?: {
       averageOutcomeConfidence: 0,
       averageOverconfidence: 0,
       averageCalibrationGap: 0,
+      sampleLabel: 'insufficient',
+      sampleNote: 'No reviewed sessions yet. Treat confidence as model output, not calibrated evidence.',
+      minimumReliableSample: 12,
       byTemplate: [],
       byDecisionType: [],
       sourcedVsUnsourced: {
@@ -1099,6 +1169,7 @@ export async function getCalibrationDashboard(input?: {
       .filter((item) => item.averageOverconfidence > 0)
       .sort((left, right) => right.averageOverconfidence - left.averageOverconfidence)[0]
       ?.key ?? '';
+  const sampleAssessment = assessCalibrationSample(calibrationRows.length);
 
   return {
     window,
@@ -1107,6 +1178,9 @@ export async function getCalibrationDashboard(input?: {
     averageOutcomeConfidence,
     averageOverconfidence,
     averageCalibrationGap,
+    sampleLabel: sampleAssessment.label,
+    sampleNote: sampleAssessment.note,
+    minimumReliableSample: sampleAssessment.minimumReliableSample,
     byTemplate: byTemplate.map((item) => ({
       templateId: item.key,
       reviewedSessions: item.reviewedSessions,
@@ -2191,6 +2265,11 @@ async function getSessionCalibrationContext(
       outcomeSummary: sessions.outcomeSummary,
       actualOutcome: sessions.actualOutcome,
       content: decisionSummaries.content,
+      predictedConfidence: decisionSummaries.predictedConfidence,
+      supportedOnly: decisionSummaries.supportedOnly,
+      evidenceSourceCount: decisionSummaries.evidenceSourceCount,
+      unsupportedClaimCount: decisionSummaries.unsupportedClaimCount,
+      unresolvedEvidenceCount: decisionSummaries.unresolvedEvidenceCount,
     })
     .from(sessions)
     .leftJoin(decisionSummaries, eq(decisionSummaries.sessionId, sessions.id));
@@ -2219,7 +2298,7 @@ async function getSessionCalibrationContext(
 
   const metrics = relevantRows
     .map((row) => {
-      const parsed = parseDecisionSummaryAnalytics(row.content);
+      const parsed = toDecisionSummaryAnalytics(row);
       if (!parsed) return null;
       const predictedConfidence = parsed.predictedConfidence;
       const outcomeConfidence = row.outcomeConfidence ?? 0;
@@ -2272,47 +2351,133 @@ async function getSessionCalibrationContext(
   };
 }
 
+function buildDecisionSummaryAnalytics(summary: DecisionSummary) {
+  const evidence = Array.isArray(summary.evidence) ? summary.evidence : [];
+  let unresolvedEvidenceCount = 0;
+  let unsupportedClaimCount = 0;
+  const citedSourceIds = new Set<string>();
+
+  for (const item of evidence) {
+    const sourceIds = item.sourceIds.filter((value) => value.trim().length > 0);
+    const unresolvedSourceIndices = item.unresolvedSourceIndices ?? [];
+    if (sourceIds.length === 0) {
+      unsupportedClaimCount += 1;
+    }
+    if (sourceIds.length === 0 || unresolvedSourceIndices.length > 0) {
+      unresolvedEvidenceCount += 1;
+    }
+    for (const sourceId of sourceIds) {
+      citedSourceIds.add(sourceId);
+    }
+  }
+
+  return {
+    predictedConfidence: normalizeConfidenceValue(
+      summary.rawConfidence ?? summary.confidence
+    ),
+    supportedOnly: unsupportedClaimCount === 0,
+    evidenceSourceCount: citedSourceIds.size,
+    unsupportedClaimCount,
+    unresolvedEvidenceCount,
+  };
+}
+
 function parseDecisionSummaryAnalytics(content?: string | null) {
   if (!content) return null;
   try {
-    const parsed = JSON.parse(content) as {
-      confidence?: unknown;
-      evidence?: unknown;
-    };
-    const confidence = normalizeConfidenceValue(parsed.confidence);
-    const evidence = Array.isArray(parsed.evidence) ? parsed.evidence : [];
-    let unresolvedEvidenceCount = 0;
-    let unsupportedCount = 0;
-
-    for (const item of evidence) {
-      const record =
-        item && typeof item === 'object' ? (item as Record<string, unknown>) : {};
-      const sourceIds = Array.isArray(record.sourceIds)
-        ? record.sourceIds.filter(
-            (value): value is string => typeof value === 'string' && value.trim().length > 0
-          )
-        : [];
-      const unresolvedSourceIndices = Array.isArray(record.unresolvedSourceIndices)
-        ? record.unresolvedSourceIndices.filter((value) =>
-            Number.isInteger(Number(value))
-          )
-        : [];
-      if (sourceIds.length === 0) {
-        unsupportedCount += 1;
-      }
-      if (sourceIds.length === 0 || unresolvedSourceIndices.length > 0) {
-        unresolvedEvidenceCount += 1;
-      }
-    }
-
-    return {
-      predictedConfidence: confidence,
-      supportedOnly: unsupportedCount === 0,
-      unresolvedEvidenceCount,
-    };
+    const parsed = JSON.parse(content) as DecisionSummary;
+    return buildDecisionSummaryAnalytics(parsed);
   } catch {
     return null;
   }
+}
+
+function toDecisionSummaryAnalytics(row: {
+  summaryContent?: string | null;
+  content?: string | null;
+  predictedConfidence?: number | null;
+  supportedOnly?: number | null;
+  evidenceSourceCount?: number | null;
+  unsupportedClaimCount?: number | null;
+  unresolvedEvidenceCount?: number | null;
+}) {
+  const predictedConfidence = Number(row.predictedConfidence ?? 0);
+  const supportedOnly = Number(row.supportedOnly ?? 0);
+  const evidenceSourceCount = Number(row.evidenceSourceCount ?? 0);
+  const unsupportedClaimCount = Number(row.unsupportedClaimCount ?? 0);
+  const unresolvedEvidenceCount = Number(row.unresolvedEvidenceCount ?? 0);
+
+  if (
+    predictedConfidence > 0 ||
+    evidenceSourceCount > 0 ||
+    unsupportedClaimCount > 0 ||
+    unresolvedEvidenceCount > 0
+  ) {
+    return {
+      predictedConfidence,
+      supportedOnly: supportedOnly === 1,
+      evidenceSourceCount,
+      unsupportedClaimCount,
+      unresolvedEvidenceCount,
+    };
+  }
+
+  return parseDecisionSummaryAnalytics(row.summaryContent ?? row.content);
+}
+
+function buildSessionVerificationMeta(
+  sources: ResearchSource[]
+): SessionVerificationMeta | null {
+  const verificationSources = sources.filter(
+    (source) => source.sourceType === 'browser_verification'
+  );
+  if (verificationSources.length === 0) return null;
+
+  const extractedSources = verificationSources.filter(
+    (source) => (source.verifiedFields?.length ?? 0) > 0
+  ).length;
+  const manualReviewRequiredSources = verificationSources.filter(
+    (source) =>
+      source.qualityFlags.includes('manual_review_required') ||
+      (source.verifiedFields?.length ?? 0) === 0
+  ).length;
+
+  return {
+    capturedSources: verificationSources.length,
+    extractedSources,
+    manualReviewRequiredSources,
+    semantics: ['captured', 'extracted', 'manual_review'],
+  };
+}
+
+function assessCalibrationSample(reviewedSessions: number) {
+  const minimumReliableSample = 12;
+  if (reviewedSessions < 4) {
+    return {
+      label: 'insufficient' as const,
+      note: 'Very low sample size. Treat these numbers as anecdotal checks, not calibration.',
+      minimumReliableSample,
+    };
+  }
+  if (reviewedSessions < minimumReliableSample) {
+    return {
+      label: 'emerging' as const,
+      note: 'Early trend only. Keep outcome reviews coming before drawing strong conclusions.',
+      minimumReliableSample,
+    };
+  }
+  if (reviewedSessions < 24) {
+    return {
+      label: 'directional' as const,
+      note: 'Directional signal is available, but template and model deltas still need manual judgment.',
+      minimumReliableSample,
+    };
+  }
+  return {
+    label: 'stable' as const,
+    note: 'Sample size is large enough to treat this as a useful operating signal, not proof.',
+    minimumReliableSample,
+  };
 }
 
 function deleteSnapshotFiles(sources: ResearchSource[]) {

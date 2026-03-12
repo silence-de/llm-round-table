@@ -22,6 +22,7 @@
 | `NOT_FOUND` | 资源不存在 | session/source/research 不存在 |
 | `CONFLICT` | 当前状态不允许该操作 | 非 running 状态 interject、不可恢复状态 resume |
 | `AUTH_MISSING_KEY` | provider key 缺失导致不可运行 | moderator 或 participant 无可用 key |
+| `UNAUTHORIZED` | API 访问令牌缺失或错误 | 配置 `ROUND_TABLE_ACCESS_TOKEN` 后未带 token |
 | `PROVIDER_UNAVAILABLE` | 外部 provider 不可用 | research rerun 失败 |
 | `TIMEOUT_STARTUP` | 启动超时 | 首 token 超时 |
 | `TIMEOUT_IDLE` | 流式空闲超时 | 中途长时间无 token |

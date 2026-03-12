@@ -141,7 +141,7 @@ export function ResearchPanel({
           {onVerifyUrl && (
             <div className="rounded-xl border rt-border-soft p-3">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
-                Browser Verification
+                Browser Capture
               </p>
               <div className="mt-2 grid gap-2 md:grid-cols-[170px_minmax(0,1fr)]">
                 <Select
@@ -200,7 +200,8 @@ export function ResearchPanel({
                 className="rt-input mt-2 min-h-[64px] text-xs"
               />
               <p className="mt-2 text-[11px] rt-text-dim">
-                Read-only capture: attach a snapshot, extract profile-specific facts, and pin the page as evidence.
+                Captured-page workflow: attach a snapshot, extract profile-specific facts when
+                possible, and surface what still needs manual review.
               </p>
               {verificationProfileId && (
                 <div className="mt-2 rounded-lg border rt-border-soft p-2">
@@ -640,7 +641,7 @@ function groupSourcesByCategory(sources: ResearchSource[]) {
 
 function classifySourceCategory(source: ResearchSource) {
   if (source.sourceType === 'browser_verification') {
-    return 'Browser Verification';
+    return 'Captured Page';
   }
   const domain = source.domain.toLowerCase();
   const title = source.title.toLowerCase();

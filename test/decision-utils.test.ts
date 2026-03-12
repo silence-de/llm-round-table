@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildDecisionConfidenceMeta,
   classifyEvidenceStatus,
   normalizePersistedDecisionSummary,
   parseDecisionSummary,
@@ -78,6 +79,37 @@ test('normalizePersistedDecisionSummary lowers confidence for unsupported and st
 
   assert.equal(normalized.evidence[0].sourceIds[0], 'R1');
   assert.equal(normalized.confidence < 84, true);
+});
+
+test('buildDecisionConfidenceMeta preserves raw model confidence and explains penalties', () => {
+  const meta = buildDecisionConfidenceMeta(
+    84,
+    [
+      { claim: 'supported but stale', sourceIds: ['R1'] },
+      { claim: 'unsupported', sourceIds: [], gapReason: 'missing proof' },
+    ],
+    [
+      {
+        id: 'src-1',
+        citationLabel: 'R1',
+        title: 'Stale source',
+        url: 'https://example.com/stale',
+        domain: 'example.com',
+        snippet: 'snippet',
+        score: 0.8,
+        selected: true,
+        pinned: false,
+        rank: 1,
+        stale: true,
+        qualityFlags: ['stale_source'],
+      },
+    ]
+  );
+
+  assert.equal(meta.rawConfidence, 84);
+  assert.equal(meta.adjustedConfidence, 66);
+  assert.equal(meta.totalPenalty, 18);
+  assert.equal(meta.adjustments.length, 2);
 });
 
 test('parseDecisionSummary backfills dossier fields from brief when missing', () => {
