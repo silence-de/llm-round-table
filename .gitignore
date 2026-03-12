@@ -24,6 +24,19 @@
 .DS_Store
 *.pem
 /data/*.db
+*.db
+*.sqlite
+*.sqlite3
+
+# local agent/editor work dirs
+/.claude/
+/.codex/
+
+# local runtime artifacts
+/data/verification-captures/
+/output/
+/temp/
+/tmp/
 
 # debug
 npm-debug.log*
