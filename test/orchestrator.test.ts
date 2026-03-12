@@ -117,6 +117,70 @@ test('orchestrator completes the main phases and persists summary hooks', async 
   assert.ok(usageDeltas.length >= 3);
 });
 
+test('orchestrator executes all configured analysis rounds before summary', async () => {
+  installFakeProviders(
+    new FakeProvider({
+      streamChat: async function* (params) {
+        if (params.messages[0]?.content.includes('会议纪要')) {
+          yield* streamText('# 圆桌讨论纪要');
+          return;
+        }
+        if (params.messages[0]?.content.includes('请就以下议题发表你的观点')) {
+          yield* streamText('参与者观点输出');
+          return;
+        }
+        yield* streamText('主持人输出');
+      },
+      chat: async () => ({
+        content: JSON.stringify({
+          agreements: [],
+          disagreements: [],
+          shouldConverge: true,
+          moderatorNarrative: '当前观点已经较为收敛。',
+        }),
+        usage: { inputTokens: 8, outputTokens: 16 },
+      }),
+    })
+  );
+
+  const orchestrator = new DiscussionOrchestrator({
+    sessionId: 'orchestrator-full-rounds',
+    topic: '验证固定轮次',
+    brief: {
+      ...DEFAULT_DECISION_BRIEF,
+      topic: '验证固定轮次',
+    },
+    agenda: DEFAULT_DISCUSSION_AGENDA,
+    researchConfig: DEFAULT_RESEARCH_CONFIG,
+    agents: buildAgents(),
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 3,
+    shouldStop: () => false,
+  });
+
+  const events = [];
+  for await (const event of orchestrator.run()) {
+    events.push(event);
+  }
+
+  const analysisRounds = events
+    .filter((event) => event.type === 'phase_change' && event.phase === DiscussionPhase.ANALYSIS)
+    .map((event) => event.round);
+  assert.deepEqual(analysisRounds, [0, 1, 2]);
+  const summaryIndex = events.findIndex(
+    (event) => event.type === 'phase_change' && event.phase === DiscussionPhase.SUMMARY
+  );
+  const lastAnalysisIndex = events
+    .map((event, index) =>
+      event.type === 'phase_change' && event.phase === DiscussionPhase.ANALYSIS
+        ? index
+        : -1
+    )
+    .filter((index) => index >= 0)
+    .at(-1);
+  assert.ok(summaryIndex > (lastAnalysisIndex ?? -1));
+});
+
 test('orchestrator exits early when stop is requested before opening', async () => {
   installFakeProviders(new FakeProvider());
 
@@ -202,6 +266,9 @@ test('orchestrator persists guided research run and uses stable source ids', asy
               risks: ['域名集中'],
               openQuestions: [],
               nextActions: ['继续补 research'],
+              alternativesRejected: ['暂不直接落地'],
+              redLines: ['若证据失效则暂停'],
+              revisitTriggers: ['补充更多反例来源后重评'],
               confidence: 72,
               evidence: [{ claim: '风险判断有证据', sourceIds: ['R1'] }],
             }),
@@ -277,7 +344,9 @@ test('orchestrator persists guided research run and uses stable source ids', asy
         researchRuns.push({ status: run.status, queryPlan: run.queryPlan });
       },
       onResearchSourcesPersist: async (_id, sources) => {
-        researchSourceBatches.push(sources.map((source) => source.id));
+        researchSourceBatches.push(
+          sources.map((source) => source.citationLabel ?? source.id)
+        );
       },
       onDecisionSummaryPersist: async (summary) => {
         decisionSummaries.push(summary.evidence.map((item) => item.sourceIds[0]));

@@ -15,6 +15,33 @@ export const DEFAULT_RESEARCH_CONFIG: ResearchConfig = {
   maxReruns: 2,
 };
 
+export function getResearchSourceCitationLabel(
+  source: Pick<ResearchSource, 'rank'>
+) {
+  const rank = Number.isFinite(source.rank) ? Math.max(1, Math.round(source.rank)) : 1;
+  return `R${rank}`;
+}
+
+export function findResearchSourceByCitation(
+  reference: string,
+  researchSources: ResearchSource[]
+) {
+  const normalized = reference.trim();
+  if (!normalized) return null;
+  return (
+    researchSources.find((source) => getResearchSourceCitationLabel(source) === normalized) ??
+    researchSources.find((source) => source.id === normalized) ??
+    null
+  );
+}
+
+export function attachCitationLabels<T extends ResearchSource>(sources: T[]) {
+  return sources.map((source) => ({
+    ...source,
+    citationLabel: getResearchSourceCitationLabel(source),
+  }));
+}
+
 export function normalizeResearchConfig(
   value?: Partial<ResearchConfig> | null
 ): ResearchConfig {
@@ -151,6 +178,40 @@ export function evaluateResearchQuality(input: {
   };
 }
 
+export function buildResearchSummaryText(sources: ResearchSource[], topic: string) {
+  if (sources.length === 0) return '';
+
+  const orderedSources = [...sources].sort((left, right) => left.rank - right.rank);
+  const lines = [
+    `【Research Intelligence】关于「${topic}」的研究来源：`,
+    '',
+    ...orderedSources.map((source) => {
+      const dateLabel = source.capturedAt
+        ? ` (captured ${formatDateLabel(source.capturedAt)})`
+        : source.publishedDate
+          ? ` (${source.publishedDate.slice(0, 10)})`
+          : '';
+      const verificationLabel =
+        source.sourceType === 'browser_verification'
+          ? ` [browser verification${source.verificationProfile ? `:${source.verificationProfile}` : ''}]`
+          : '';
+      const verifiedFacts =
+        source.verifiedFields && source.verifiedFields.length > 0
+          ? `\n   Extracted signals (manual review): ${source.verifiedFields
+              .slice(0, 4)
+              .map((field) => `${field.label}=${field.value}`)
+              .join(' | ')}`
+          : '';
+      const claimHint = source.claimHint ? `\n   Claim hint: ${source.claimHint}` : '';
+      return `${getResearchSourceCitationLabel(source)}. ${source.title}${verificationLabel}${dateLabel}\n   ${source.snippet}${verifiedFacts}${claimHint}`;
+    }),
+    '',
+    '请参考以上来源进行讨论，并明确区分结论、风险和仍待验证的问题。',
+  ];
+
+  return lines.join('\n');
+}
+
 export function buildSourceQualityFlags(
   source: Pick<ResearchSource, 'publishedDate' | 'score'>,
   duplicateDomainCount: number
@@ -238,6 +299,11 @@ function isRecent(value?: string, decisionType: DecisionBrief['decisionType'] = 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return false;
   return Date.now() - date.getTime() <= staleWindowMs(decisionType);
+}
+
+function formatDateLabel(value: number | string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toISOString().slice(0, 10);
 }
 
 function staleWindowMs(decisionType: DecisionBrief['decisionType']) {

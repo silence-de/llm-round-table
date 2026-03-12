@@ -1,4 +1,5 @@
 export type SSEEventType =
+  | 'heartbeat'
   | 'phase_change'
   | 'agent_start'
   | 'agent_token'

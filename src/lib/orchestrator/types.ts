@@ -141,6 +141,7 @@ export interface DiscussionSessionEvent {
     | 'follow_up_inherited'
     | 'resume_preview'
     | 'resume_started'
+    | 'browser_verification'
     | 'provider_error';
   provider?: string;
   modelId?: string;

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   Activity,
   Cpu,
@@ -24,7 +24,9 @@ import { Badge } from '@/components/ui/badge';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
@@ -38,6 +40,8 @@ import { ResearchPanel } from '@/components/discussion/research-panel';
 import { MarkdownContent } from '@/components/ui/markdown-content';
 import { DiscussionFeed } from '@/components/discussion/discussion-feed';
 import { DecisionSummaryCard } from '@/components/discussion/decision-summary-card';
+import { OpsSummaryCard } from '@/components/discussion/ops-summary-card';
+import { CalibrationDashboard } from '@/components/discussion/calibration-dashboard';
 import { ActionItemsBoard } from '@/components/discussion/action-items-board';
 import type { FeedMessage } from '@/components/discussion/discussion-feed';
 import type { PersonaPreset, PersonaSelection } from '@/lib/agents/types';
@@ -63,6 +67,7 @@ import {
   normalizeDiscussionAgenda,
 } from '@/lib/decision/utils';
 import {
+  buildDecisionDossierMarkdown,
   buildDecisionSummaryMarkdown,
   buildExecutionChecklistMarkdown,
   buildTranscriptMarkdown,
@@ -100,6 +105,10 @@ interface SessionRecord {
   goal: string;
   background: string;
   constraints: string;
+  timeHorizon: string;
+  nonNegotiables: string;
+  acceptableDownside: string;
+  reviewAt?: string | null;
   retrospectiveNote?: string;
   outcomeSummary?: string;
   actualOutcome?: string;
@@ -152,6 +161,13 @@ interface SessionDetail {
     unresolvedSourceIndices: number[];
     gapReason: string;
   }>;
+  calibrationContext: {
+    reviewedSessions: number;
+    averageOverconfidence: number;
+    templateHitRate: number;
+    penalty: number;
+    basedOn: 'template' | 'decisionType';
+  };
   resumeMeta:
     | {
         resumedFromSessionId?: string | null;
@@ -185,6 +201,18 @@ interface SessionDetail {
         createdAt: number | string;
       }
     | null;
+  parentReviewComparison:
+    | {
+        sessionId: string;
+        topic: string;
+        recommendedOption: string;
+        predictedConfidence: number;
+        outcomeSummary?: string;
+        actualOutcome?: string;
+        outcomeConfidence?: number;
+        retrospectiveNote?: string;
+      }
+    | null;
   childSessions: Array<{
     id: string;
     topic: string;
@@ -193,6 +221,114 @@ interface SessionDetail {
     decisionStatus: DecisionStatus;
     createdAt: number | string;
   }>;
+}
+
+interface OpsSummary {
+  sessionsAnalyzed: number;
+  metrics: {
+    timeoutRate: number;
+    resumeSuccessRate: number;
+    agentDegradedRate: number;
+    unresolvedEvidenceRate: number;
+  };
+  recentFailures: Array<{
+    sessionId: string;
+    status: string;
+    createdAt?: number | string;
+  }>;
+  degradedAgentSessions: Array<{
+    sessionId: string;
+    status?: string;
+    createdAt?: number | string;
+    degradedEventCount?: number;
+  }>;
+  unresolvedEvidenceSessions: Array<{
+    sessionId: string;
+    unresolvedEvidenceCount: number;
+    createdAt?: number | string;
+  }>;
+  calibration: {
+    reviewedSessions: number;
+    averagePredictedConfidence: number;
+    averageOutcomeConfidence: number;
+    averageOverconfidence: number;
+    averageCalibrationGap: number;
+    sourcedVsUnsourcedOutcomeGap: {
+      sourcedAverage: number;
+      unsourcedAverage: number;
+      delta: number;
+    };
+    templateHitRates: Array<{
+      templateId: string;
+      reviewedSessions: number;
+      hitRate: number;
+    }>;
+    agentModelOverconfidence: Array<{
+      agentId: string;
+      modelId: string;
+      reviewedSessions: number;
+      averageDelta: number;
+      averageOutcomeConfidence: number;
+    }>;
+    overconfidenceTrend: Array<{
+      sessionId: string;
+      createdAt?: number | string;
+      predictedConfidence: number;
+      outcomeConfidence: number;
+      delta: number;
+    }>;
+  };
+}
+
+interface CalibrationDashboardData {
+  window: '30d' | '90d' | '180d' | 'all';
+  reviewedSessions: number;
+  averagePredictedConfidence: number;
+  averageOutcomeConfidence: number;
+  averageOverconfidence: number;
+  averageCalibrationGap: number;
+  byTemplate: Array<{
+    templateId: string;
+    reviewedSessions: number;
+    averagePredictedConfidence: number;
+    averageOutcomeConfidence: number;
+    averageOverconfidence: number;
+    hitRate: number;
+  }>;
+  byDecisionType: Array<{
+    decisionType: string;
+    reviewedSessions: number;
+    averagePredictedConfidence: number;
+    averageOutcomeConfidence: number;
+    averageOverconfidence: number;
+    hitRate: number;
+  }>;
+  sourcedVsUnsourced: {
+    sourcedSessions: number;
+    unsourcedSessions: number;
+    sourcedAverage: number;
+    unsourcedAverage: number;
+    delta: number;
+  };
+  agentModelDrift: Array<{
+    agentId: string;
+    modelId: string;
+    reviewedSessions: number;
+    averageDelta: number;
+    averageOutcomeConfidence: number;
+  }>;
+  timeline: Array<{
+    sessionId: string;
+    createdAt?: number | string;
+    predictedConfidence: number;
+    outcomeConfidence: number;
+    delta: number;
+    templateId: string;
+    decisionType: string;
+  }>;
+  confidencePenaltyGuidance: string[];
+  mostReliableTemplate: string;
+  largestBlindSpot: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -205,6 +341,13 @@ function downloadMarkdown(filename: string, content: string) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function downloadFromUrl(url: string) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.rel = 'noopener noreferrer';
+  a.click();
 }
 
 function parseAgentList(value?: string | null): string[] {
@@ -297,7 +440,9 @@ export default function HomePage() {
   const [loadingAgents, setLoadingAgents] = useState(true);
 
   const [leftTab, setLeftTab] = useState<'brief' | 'council' | 'research'>('brief');
-  const [rightTab, setRightTab] = useState<'context' | 'history'>('context');
+  const [rightTab, setRightTab] = useState<'context' | 'history' | 'calibration'>(
+    'context'
+  );
   const [historyQuery, setHistoryQuery] = useState('');
   const [historyStatusFilter, setHistoryStatusFilter] = useState<'all' | SessionRecord['status']>('all');
   const [historyTemplateFilter, setHistoryTemplateFilter] = useState<string>('all');
@@ -316,17 +461,29 @@ export default function HomePage() {
   const [followUpCarryPreview, setFollowUpCarryPreview] = useState<{
     inheritedActionCount: number;
     skippedReason: string[];
+    parentReviewComparison?: SessionDetail['parentReviewComparison'];
   } | null>(null);
   const [compareSessionIds, setCompareSessionIds] = useState<string[]>([]);
   const [compareDetails, setCompareDetails] = useState<SessionDetail[]>([]);
 
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [opsSummary, setOpsSummary] = useState<OpsSummary | null>(null);
+  const [calibrationWindow, setCalibrationWindow] = useState<
+    CalibrationDashboardData['window']
+  >('90d');
+  const [calibrationTemplateFilter, setCalibrationTemplateFilter] = useState('all');
+  const [calibrationDecisionTypeFilter, setCalibrationDecisionTypeFilter] =
+    useState<string>('all');
+  const [calibrationData, setCalibrationData] =
+    useState<CalibrationDashboardData | null>(null);
+  const [calibrationLoading, setCalibrationLoading] = useState(false);
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
   const [historyDetail, setHistoryDetail] = useState<SessionDetail | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [researchBusySessionId, setResearchBusySessionId] = useState<string | null>(
     null
   );
+  const loadHistoryRequestRef = useRef(0);
 
   // ── Store ────────────────────────────────────────────────────────────────
   const {
@@ -374,8 +531,37 @@ export default function HomePage() {
     setSessions([...data].reverse());
   }, []);
 
+  const refreshOpsSummary = useCallback(async () => {
+    const res = await fetch('/api/sessions/ops?limit=20');
+    if (!res.ok) return;
+    const data = (await res.json()) as OpsSummary;
+    setOpsSummary(data);
+  }, []);
+
+  const refreshCalibration = useCallback(async () => {
+    setCalibrationLoading(true);
+    try {
+      const search = new URLSearchParams({
+        window: calibrationWindow,
+      });
+      if (calibrationDecisionTypeFilter !== 'all') {
+        search.set('decisionType', calibrationDecisionTypeFilter);
+      }
+      if (calibrationTemplateFilter !== 'all') {
+        search.set('templateId', calibrationTemplateFilter);
+      }
+      const res = await fetch(`/api/sessions/calibration?${search.toString()}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as CalibrationDashboardData;
+      setCalibrationData(data);
+    } finally {
+      setCalibrationLoading(false);
+    }
+  }, [calibrationDecisionTypeFilter, calibrationTemplateFilter, calibrationWindow]);
+
   const loadHistory = useCallback(
     async (id: string) => {
+      const requestId = ++loadHistoryRequestRef.current;
       setLoadingHistory(true);
       setActiveHistoryId(id);
       setAutoScroll('follow');
@@ -384,10 +570,13 @@ export default function HomePage() {
         const res = await fetch(`/api/sessions/${id}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as SessionDetail;
+        if (requestId !== loadHistoryRequestRef.current) return;
         setHistoryDetail(data);
       } catch (err) {
+        if (requestId !== loadHistoryRequestRef.current) return;
         setError(err instanceof Error ? err.message : String(err));
       } finally {
+        if (requestId !== loadHistoryRequestRef.current) return;
         setLoadingHistory(false);
       }
     },
@@ -452,13 +641,21 @@ export default function HomePage() {
       .catch(() => setLoadingAgents(false));
 
     void refreshSessions();
-  }, [refreshSessions]);
+    void refreshOpsSummary();
+    void refreshCalibration();
+  }, [refreshCalibration, refreshOpsSummary, refreshSessions]);
 
   useEffect(() => {
     if (!isRunning) {
       void refreshSessions();
+      void refreshOpsSummary();
+      void refreshCalibration();
     }
-  }, [isRunning, refreshSessions]);
+  }, [isRunning, refreshCalibration, refreshOpsSummary, refreshSessions]);
+
+  useEffect(() => {
+    void refreshCalibration();
+  }, [refreshCalibration]);
 
   // ── Right-panel tab auto-switching ───────────────────────────────────────
 
@@ -510,6 +707,7 @@ export default function HomePage() {
         return (await response.json()) as {
           inheritedActionCount: number;
           skippedReason: string[];
+          parentReviewComparison?: SessionDetail['parentReviewComparison'];
         };
       })
       .then((preview) => {
@@ -562,16 +760,29 @@ export default function HomePage() {
     setBrief((prev) => ({
       ...prev,
       templateId: template.id,
-      goal: prev.goal || template.goal,
-      background: prev.background || template.background,
-      constraints: prev.constraints || template.constraints,
+      goal:
+        prev.templateId && prev.templateId !== template.id
+          ? template.goal
+          : prev.goal || template.goal,
+      background:
+        prev.templateId && prev.templateId !== template.id
+          ? template.background
+          : prev.background || template.background,
+      constraints:
+        prev.templateId && prev.templateId !== template.id
+          ? template.constraints
+          : prev.constraints || template.constraints,
       decisionType: template.decisionType,
       desiredOutput: template.desiredOutput,
+      reviewAt:
+        prev.reviewAt && prev.templateId === template.id
+          ? prev.reviewAt
+          : template.reviewWindowSuggestion,
     }));
     setAgenda((prev) => ({
       ...prev,
-      focalQuestions: prev.focalQuestions || template.focalQuestions,
-      requiredDimensions: prev.requiredDimensions || template.requiredDimensions,
+      focalQuestions: template.focalQuestions,
+      requiredDimensions: template.requiredDimensions,
     }));
   }, []);
 
@@ -723,6 +934,24 @@ export default function HomePage() {
         : null,
     [brief.templateId]
   );
+  const templateMap = useMemo(
+    () => new Map(DECISION_TEMPLATES.map((template) => [template.id, template])),
+    []
+  );
+  const groupedTemplates = useMemo(() => {
+    const families: Array<{
+      id: 'career' | 'life' | 'money';
+      label: string;
+    }> = [
+      { id: 'career', label: 'Career' },
+      { id: 'life', label: 'Life' },
+      { id: 'money', label: 'Money' },
+    ];
+    return families.map((family) => ({
+      ...family,
+      templates: DECISION_TEMPLATES.filter((template) => template.family === family.id),
+    }));
+  }, []);
 
   const historyPersonaSelections = useMemo(
     () => parsePersonaSelectionMap(historyDetail?.session.personaSelections),
@@ -1071,6 +1300,17 @@ export default function HomePage() {
       ).sort(),
     [sessions]
   );
+  const calibrationDecisionTypeOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          sessions
+            .map((session) => session.decisionType)
+            .filter((decisionType): decisionType is string => Boolean(decisionType))
+        )
+      ).sort(),
+    [sessions]
+  );
 
   const similarSessions = useMemo(() => {
     if (!historyDetail) return [] as SessionRecord[];
@@ -1120,6 +1360,37 @@ export default function HomePage() {
     );
   }, [brief.topic, decisionSummary, isRunning, phase, sessionId]);
 
+  const handleExportLiveDossier = useCallback(() => {
+    if (!decisionSummary) return;
+    downloadMarkdown(
+      `dossier-${sessionId ?? 'current'}.md`,
+      buildDecisionDossierMarkdown({
+        topic: brief.topic.trim() || 'Live discussion',
+        status: isRunning ? phase || 'running' : 'completed',
+        brief,
+        decisionSummary,
+        actionItems,
+        researchEvaluation: research.run?.evaluation ?? null,
+        review: {
+          outcomeSummary: review.outcomeSummary,
+          retrospectiveNote: review.retrospectiveNote,
+        },
+        parentReviewComparison: followUpCarryPreview?.parentReviewComparison ?? null,
+      })
+    );
+  }, [
+    actionItems,
+    brief,
+    decisionSummary,
+    followUpCarryPreview?.parentReviewComparison,
+    isRunning,
+    phase,
+    research.run?.evaluation,
+    review.outcomeSummary,
+    review.retrospectiveNote,
+    sessionId,
+  ]);
+
   const handleExportLiveChecklist = useCallback(() => {
     if (actionItems.length === 0) return;
     downloadMarkdown(
@@ -1131,6 +1402,11 @@ export default function HomePage() {
       })
     );
   }, [actionItems, brief.topic, isRunning, phase, sessionId]);
+
+  const handleExportLivePdf = useCallback(() => {
+    if (!sessionId || !decisionSummary) return;
+    downloadFromUrl(`/api/sessions/${sessionId}/artifact-file`);
+  }, [decisionSummary, sessionId]);
 
   const handleExportHistoryTranscript = useCallback(() => {
     if (!historyDetail) return;
@@ -1162,6 +1438,35 @@ export default function HomePage() {
     );
   }, [historyDetail]);
 
+  const handleExportHistoryDossier = useCallback(() => {
+    if (!historyDetail?.decisionSummary) return;
+    downloadMarkdown(
+      `dossier-${historyDetail.session.id}.md`,
+      buildDecisionDossierMarkdown({
+        topic: historyDetail.session.topic,
+        status: historyDetail.session.decisionStatus,
+        brief: {
+          goal: historyDetail.session.goal,
+          constraints: historyDetail.session.constraints,
+          timeHorizon: historyDetail.session.timeHorizon,
+          nonNegotiables: historyDetail.session.nonNegotiables,
+          acceptableDownside: historyDetail.session.acceptableDownside,
+          reviewAt: historyDetail.session.reviewAt ?? '',
+        },
+        decisionSummary: historyDetail.decisionSummary,
+        actionItems: historyDetail.actionItems,
+        researchEvaluation: historyDetail.researchRun?.evaluation ?? null,
+        parentReviewComparison: historyDetail.parentReviewComparison ?? null,
+        review: {
+          outcomeSummary: historyDetail.session.outcomeSummary ?? '',
+          actualOutcome: historyDetail.session.actualOutcome ?? '',
+          outcomeConfidence: historyDetail.session.outcomeConfidence ?? 0,
+          retrospectiveNote: historyDetail.session.retrospectiveNote ?? '',
+        },
+      })
+    );
+  }, [historyDetail]);
+
   const handleExportHistoryChecklist = useCallback(() => {
     if (!historyDetail || historyDetail.actionItems.length === 0) return;
     downloadMarkdown(
@@ -1172,6 +1477,11 @@ export default function HomePage() {
         actionItems: historyDetail.actionItems,
       })
     );
+  }, [historyDetail]);
+
+  const handleExportHistoryPdf = useCallback(() => {
+    if (!historyDetail?.decisionSummary) return;
+    downloadFromUrl(`/api/sessions/${historyDetail.session.id}/artifact-file`);
   }, [historyDetail]);
 
   const handleReuseHistorySetup = useCallback(() => {
@@ -1200,6 +1510,10 @@ export default function HomePage() {
         goal: historyDetail.session.goal,
         background: historyDetail.session.background,
         constraints: historyDetail.session.constraints,
+        timeHorizon: historyDetail.session.timeHorizon,
+        nonNegotiables: historyDetail.session.nonNegotiables,
+        acceptableDownside: historyDetail.session.acceptableDownside,
+        reviewAt: historyDetail.session.reviewAt ?? '',
         decisionType: historyDetail.session.decisionType as DecisionBrief['decisionType'],
         desiredOutput: historyDetail.session.desiredOutput as DecisionBrief['desiredOutput'],
         templateId: historyDetail.session.templateId ?? null,
@@ -1374,6 +1688,12 @@ export default function HomePage() {
                 ...(patch.outcomeSummary !== undefined
                   ? { outcomeSummary: patch.outcomeSummary }
                   : {}),
+                ...(patch.actualOutcome !== undefined
+                  ? { actualOutcome: patch.actualOutcome }
+                  : {}),
+                ...(patch.outcomeConfidence !== undefined
+                  ? { outcomeConfidence: patch.outcomeConfidence }
+                  : {}),
               },
             }
           : prev
@@ -1387,8 +1707,9 @@ export default function HomePage() {
       }
 
       await refreshSessions();
+      await refreshCalibration();
     },
-    [refreshSessions, sessionId, setReview]
+    [refreshCalibration, refreshSessions, sessionId, setReview]
   );
 
   const handleResearchRerun = useCallback(
@@ -1484,6 +1805,48 @@ export default function HomePage() {
               .sort((left, right) => left.rank - right.rank),
           });
         }
+      }
+    },
+    [sessionId, setResearchRun]
+  );
+
+  const handleResearchVerify = useCallback(
+    async (
+      sessionIdToUpdate: string,
+      input: {
+        url: string;
+        profileId?: string;
+        claimHint?: string;
+        note?: string;
+      }
+    ) => {
+      setResearchBusySessionId(sessionIdToUpdate);
+      try {
+        const response = await fetch(
+          `/api/sessions/${sessionIdToUpdate}/research/verify`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(input),
+          }
+        );
+        if (!response.ok) {
+          throw new Error(`Failed to verify url (${response.status})`);
+        }
+        const nextRun = (await response.json()) as ResearchRunDetail | null;
+        setHistoryDetail((prev) =>
+          prev && prev.session.id === sessionIdToUpdate
+            ? {
+                ...prev,
+                researchRun: nextRun,
+              }
+            : prev
+        );
+        if (sessionId === sessionIdToUpdate) {
+          setResearchRun(nextRun);
+        }
+      } finally {
+        setResearchBusySessionId(null);
       }
     },
     [sessionId, setResearchRun]
@@ -1596,10 +1959,19 @@ export default function HomePage() {
                     <SelectItem value="none" className="text-xs">
                       Custom
                     </SelectItem>
-                    {DECISION_TEMPLATES.map((template) => (
-                      <SelectItem key={template.id} value={template.id} className="text-xs">
-                        {template.label}
-                      </SelectItem>
+                    {groupedTemplates.map((group) => (
+                      <SelectGroup key={group.id}>
+                        <SelectLabel>{group.label}</SelectLabel>
+                        {group.templates.map((template) => (
+                          <SelectItem
+                            key={template.id}
+                            value={template.id}
+                            className="text-xs"
+                          >
+                            {template.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1639,6 +2011,65 @@ export default function HomePage() {
                 </Select>
               </div>
             </div>
+            {activeTemplate && (
+              <div className="rounded-xl border rt-border-soft p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold rt-text-strong">
+                      {activeTemplate.label}
+                    </p>
+                    <p className="mt-0.5 text-xs rt-text-dim">
+                      {activeTemplate.description}
+                    </p>
+                  </div>
+                  <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
+                    {activeTemplate.family} / {activeTemplate.verificationProfileId}
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {activeTemplate.evidenceExpectations.map((item) => (
+                    <span
+                      key={`${activeTemplate.id}-${item}`}
+                      className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim"
+                    >
+                      {item}
+                    </span>
+                  ))}
+                </div>
+                <div className="mt-2 grid gap-2 md:grid-cols-2">
+                  <div className="rounded-lg border rt-border-soft p-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                      Default red lines
+                    </p>
+                    <div className="mt-1 space-y-1">
+                      {activeTemplate.defaultRedLines.map((item) => (
+                        <p key={`${activeTemplate.id}-red-${item}`} className="text-[11px] rt-text-dim">
+                          - {item}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border rt-border-soft p-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                      Revisit defaults
+                    </p>
+                    <div className="mt-1 space-y-1">
+                      <p className="text-[11px] rt-text-dim">
+                        {activeTemplate.reviewWindowSuggestion}
+                      </p>
+                      {activeTemplate.defaultRevisitTriggers.map((item) => (
+                        <p
+                          key={`${activeTemplate.id}-trigger-${item}`}
+                          className="text-[11px] rt-text-dim"
+                        >
+                          - {item}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="mb-1.5 block rt-eyebrow">
@@ -1716,6 +2147,7 @@ export default function HomePage() {
                   <p>Goal hint: {activeTemplate.goal}</p>
                   <p>Background hint: {activeTemplate.background}</p>
                   <p>Constraint hint: {activeTemplate.constraints}</p>
+                  <p>Framework: {activeTemplate.analysisChecklist.join(' · ')}</p>
                 </div>
               </div>
             )}
@@ -1741,6 +2173,59 @@ export default function HomePage() {
                 placeholder="预算、时间、风险边界、不可接受后果"
                 value={brief.constraints}
                 onChange={(e) => updateBrief('constraints', e.target.value)}
+                disabled={isRunning}
+                className="rt-input min-h-[52px] text-sm"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-1 block rt-eyebrow">
+                  Time Horizon
+                </label>
+                <Input
+                  placeholder="例如：3个月 / 2年"
+                  value={brief.timeHorizon}
+                  onChange={(e) => updateBrief('timeHorizon', e.target.value)}
+                  disabled={isRunning}
+                  className="rt-input h-9 text-xs"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block rt-eyebrow">
+                  Review At
+                </label>
+                <Input
+                  type="date"
+                  value={brief.reviewAt}
+                  onChange={(e) => updateBrief('reviewAt', e.target.value)}
+                  disabled={isRunning}
+                  className="rt-input h-9 text-xs"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block rt-eyebrow">
+                Non-Negotiables
+              </label>
+              <Textarea
+                placeholder="哪些条件不能退让"
+                value={brief.nonNegotiables}
+                onChange={(e) => updateBrief('nonNegotiables', e.target.value)}
+                disabled={isRunning}
+                className="rt-input min-h-[52px] text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1.5 block rt-eyebrow">
+                Acceptable Downside
+              </label>
+              <Textarea
+                placeholder="你能接受的最坏情况 / 最大损失"
+                value={brief.acceptableDownside}
+                onChange={(e) => updateBrief('acceptableDownside', e.target.value)}
                 disabled={isRunning}
                 className="rt-input min-h-[52px] text-sm"
               />
@@ -1996,6 +2481,26 @@ export default function HomePage() {
                           ? ` · skipped ${followUpCarryPreview.skippedReason.length}`
                           : ''}
                       </p>
+                    )}
+                    {followUpCarryPreview?.parentReviewComparison && (
+                      <div className="mt-2 rounded-lg border rt-border-soft p-2 text-[11px] rt-text-muted">
+                        <p className="font-semibold rt-text-strong">
+                          Previous prediction vs reality
+                        </p>
+                        <p className="mt-1">
+                          Recommendation:{' '}
+                          {followUpCarryPreview.parentReviewComparison.recommendedOption}
+                        </p>
+                        <p className="mt-1">
+                          Predicted {followUpCarryPreview.parentReviewComparison.predictedConfidence}% ·
+                          Outcome {followUpCarryPreview.parentReviewComparison.outcomeConfidence ?? 0}%
+                        </p>
+                        {followUpCarryPreview.parentReviewComparison.outcomeSummary && (
+                          <p className="mt-1">
+                            Outcome: {followUpCarryPreview.parentReviewComparison.outcomeSummary}
+                          </p>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
@@ -2265,14 +2770,32 @@ export default function HomePage() {
                     Export Transcript
                   </Button>
                   {decisionSummary && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 shrink-0 text-xs"
-                      onClick={handleExportLiveDecisionCard}
-                    >
-                      Export Decision
-                    </Button>
+                    <>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 shrink-0 text-xs"
+                        onClick={handleExportLiveDecisionCard}
+                      >
+                        Export Decision
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 shrink-0 text-xs"
+                        onClick={handleExportLiveDossier}
+                      >
+                        Export Dossier
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 shrink-0 text-xs"
+                        onClick={handleExportLivePdf}
+                      >
+                        Export PDF
+                      </Button>
+                    </>
                   )}
                   {actionItems.length > 0 && (
                     <Button
@@ -2499,6 +3022,8 @@ export default function HomePage() {
             />
             {research.status !== 'idle' && (
               <ResearchPanel
+                key={`left-${sessionId ?? 'draft'}-${activeTemplate?.verificationProfileId ?? 'default'}`}
+                sessionId={sessionId}
                 status={research.status}
                 sources={research.sources}
                 researchRun={research.run}
@@ -2540,18 +3065,29 @@ export default function HomePage() {
                         )
                     : null
                 }
+                onVerifyUrl={
+                  sessionId
+                    ? (input) =>
+                        void handleResearchVerify(sessionId, input).catch((error) =>
+                          setError(
+                            error instanceof Error ? error.message : String(error)
+                          )
+                        )
+                    : null
+                }
+                defaultVerificationProfileId={activeTemplate?.verificationProfileId ?? null}
               />
             )}
           </div>
         </div>
 
         {/* ─────────────────────────────────────────────────────────────────
-            RIGHT PANEL: Context | History (xl+ only)
+            RIGHT PANEL: Context | History | Calibration (xl+ only)
         ───────────────────────────────────────────────────────────────── */}
         <div className="hidden xl:flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden">
           {/* Tab switcher */}
           <div className="shrink-0 flex h-10 border-b rt-border-soft gap-0">
-            {(['context', 'history'] as const).map((tab) => (
+            {(['context', 'history', 'calibration'] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setRightTab(tab)}
@@ -2561,7 +3097,11 @@ export default function HomePage() {
                     : 'border-transparent rt-text-dim hover:rt-text-muted'
                 }`}
               >
-                {tab === 'context' ? 'Context' : 'History'}
+                {tab === 'context'
+                  ? 'Context'
+                  : tab === 'history'
+                    ? 'History'
+                    : 'Calibration'}
               </button>
             ))}
           </div>
@@ -2586,6 +3126,8 @@ export default function HomePage() {
                 {/* Web Research */}
                 {research.status !== 'idle' && (
                   <ResearchPanel
+                    key={`context-${sessionId ?? 'draft'}-${activeTemplate?.verificationProfileId ?? 'default'}`}
+                    sessionId={sessionId}
                     status={research.status}
                     sources={research.sources}
                     researchRun={research.run}
@@ -2636,6 +3178,19 @@ export default function HomePage() {
                             )
                         : null
                     }
+                    onVerifyUrl={
+                      sessionId
+                        ? (input) =>
+                            void handleResearchVerify(sessionId, input).catch((error) =>
+                              setError(
+                                error instanceof Error
+                                  ? error.message
+                                  : String(error)
+                              )
+                            )
+                        : null
+                    }
+                    defaultVerificationProfileId={activeTemplate?.verificationProfileId ?? null}
                   />
                 )}
 
@@ -2671,6 +3226,7 @@ export default function HomePage() {
                     decisionSummary={decisionSummary}
                     researchSources={research.run?.sources ?? research.sources}
                     researchEvaluation={research.run?.evaluation ?? null}
+                    researchStatus={research.run?.status ?? research.status}
                     footer={
                       <div className="flex gap-2">
                         <Button
@@ -2680,6 +3236,24 @@ export default function HomePage() {
                         >
                           Export decision
                         </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 text-xs"
+                          onClick={handleExportLiveDossier}
+                        >
+                          Export dossier
+                        </Button>
+                        {sessionId && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-xs"
+                            onClick={handleExportLivePdf}
+                          >
+                            PDF
+                          </Button>
+                        )}
                       </div>
                     }
                   />
@@ -2801,6 +3375,9 @@ export default function HomePage() {
                     <p className="rt-eyebrow">
                       Sessions
                     </p>
+                  </div>
+                  <div className="mb-2">
+                    <OpsSummaryCard summary={opsSummary} />
                   </div>
                   <div className="mb-2 space-y-2">
                     <Input
@@ -3059,6 +3636,26 @@ export default function HomePage() {
                             Constraints: {historyDetail.session.constraints}
                           </p>
                         )}
+                        {historyDetail.session.timeHorizon && (
+                          <p className="rt-text-muted">
+                            Time horizon: {historyDetail.session.timeHorizon}
+                          </p>
+                        )}
+                        {historyDetail.session.nonNegotiables && (
+                          <p className="rt-text-muted">
+                            Non-negotiables: {historyDetail.session.nonNegotiables}
+                          </p>
+                        )}
+                        {historyDetail.session.acceptableDownside && (
+                          <p className="rt-text-muted">
+                            Acceptable downside: {historyDetail.session.acceptableDownside}
+                          </p>
+                        )}
+                        {historyDetail.session.reviewAt && (
+                          <p className="rt-text-muted">
+                            Review at: {historyDetail.session.reviewAt}
+                          </p>
+                        )}
                       </div>
                       {historyDetail.parentSession && (
                         <button
@@ -3150,6 +3747,26 @@ export default function HomePage() {
                             Export decision
                           </Button>
                         )}
+                        {historyDetail.decisionSummary && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-xs"
+                            onClick={handleExportHistoryDossier}
+                          >
+                            Export dossier
+                          </Button>
+                        )}
+                        {historyDetail.decisionSummary && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-xs"
+                            onClick={handleExportHistoryPdf}
+                          >
+                            Export PDF
+                          </Button>
+                        )}
                         {historyDetail.actionItems.length > 0 && (
                           <Button
                             size="sm"
@@ -3169,7 +3786,65 @@ export default function HomePage() {
                         decisionSummary={historyDetail.decisionSummary}
                         researchSources={historyDetail.researchRun?.sources ?? []}
                         researchEvaluation={historyDetail.researchRun?.evaluation ?? null}
+                        confidencePenalty={historyDetail.calibrationContext.penalty}
+                        researchStatus={historyDetail.researchRun?.status ?? 'idle'}
                       />
+                    )}
+                    {historyDetail.calibrationContext.reviewedSessions > 0 && (
+                      <div className="rounded-xl border rt-surface p-2.5">
+                        <p className="rt-eyebrow">Confidence Calibration</p>
+                        <div className="mt-2 space-y-1 text-xs rt-text-muted">
+                          <p>
+                            Based on {historyDetail.calibrationContext.reviewedSessions} reviewed
+                            session(s) by {historyDetail.calibrationContext.basedOn}.
+                          </p>
+                          <p>
+                            Average overconfidence:{' '}
+                            {historyDetail.calibrationContext.averageOverconfidence}pt
+                          </p>
+                          <p>
+                            Historical hit rate:{' '}
+                            {historyDetail.calibrationContext.templateHitRate}%
+                          </p>
+                          <p>
+                            Suggested confidence penalty:{' '}
+                            {historyDetail.calibrationContext.penalty}pt
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                    {historyDetail.parentReviewComparison && (
+                      <div className="rounded-xl border rt-surface p-2.5">
+                        <p className="rt-eyebrow">Previous Prediction Vs Reality</p>
+                        <div className="mt-2 space-y-1 text-xs rt-text-muted">
+                          <p>
+                            Prior recommendation:{' '}
+                            {historyDetail.parentReviewComparison.recommendedOption}
+                          </p>
+                          <p>
+                            Predicted {historyDetail.parentReviewComparison.predictedConfidence}% ·
+                            Outcome {historyDetail.parentReviewComparison.outcomeConfidence ?? 0}%
+                          </p>
+                          {historyDetail.parentReviewComparison.outcomeSummary && (
+                            <p>
+                              Outcome summary:{' '}
+                              {historyDetail.parentReviewComparison.outcomeSummary}
+                            </p>
+                          )}
+                          {historyDetail.parentReviewComparison.actualOutcome && (
+                            <p>
+                              Actual outcome:{' '}
+                              {historyDetail.parentReviewComparison.actualOutcome}
+                            </p>
+                          )}
+                          {historyDetail.parentReviewComparison.retrospectiveNote && (
+                            <p>
+                              Retrospective:{' '}
+                              {historyDetail.parentReviewComparison.retrospectiveNote}
+                            </p>
+                          )}
+                        </div>
+                      </div>
                     )}
                     {historyDetail.decisionClaims.length > 0 && (
                       <div className="rounded-xl border rt-surface p-2.5">
@@ -3179,7 +3854,7 @@ export default function HomePage() {
                             <div key={claim.id} className="rounded-lg border rt-border-soft p-2">
                               <p className="text-xs font-medium rt-text-strong">{claim.claim}</p>
                               <p className="mt-1 text-[11px] rt-text-dim">
-                                Sources: {claim.sourceIds.join(', ') || 'none'}
+                                Citations: {claim.sourceIds.join(', ') || 'none'}
                               </p>
                               {claim.gapReason && (
                                 <p className="mt-1 text-[11px] rt-text-dim">
@@ -3202,7 +3877,7 @@ export default function HomePage() {
                             >
                               <p className="text-xs font-medium rt-text-strong">{item.claim}</p>
                               <p className="mt-1 text-[11px] rt-text-dim">
-                                Source IDs: {item.sourceIds.join(', ') || 'none'}
+                                Citations: {item.sourceIds.join(', ') || 'none'}
                               </p>
                               <p className="mt-1 text-[11px] rt-text-dim">
                                 {item.gapReason || 'Evidence could not be resolved to persisted sources.'}
@@ -3215,6 +3890,8 @@ export default function HomePage() {
 
                     {historyDetail.researchRun && (
                       <ResearchPanel
+                        key={`history-${historyDetail.session.id}-${historyDetail.session.templateId ?? 'custom'}`}
+                        sessionId={historyDetail.session.id}
                         status={historyDetail.researchRun.status}
                         sources={historyDetail.researchRun.sources}
                         researchRun={historyDetail.researchRun}
@@ -3255,8 +3932,23 @@ export default function HomePage() {
                               error instanceof Error
                                 ? error.message
                                 : String(error)
-                            )
+                              )
                           )
+                        }
+                        onVerifyUrl={(input) =>
+                          void handleResearchVerify(historyDetail.session.id, input).catch(
+                            (error) =>
+                              setError(
+                                error instanceof Error
+                                  ? error.message
+                                  : String(error)
+                              )
+                          )
+                        }
+                        defaultVerificationProfileId={
+                          (historyDetail.session.templateId
+                            ? templateMap.get(historyDetail.session.templateId)?.verificationProfileId
+                            : null) ?? null
                         }
                       />
                     )}
@@ -3522,6 +4214,124 @@ export default function HomePage() {
                   </div>
                 )}
               </>
+            )}
+
+            {rightTab === 'calibration' && (
+              <div className="space-y-3">
+                <div className="rounded-xl border rt-surface p-2.5">
+                  <div className="mb-2 flex items-center gap-2">
+                    <Activity className="h-3.5 w-3.5 rt-text-muted" />
+                    <p className="rt-eyebrow">Decision Quality</p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <span className="rt-eyebrow pl-0.5">Window</span>
+                      <Select
+                        value={calibrationWindow}
+                        onValueChange={(value) => {
+                          if (!value) return;
+                          setCalibrationWindow(value as CalibrationDashboardData['window']);
+                        }}
+                      >
+                        <SelectTrigger className="rt-input h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="30d" className="text-xs">
+                            30d
+                          </SelectItem>
+                          <SelectItem value="90d" className="text-xs">
+                            90d
+                          </SelectItem>
+                          <SelectItem value="180d" className="text-xs">
+                            180d
+                          </SelectItem>
+                          <SelectItem value="all" className="text-xs">
+                            All
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <span className="rt-eyebrow pl-0.5">Decision Type</span>
+                      <Select
+                        value={calibrationDecisionTypeFilter}
+                        onValueChange={(value) =>
+                          setCalibrationDecisionTypeFilter(value ?? 'all')
+                        }
+                      >
+                        <SelectTrigger className="rt-input h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all" className="text-xs">
+                            All types
+                          </SelectItem>
+                          {calibrationDecisionTypeOptions.map((decisionType) => (
+                            <SelectItem
+                              key={decisionType}
+                              value={decisionType}
+                              className="text-xs"
+                            >
+                              {decisionType}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <span className="rt-eyebrow pl-0.5">Template</span>
+                      <Select
+                        value={calibrationTemplateFilter}
+                        onValueChange={(value) => setCalibrationTemplateFilter(value ?? 'all')}
+                      >
+                        <SelectTrigger className="rt-input h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all" className="text-xs">
+                            All templates
+                          </SelectItem>
+                          {historyTemplateOptions.map((templateId) => (
+                            <SelectItem key={templateId} value={templateId} className="text-xs">
+                              {templateMap.get(templateId)?.label ?? templateId}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+
+                {historyDetail?.calibrationContext.reviewedSessions ? (
+                  <div className="rounded-xl border rt-surface p-2.5">
+                    <p className="rt-eyebrow">Current Session Baseline</p>
+                    <div className="mt-2 space-y-1 text-xs rt-text-muted">
+                      <p>
+                        Raw confidence is shown on the card. Suggested adjustment is{' '}
+                        -{historyDetail.calibrationContext.penalty}pt based on{' '}
+                        {historyDetail.calibrationContext.reviewedSessions} reviewed session(s).
+                      </p>
+                      <p>
+                        Baseline source: {historyDetail.calibrationContext.basedOn} · average
+                        overconfidence {historyDetail.calibrationContext.averageOverconfidence}pt
+                        · hit rate {historyDetail.calibrationContext.templateHitRate}%
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
+
+                {calibrationLoading ? (
+                  <p className="text-sm rt-text-muted">Loading calibration…</p>
+                ) : (
+                  <CalibrationDashboard
+                    data={calibrationData}
+                    templateLabelFor={(templateId) =>
+                      templateMap.get(templateId)?.label ?? templateId
+                    }
+                  />
+                )}
+              </div>
             )}
           </div>
         </div>

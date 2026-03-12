@@ -2,6 +2,8 @@ import test, { after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { GET as getAgents } from '@/app/api/agents/route';
 import { GET as listSessionsRoute } from '@/app/api/sessions/route';
+import { GET as getOpsRoute } from '@/app/api/sessions/ops/route';
+import { GET as getCalibrationRoute } from '@/app/api/sessions/calibration/route';
 import {
   GET as getSessionRoute,
   DELETE as deleteSessionRoute,
@@ -9,13 +11,17 @@ import {
 } from '@/app/api/sessions/[id]/route';
 import { PATCH as patchActionItemRoute } from '@/app/api/sessions/[id]/action-items/[itemId]/route';
 import { POST as rerunResearchRoute } from '@/app/api/sessions/[id]/research/route';
+import { POST as verifyResearchRoute } from '@/app/api/sessions/[id]/research/verify/route';
 import { PATCH as patchResearchSourceRoute } from '@/app/api/sessions/[id]/research/sources/[sourceId]/route';
+import { GET as getArtifactsRoute } from '@/app/api/sessions/[id]/artifacts/route';
+import { GET as getArtifactFileRoute } from '@/app/api/sessions/[id]/artifact-file/route';
 import { POST as resumePreviewRoute } from '@/app/api/sessions/[id]/resume-preview/route';
 import { POST as followUpPreviewRoute } from '@/app/api/sessions/[id]/follow-up/route';
 import { POST as startSessionRoute } from '@/app/api/sessions/[id]/start/route';
 import { POST as stopSessionRoute } from '@/app/api/sessions/[id]/stop/route';
 import { POST as interjectionRoute } from '@/app/api/sessions/[id]/interjections/route';
 import {
+  appendSessionEvent,
   appendMessage,
   createSession,
   getSessionStatus,
@@ -159,6 +165,9 @@ test('start route streams a completed discussion and persists history', async ()
               risks: ['页面更复杂'],
               openQuestions: ['后续协作如何做'],
               nextActions: ['扩 schema', '补 UI'],
+              alternativesRejected: ['暂不并行做多人协作'],
+              redLines: ['如果主流程不稳定则暂停扩功能'],
+              revisitTriggers: ['主流程稳定后重新评估'],
               confidence: 78,
               evidence: [],
             }),
@@ -267,6 +276,9 @@ test('start route persists research run, sources, and source-backed evidence', a
               risks: ['证据仍偏少'],
               openQuestions: ['域名是否足够多样'],
               nextActions: ['继续补充反例研究'],
+              alternativesRejected: ['暂不直接下最终结论'],
+              redLines: ['外部风险失控则暂停推进'],
+              revisitTriggers: ['补到多域名证据后复盘'],
               confidence: 74,
               evidence: [
                 {
@@ -356,6 +368,7 @@ test('start route persists research run, sources, and source-backed evidence', a
       assert.equal(detail.researchRun.sources.length, 2);
       assert.equal(detail.researchRun.queryPlan.length >= 3, true);
       assert.equal(detail.researchRun.searchConfig.mode, 'guided');
+      assert.equal(detail.researchRun.sources[0].citationLabel, 'R1');
       assert.equal(detail.decisionSummary.evidence[0].sourceIds[0], 'R1');
     }
   );
@@ -457,6 +470,27 @@ test('research rerun route refreshes sources and source selection persists', asy
   assert.equal(detail.researchRun.sources[0].pinned, true);
   assert.equal(detail.researchRun.sources[0].excludedReason, 'manual_exclude');
   assert.equal(detail.researchRun.queryPlan.length >= 3, true);
+
+  await upsertDecisionSummary('research-rerun-session', {
+    summary: 'summary',
+    recommendedOption: 'option',
+    why: [],
+    risks: [],
+    openQuestions: [],
+    nextActions: [],
+    alternativesRejected: [],
+    redLines: [],
+    revisitTriggers: [],
+    confidence: 72,
+    evidence: [{ claim: 'Persisted citation survives source exclusion', sourceIds: ['R1'] }],
+  });
+
+  const evidenceDetailResponse = await getSessionRoute(
+    new Request('http://localhost/api/sessions/research-rerun-session'),
+    { params: Promise.resolve({ id: 'research-rerun-session' }) }
+  );
+  const evidenceDetail = await evidenceDetailResponse.json();
+  assert.equal(evidenceDetail.decisionSummary.evidence[0].sourceIds[0], 'R1');
 });
 
 test('research rerun route enforces max rerun budget', async () => {
@@ -753,6 +787,9 @@ test('follow-up sessions carry forward unfinished action items', async () => {
     risks: [],
     openQuestions: [],
     nextActions: ['Validate demand', 'Prepare launch checklist'],
+    alternativesRejected: [],
+    redLines: [],
+    revisitTriggers: [],
     confidence: 72,
     evidence: [],
   });
@@ -845,6 +882,9 @@ test('follow-up sessions can inherit only high-priority open action items', asyn
     risks: [],
     openQuestions: [],
     nextActions: ['High impact follow-up', 'Routine cleanup'],
+    alternativesRejected: [],
+    redLines: [],
+    revisitTriggers: [],
     confidence: 75,
     evidence: [],
   });
@@ -931,6 +971,9 @@ test('session patch route persists review fields and action item route updates e
     risks: [],
     openQuestions: [],
     nextActions: ['Ship decision log'],
+    alternativesRejected: [],
+    redLines: [],
+    revisitTriggers: [],
     confidence: 70,
     evidence: [],
   });
@@ -1031,6 +1074,9 @@ test('action item route enforces transition rules and discard validation', async
     risks: [],
     openQuestions: [],
     nextActions: ['Validate integration'],
+    alternativesRejected: [],
+    redLines: [],
+    revisitTriggers: [],
     confidence: 70,
     evidence: [],
   });
@@ -1140,6 +1186,9 @@ test('follow-up preview route reports inheritance counts and skip reasons', asyn
     risks: [],
     openQuestions: [],
     nextActions: ['High priority item', 'Medium priority item'],
+    alternativesRejected: [],
+    redLines: [],
+    revisitTriggers: [],
     confidence: 80,
     evidence: [],
   });
@@ -1179,6 +1228,480 @@ test('follow-up preview route reports inheritance counts and skip reasons', asyn
   const previewPayload = await previewResponse.json();
   assert.equal(previewPayload.inheritedActionCount, 1);
   assert.ok(Array.isArray(previewPayload.skippedReason));
+  assert.equal(previewPayload.parentReviewComparison.recommendedOption, 'option');
+});
+
+test('browser verification route appends a pinned verification source', async () => {
+  await createSession({
+    id: 'browser-verify-session',
+    topic: 'browser verify',
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 2,
+    selectedAgentIds: ['claude', 'gpt'],
+    modelSelections: {},
+    personaSelections: {},
+    personas: {},
+  });
+
+  globalThis.fetch = async (input, init) => {
+    if (typeof input === 'string' && input.includes('product.example.com')) {
+      return new Response(
+        '<html><head><title>Pricing</title><meta name="description" content="Plan pricing and feature details."></head><body><main>Pricing page with current plans and limitations. Annual fee is 0.30%. Lock-up period 12 months. Benchmark updated January 2, 2026.</main></body></html>',
+        { status: 200, headers: { 'Content-Type': 'text/html' } }
+      );
+    }
+    return originalFetch(input, init);
+  };
+
+  try {
+    const response = await verifyResearchRoute(
+      new Request('http://localhost/api/sessions/browser-verify-session/research/verify', {
+        method: 'POST',
+        body: JSON.stringify({
+          url: 'https://product.example.com/pricing',
+          profileId: 'money_investment_product',
+          claimHint: 'Verify fee and lock-up terms',
+          note: 'Critical product page',
+        }),
+        headers: { 'Content-Type': 'application/json' },
+      }),
+      { params: Promise.resolve({ id: 'browser-verify-session' }) }
+    );
+
+    assert.equal(response.status, 200);
+    const run = await response.json();
+    assert.equal(run.sources.length, 1);
+    assert.equal(run.sources[0].citationLabel, 'R1');
+    assert.equal(run.sources[0].sourceType, 'browser_verification');
+    assert.equal(run.sources[0].pinned, true);
+    assert.equal(run.sources[0].qualityFlags.includes('browser_capture'), true);
+    assert.equal(run.sources[0].verificationProfile, 'money_investment_product');
+    assert.equal(run.sources[0].claimHint, 'Verify fee and lock-up terms');
+    assert.equal(run.sources[0].note, 'Critical product page');
+    assert.equal(run.sources[0].verifiedFields.length >= 2, true);
+    assert.equal(typeof run.sources[0].snapshotPath, 'string');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('artifacts route returns transcript, decision card, dossier and checklist', async () => {
+  await createSession({
+    id: 'artifact-session',
+    topic: 'artifact topic',
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 2,
+    selectedAgentIds: ['claude', 'gpt'],
+    modelSelections: {},
+    personaSelections: {},
+    personas: {},
+  });
+  await appendMessage({
+    sessionId: 'artifact-session',
+    role: 'moderator',
+    phase: 'summary',
+    content: 'summary minutes',
+    displayName: 'Moderator',
+  });
+  await upsertDecisionSummary('artifact-session', {
+    summary: 'summary',
+    recommendedOption: 'ship dossier',
+    why: ['shareable output'],
+    risks: ['format drift'],
+    openQuestions: ['pdf later'],
+    nextActions: ['export dossier'],
+    alternativesRejected: ['skip artifacts'],
+    redLines: ['if evidence breaks, stop'],
+    revisitTriggers: ['when new evidence arrives'],
+    confidence: 75,
+    evidence: [{ claim: 'artifact consistency matters', sourceIds: [], gapReason: '待验证' }],
+  });
+
+  const detailResponse = await getSessionRoute(
+    new Request('http://localhost/api/sessions/artifact-session'),
+    { params: Promise.resolve({ id: 'artifact-session' }) }
+  );
+  const detail = await detailResponse.json();
+  await patchActionItemRoute(
+    new Request(
+      `http://localhost/api/sessions/artifact-session/action-items/${detail.actionItems[0].id}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ owner: 'PM', priority: 'high' }),
+        headers: { 'Content-Type': 'application/json' },
+      }
+    ),
+    {
+      params: Promise.resolve({
+        id: 'artifact-session',
+        itemId: detail.actionItems[0].id,
+      }),
+    }
+  );
+
+  const response = await getArtifactsRoute(
+    new Request('http://localhost/api/sessions/artifact-session/artifacts'),
+    { params: Promise.resolve({ id: 'artifact-session' }) }
+  );
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.match(payload.transcriptMarkdown, /Round Table Transcript/);
+  assert.match(payload.decisionCardMarkdown, /Round Table Decision Card/);
+  assert.match(payload.dossierMarkdown, /Round Table Decision Dossier/);
+  assert.match(payload.checklistMarkdown, /Execution Checklist/);
+});
+
+test('artifact file route returns a pdf download', async () => {
+  await createSession({
+    id: 'artifact-file-session',
+    topic: 'artifact export',
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 2,
+    selectedAgentIds: ['claude', 'gpt'],
+    modelSelections: {},
+    personaSelections: {},
+    personas: {},
+  });
+  await upsertDecisionSummary('artifact-file-session', {
+    summary: 'summary',
+    recommendedOption: 'ship deck export',
+    why: ['shareable'],
+    risks: ['layout drift'],
+    openQuestions: ['font availability'],
+    nextActions: ['download pdf'],
+    alternativesRejected: ['stay markdown only'],
+    redLines: ['if confidence drops, stop'],
+    revisitTriggers: ['after new evidence'],
+    confidence: 71,
+    evidence: [{ claim: 'shareable artifacts help', sourceIds: [], gapReason: '待验证' }],
+  });
+
+  const pdfResponse = await getArtifactFileRoute(
+    new Request('http://localhost/api/sessions/artifact-file-session/artifact-file'),
+    { params: Promise.resolve({ id: 'artifact-file-session' }) }
+  );
+  assert.equal(pdfResponse.status, 200);
+  assert.match(
+    pdfResponse.headers.get('content-type') ?? '',
+    /application\/pdf/
+  );
+});
+
+test('ops route reports degraded and unresolved evidence metrics', async () => {
+  await createSession({
+    id: 'ops-session-failed',
+    topic: 'ops failed',
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 2,
+    selectedAgentIds: ['claude', 'gpt'],
+    modelSelections: {},
+    personaSelections: {},
+    personas: {},
+  });
+  await updateSessionStatus('ops-session-failed', 'failed');
+  await appendSessionEvent('ops-session-failed', {
+    type: 'agent_degraded',
+    provider: 'openai',
+    agentId: 'gpt',
+    message: 'timeout',
+  });
+
+  await createSession({
+    id: 'ops-session-unresolved',
+    topic: 'ops unresolved',
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 2,
+    selectedAgentIds: ['claude', 'gpt'],
+    modelSelections: {},
+    personaSelections: {},
+    personas: {},
+  });
+  await upsertDecisionSummary('ops-session-unresolved', {
+    summary: 'summary',
+    recommendedOption: 'option',
+    why: [],
+    risks: [],
+    openQuestions: [],
+    nextActions: [],
+    alternativesRejected: [],
+    redLines: [],
+    revisitTriggers: [],
+    confidence: 64,
+    evidence: [{ claim: 'unsupported', sourceIds: [], gapReason: 'missing evidence' }],
+  });
+  await patchSessionRoute(
+    new Request('http://localhost/api/sessions/ops-session-unresolved', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        outcomeSummary: '执行后发现证据不足',
+        outcomeConfidence: 42,
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    }),
+    { params: Promise.resolve({ id: 'ops-session-unresolved' }) }
+  );
+
+  const response = await getOpsRoute(
+    new Request('http://localhost/api/sessions/ops?limit=10')
+  );
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+
+  assert.equal(payload.sessionsAnalyzed >= 2, true);
+  assert.equal(payload.metrics.agentDegradedRate > 0, true);
+  assert.equal(payload.metrics.unresolvedEvidenceRate > 0, true);
+  assert.equal(
+    payload.recentFailures.some(
+      (item: { sessionId: string }) => item.sessionId === 'ops-session-failed'
+    ),
+    true
+  );
+  assert.equal(
+    payload.unresolvedEvidenceSessions.some(
+      (item: { sessionId: string }) => item.sessionId === 'ops-session-unresolved'
+    ),
+    true
+  );
+  assert.equal(
+    payload.degradedAgentSessions.some(
+      (item: { sessionId: string; degradedEventCount?: number }) =>
+        item.sessionId === 'ops-session-failed' &&
+        (item.degradedEventCount ?? 0) > 0
+    ),
+    true
+  );
+  assert.equal(payload.calibration.reviewedSessions >= 1, true);
+  assert.equal(payload.calibration.averageCalibrationGap > 0, true);
+  assert.equal(
+    payload.calibration.agentModelOverconfidence.some(
+      (item: { agentId: string; reviewedSessions: number; averageDelta: number }) =>
+        item.agentId === 'gpt' &&
+        item.reviewedSessions >= 1 &&
+        item.averageDelta > 0
+    ),
+    true
+  );
+  assert.equal(payload.calibration.overconfidenceTrend.length >= 1, true);
+});
+
+test('session detail exposes calibration penalty guidance without mutating raw confidence', async () => {
+  for (const [id, outcomeConfidence] of [
+    ['calibration-prior-1', 42],
+    ['calibration-prior-2', 38],
+  ] as const) {
+    await createSession({
+      id,
+      brief: {
+        topic: id,
+        goal: '',
+        background: '',
+        constraints: '',
+        timeHorizon: '',
+        nonNegotiables: '',
+        acceptableDownside: '',
+        reviewAt: '',
+        decisionType: 'career',
+        desiredOutput: 'recommendation',
+        templateId: 'career-choice',
+      },
+      moderatorAgentId: 'claude',
+      maxDebateRounds: 2,
+      selectedAgentIds: ['claude', 'gpt'],
+      modelSelections: {},
+      personaSelections: {},
+      personas: {},
+    });
+    await upsertDecisionSummary(id, {
+      summary: 'summary',
+      recommendedOption: 'option',
+      why: [],
+      risks: [],
+      openQuestions: [],
+      nextActions: ['next'],
+      alternativesRejected: ['alt'],
+      redLines: ['red'],
+      revisitTriggers: ['revisit'],
+      confidence: 84,
+      evidence: [{ claim: 'claim', sourceIds: ['R1'], gapReason: 'gap' }],
+    });
+    await patchSessionRoute(
+      new Request(`http://localhost/api/sessions/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          outcomeSummary: 'outcome',
+          outcomeConfidence,
+        }),
+        headers: { 'Content-Type': 'application/json' },
+      }),
+      { params: Promise.resolve({ id }) }
+    );
+  }
+
+  await createSession({
+    id: 'calibration-current',
+    brief: {
+      topic: 'current',
+      goal: '',
+      background: '',
+      constraints: '',
+      timeHorizon: '',
+      nonNegotiables: '',
+      acceptableDownside: '',
+      reviewAt: '',
+      decisionType: 'career',
+      desiredOutput: 'recommendation',
+      templateId: 'career-choice',
+    },
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 2,
+    selectedAgentIds: ['claude', 'gpt'],
+    modelSelections: {},
+    personaSelections: {},
+    personas: {},
+  });
+  await upsertDecisionSummary('calibration-current', {
+    summary: 'summary',
+    recommendedOption: 'option',
+    why: [],
+    risks: [],
+    openQuestions: [],
+    nextActions: ['next'],
+    alternativesRejected: ['alt'],
+    redLines: ['red'],
+    revisitTriggers: ['revisit'],
+    confidence: 84,
+    evidence: [{ claim: 'claim', sourceIds: ['R1'], gapReason: 'gap' }],
+  });
+
+  const response = await getSessionRoute(
+    new Request('http://localhost/api/sessions/calibration-current'),
+    { params: Promise.resolve({ id: 'calibration-current' }) }
+  );
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.calibrationContext.reviewedSessions, 2);
+  assert.equal(payload.calibrationContext.penalty > 0, true);
+  assert.equal(payload.decisionSummary.confidence, 76);
+});
+
+test('calibration route aggregates template, sourcing, and agent/model drift', async () => {
+  await createSession({
+    id: 'calibration-route-1',
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 2,
+    selectedAgentIds: ['claude', 'gpt'],
+    modelSelections: { claude: 'claude-sonnet', gpt: 'gpt-5.1' },
+    personaSelections: {},
+    personas: {},
+    brief: {
+      topic: 'choose offer',
+      goal: '',
+      background: '',
+      constraints: '',
+      timeHorizon: '',
+      nonNegotiables: '',
+      acceptableDownside: '',
+      reviewAt: '',
+      decisionType: 'career',
+      desiredOutput: 'recommendation',
+      templateId: 'offer-choice',
+    },
+  });
+  await upsertDecisionSummary('calibration-route-1', {
+    summary: 'summary',
+    recommendedOption: 'offer a',
+    why: ['growth'],
+    risks: ['team risk'],
+    openQuestions: [],
+    nextActions: ['sign'],
+    alternativesRejected: ['offer b'],
+    redLines: ['salary below floor'],
+    revisitTriggers: ['manager changes'],
+    confidence: 82,
+    evidence: [{ claim: 'salary is competitive', sourceIds: ['R1'], gapReason: '' }],
+  });
+  await patchSessionRoute(
+    new Request('http://localhost/api/sessions/calibration-route-1', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        actualOutcome: 'solid fit',
+        outcomeSummary: 'performed well',
+        outcomeConfidence: 68,
+      }),
+    }),
+    { params: Promise.resolve({ id: 'calibration-route-1' }) }
+  );
+
+  await createSession({
+    id: 'calibration-route-2',
+    moderatorAgentId: 'claude',
+    maxDebateRounds: 2,
+    selectedAgentIds: ['claude', 'gpt'],
+    modelSelections: { claude: 'claude-sonnet', gpt: 'gpt-5.1' },
+    personaSelections: {},
+    personas: {},
+    brief: {
+      topic: 'buy item',
+      goal: '',
+      background: '',
+      constraints: '',
+      timeHorizon: '',
+      nonNegotiables: '',
+      acceptableDownside: '',
+      reviewAt: '',
+      decisionType: 'general',
+      desiredOutput: 'action_plan',
+      templateId: 'large-purchase',
+    },
+  });
+  await upsertDecisionSummary('calibration-route-2', {
+    summary: 'summary',
+    recommendedOption: 'wait',
+    why: ['price too high'],
+    risks: ['delay'],
+    openQuestions: [],
+    nextActions: ['watch price'],
+    alternativesRejected: ['buy now'],
+    redLines: ['cashflow stress'],
+    revisitTriggers: ['price drop'],
+    confidence: 78,
+    evidence: [{ claim: 'price is elevated', sourceIds: [], gapReason: 'no trusted source' }],
+  });
+  await patchSessionRoute(
+    new Request('http://localhost/api/sessions/calibration-route-2', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        actualOutcome: 'wait was correct',
+        outcomeSummary: 'saved money',
+        outcomeConfidence: 74,
+      }),
+    }),
+    { params: Promise.resolve({ id: 'calibration-route-2' }) }
+  );
+
+  const response = await getCalibrationRoute(
+    new Request('http://localhost/api/sessions/calibration?window=all')
+  );
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.reviewedSessions >= 2, true);
+  assert.equal(
+    payload.byTemplate.some(
+      (item: { templateId: string }) => item.templateId === 'offer-choice'
+    ),
+    true
+  );
+  assert.equal(
+    payload.byDecisionType.some(
+      (item: { decisionType: string }) => item.decisionType === 'career'
+    ),
+    true
+  );
+  assert.equal(payload.agentModelDrift.length >= 1, true);
+  assert.equal(typeof payload.sourcedVsUnsourced.delta, 'number');
+  assert.equal(payload.confidencePenaltyGuidance.length >= 1, true);
 });
 
 test('session detail and delete routes cover found and missing history', async () => {

@@ -28,5 +28,6 @@ export async function POST(
     carryForwardMode,
     inheritedActionCount: preview.inheritedActionCount,
     skippedReason: preview.skippedReason,
+    parentReviewComparison: preview.parentReviewComparison ?? null,
   });
 }

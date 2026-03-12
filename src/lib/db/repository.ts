@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import type { PersonaSelection } from '../agents/types';
@@ -14,6 +16,7 @@ import type {
 } from '../decision/types';
 import {
   normalizeActionItemStatus,
+  normalizeDecisionBrief,
   normalizeDecisionStatus,
   normalizePersistedDecisionSummary,
 } from '../decision/utils';
@@ -25,6 +28,13 @@ import type {
   ResearchSource,
 } from '../search/types';
 import { normalizeResearchConfig } from '../search/utils';
+import {
+  attachCitationLabels,
+  buildResearchSummaryText,
+  evaluateResearchQuality,
+  findResearchSourceByCitation,
+  getResearchSourceCitationLabel,
+} from '../search/utils';
 import type {
   DiscussionResumeSnapshot,
   DiscussionSessionEvent,
@@ -72,6 +82,10 @@ export async function createSession(input: {
     goal: '',
     background: '',
     constraints: '',
+    timeHorizon: '',
+    nonNegotiables: '',
+    acceptableDownside: '',
+    reviewAt: '',
     decisionType: 'general',
     desiredOutput: 'recommendation',
     templateId: null,
@@ -89,6 +103,10 @@ export async function createSession(input: {
     goal: brief.goal,
     background: brief.background,
     constraints: brief.constraints,
+    timeHorizon: brief.timeHorizon,
+    nonNegotiables: brief.nonNegotiables,
+    acceptableDownside: brief.acceptableDownside,
+    reviewAt: brief.reviewAt || null,
     decisionType: brief.decisionType,
     desiredOutput: brief.desiredOutput,
     templateId: brief.templateId ?? null,
@@ -332,6 +350,8 @@ export async function replaceResearchSources(
       INSERT INTO research_sources (
         id,
         research_run_id,
+        source_type,
+        verification_profile,
         title,
         url,
         domain,
@@ -344,8 +364,17 @@ export async function replaceResearchSources(
         stale,
         quality_flags,
         published_date,
+        captured_at,
+        snapshot_path,
+        claim_hint,
+        note,
+        verification_notes,
+        verified_fields,
+        extraction_method,
+        extraction_quality,
+        capture_status,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const now = Date.now();
 
@@ -353,6 +382,8 @@ export async function replaceResearchSources(
       stmt.run(
         source.id,
         researchRunId,
+        source.sourceType ?? 'research',
+        source.verificationProfile ?? null,
         source.title,
         source.url,
         source.domain,
@@ -365,6 +396,15 @@ export async function replaceResearchSources(
         source.stale ? 1 : 0,
         JSON.stringify(source.qualityFlags),
         source.publishedDate ?? null,
+        normalizeOptionalDate(source.capturedAt)?.getTime() ?? null,
+        source.snapshotPath ?? null,
+        source.claimHint ?? null,
+        source.note ?? null,
+        JSON.stringify(source.verificationNotes ?? []),
+        JSON.stringify(source.verifiedFields ?? []),
+        source.extractionMethod ?? null,
+        source.extractionQuality ?? null,
+        source.captureStatus ?? null,
         now
       );
     }
@@ -401,21 +441,52 @@ export async function getSessionResearch(
     evaluation: run.evaluation
       ? (parseJsonObject(run.evaluation) as ResearchEvaluation)
       : null,
-    sources: rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      url: row.url,
-      domain: row.domain,
-      snippet: row.snippet,
-      score: Number(row.score ?? 0),
-      selected: (row.selected ?? 0) === 1,
-      pinned: (row.pinned ?? 0) === 1,
-      rank: Number(row.rank ?? 0),
-      excludedReason: row.excludedReason ?? '',
-      stale: (row.stale ?? 0) === 1,
-      qualityFlags: parseJsonArray(row.qualityFlags),
-      publishedDate: row.publishedDate ?? undefined,
-    })),
+    sources: attachCitationLabels(
+      rows.map((row) => ({
+        id: row.id,
+        sourceType:
+          row.sourceType === 'browser_verification'
+            ? 'browser_verification'
+            : 'research',
+        verificationProfile: row.verificationProfile ?? undefined,
+        title: row.title,
+        url: row.url,
+        domain: row.domain,
+        snippet: row.snippet,
+        score: Number(row.score ?? 0),
+        selected: (row.selected ?? 0) === 1,
+        pinned: (row.pinned ?? 0) === 1,
+        rank: Number(row.rank ?? 0),
+        excludedReason: row.excludedReason ?? '',
+        stale: (row.stale ?? 0) === 1,
+        qualityFlags: parseJsonArray(row.qualityFlags),
+        publishedDate: row.publishedDate ?? undefined,
+        capturedAt:
+          row.capturedAt !== null && row.capturedAt !== undefined
+            ? normalizeDateLike(row.capturedAt)
+            : undefined,
+        snapshotPath: row.snapshotPath ?? undefined,
+        claimHint: row.claimHint ?? undefined,
+        note: row.note ?? undefined,
+        verificationNotes: parseJsonArray(row.verificationNotes),
+        verifiedFields: parseVerifiedFields(row.verifiedFields),
+        extractionMethod:
+          row.extractionMethod === 'playwright_dom' ||
+          row.extractionMethod === 'fetch_html_fallback'
+            ? row.extractionMethod
+            : undefined,
+        extractionQuality:
+          row.extractionQuality === 'high' ||
+          row.extractionQuality === 'medium' ||
+          row.extractionQuality === 'low'
+            ? row.extractionQuality
+            : undefined,
+        captureStatus:
+          row.captureStatus === 'screenshot' || row.captureStatus === 'snapshot_fallback'
+            ? row.captureStatus
+            : undefined,
+      }))
+    ),
     createdAt: normalizeDateLike(run.createdAt),
     updatedAt: normalizeDateLike(run.updatedAt),
   };
@@ -472,6 +543,67 @@ export async function updateResearchSource(
 
   const refreshed = await getSessionResearch(sessionId);
   return refreshed?.sources.find((source) => source.id === sourceId) ?? null;
+}
+
+export async function appendVerifiedResearchSource(
+  sessionId: string,
+  source: ResearchSource
+) {
+  const [session] = await db
+    .select()
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+  if (!session) {
+    return null;
+  }
+
+  const existingRun = await getSessionResearch(sessionId);
+  if (!existingRun) {
+    await upsertResearchRun(sessionId, {
+      status: 'partial',
+      queryPlan: [],
+      searchConfig: normalizeResearchConfig(parseJsonObject(session.researchConfig)),
+      summary: '',
+      evaluation: null,
+    });
+  }
+
+  const run = await getSessionResearch(sessionId);
+  if (!run) return null;
+
+  const nextRank =
+    Math.max(0, ...run.sources.map((item) => Number(item.rank ?? 0))) + 1;
+  const nextSources = [...run.sources, { ...source, rank: nextRank }];
+  const brief = normalizeDecisionBrief({
+    topic: session.topic,
+    goal: session.goal,
+    background: session.background,
+    constraints: session.constraints,
+    timeHorizon: session.timeHorizon,
+    nonNegotiables: session.nonNegotiables,
+    acceptableDownside: session.acceptableDownside,
+    reviewAt: session.reviewAt ?? '',
+    decisionType: session.decisionType as DecisionBrief['decisionType'],
+    desiredOutput: session.desiredOutput as DecisionBrief['desiredOutput'],
+    templateId: session.templateId ?? null,
+  });
+  const summary = buildResearchSummaryText(nextSources, brief.topic);
+  const evaluation = evaluateResearchQuality({
+    brief,
+    queryPlan: run.queryPlan,
+    sources: nextSources.filter((item) => item.selected),
+  });
+
+  await upsertResearchRun(sessionId, {
+    status: run.status === 'completed' ? 'completed' : 'partial',
+    queryPlan: run.queryPlan,
+    searchConfig: run.searchConfig,
+    summary,
+    evaluation,
+  });
+  await replaceResearchSources(run.id, nextSources);
+  return getSessionResearch(sessionId);
 }
 
 export async function getSessionDetail(sessionId: string) {
@@ -546,13 +678,35 @@ export async function getSessionDetail(sessionId: string) {
     .from(sessions)
     .where(eq(sessions.parentSessionId, sessionId))
     .orderBy(asc(sessions.createdAt));
+  const parentReviewComparison = parentSession?.id
+    ? await getParentReviewComparison(parentSession.id, parentSession.topic)
+    : null;
 
-  const normalizedDecisionSummary = sessionDecisionSummary
+  const baseDecisionSummary = sessionDecisionSummary
     ? normalizePersistedDecisionSummary(
         JSON.parse(sessionDecisionSummary.content) as DecisionSummary,
-        researchRun?.sources ?? []
+        researchRun?.sources ?? [],
+        {
+          topic: session.topic,
+          goal: session.goal,
+          background: session.background,
+          constraints: session.constraints,
+          timeHorizon: session.timeHorizon,
+          nonNegotiables: session.nonNegotiables,
+          acceptableDownside: session.acceptableDownside,
+          reviewAt: session.reviewAt ?? '',
+          decisionType: session.decisionType as DecisionBrief['decisionType'],
+          desiredOutput: session.desiredOutput as DecisionBrief['desiredOutput'],
+          templateId: session.templateId ?? null,
+        }
       )
     : null;
+  const calibrationContext = await getSessionCalibrationContext(
+    session.id,
+    session.templateId ?? null,
+    session.decisionType
+  );
+  const normalizedDecisionSummary = baseDecisionSummary;
   const actionStats = summarizeActionItems(sessionActionItems);
   const unresolvedEvidence =
     normalizedDecisionSummary?.evidence
@@ -579,6 +733,7 @@ export async function getSessionDetail(sessionId: string) {
     actionStats,
     decisionClaims,
     unresolvedEvidence,
+    calibrationContext,
     resumeMeta:
       session.resumedFromSessionId || session.resumeSnapshot
         ? {
@@ -591,6 +746,7 @@ export async function getSessionDetail(sessionId: string) {
         : null,
     degradeEvents,
     parentSession,
+    parentReviewComparison,
     childSessions,
   };
 }
@@ -605,6 +761,12 @@ export async function getOperationalSummary(limit = 20) {
       id: sessions.id,
       status: sessions.status,
       createdAt: sessions.createdAt,
+      templateId: sessions.templateId,
+      outcomeConfidence: sessions.outcomeConfidence,
+      outcomeSummary: sessions.outcomeSummary,
+      actualOutcome: sessions.actualOutcome,
+      selectedAgentIds: sessions.selectedAgentIds,
+      modelSelections: sessions.modelSelections,
       usageInputTokens: sessions.usageInputTokens,
       usageOutputTokens: sessions.usageOutputTokens,
     })
@@ -619,8 +781,26 @@ export async function getOperationalSummary(limit = 20) {
         timeoutRate: 0,
         resumeSuccessRate: 0,
         agentDegradedRate: 0,
+        unresolvedEvidenceRate: 0,
       },
       providerHotspots: [],
+      degradedAgentSessions: [],
+      unresolvedEvidenceSessions: [],
+      calibration: {
+        reviewedSessions: 0,
+        averagePredictedConfidence: 0,
+        averageOutcomeConfidence: 0,
+        averageOverconfidence: 0,
+        averageCalibrationGap: 0,
+        sourcedVsUnsourcedOutcomeGap: {
+          sourcedAverage: 0,
+          unsourcedAverage: 0,
+          delta: 0,
+        },
+        templateHitRates: [],
+        agentModelOverconfidence: [],
+        overconfidenceTrend: [],
+      },
       recentFailures: [],
     };
   }
@@ -638,6 +818,13 @@ export async function getOperationalSummary(limit = 20) {
   const resumedSuccess = recentSessions.filter(
     (session) => resumedSessionIds.has(session.id) && session.status === 'completed'
   ).length;
+  const degradedSessionCounts = new Map<string, number>();
+  for (const event of degradedEvents) {
+    degradedSessionCounts.set(
+      event.sessionId,
+      (degradedSessionCounts.get(event.sessionId) ?? 0) + 1
+    );
+  }
 
   const providerCounts = new Map<string, number>();
   for (const event of events) {
@@ -645,17 +832,106 @@ export async function getOperationalSummary(limit = 20) {
     providerCounts.set(event.provider, (providerCounts.get(event.provider) ?? 0) + 1);
   }
 
+  const unresolvedEvidenceSessions = [];
+  const calibrationRows: Array<{
+    sessionId: string;
+    createdAt: number | string;
+    templateId: string;
+    predictedConfidence: number;
+    outcomeConfidence: number;
+    supportedOnly: boolean;
+  }> = [];
+  const calibrationAgentModelRows: Array<{
+    agentId: string;
+    modelId: string;
+    outcomeConfidence: number;
+    delta: number;
+  }> = [];
+  const summaryRows =
+    sessionIds.length > 0
+      ? await db
+          .select({
+            sessionId: decisionSummaries.sessionId,
+            content: decisionSummaries.content,
+          })
+          .from(decisionSummaries)
+          .where(inArray(decisionSummaries.sessionId, sessionIds))
+      : [];
+  const summaryBySessionId = new Map(
+    summaryRows.map((row) => [row.sessionId, row.content])
+  );
+
+  for (const session of recentSessions) {
+    const parsedSummary = parseDecisionSummaryAnalytics(
+      summaryBySessionId.get(session.id)
+    );
+    if (!parsedSummary) continue;
+
+    if (parsedSummary.unresolvedEvidenceCount > 0) {
+      unresolvedEvidenceSessions.push({
+        sessionId: session.id,
+        unresolvedEvidenceCount: parsedSummary.unresolvedEvidenceCount,
+        createdAt: normalizeDateLike(session.createdAt),
+      });
+    }
+    const hasReview =
+      (session.outcomeConfidence ?? 0) > 0 ||
+      Boolean(session.actualOutcome?.trim()) ||
+      Boolean(session.outcomeSummary?.trim());
+    if (!hasReview) continue;
+    calibrationRows.push({
+      sessionId: session.id,
+      createdAt: normalizeDateLike(session.createdAt),
+      templateId: session.templateId ?? 'none',
+      predictedConfidence: parsedSummary.predictedConfidence,
+      outcomeConfidence: session.outcomeConfidence ?? 0,
+      supportedOnly: parsedSummary.supportedOnly,
+    });
+    const selectedAgentIds = parseJsonArray(session.selectedAgentIds).filter(
+      (value): value is string => typeof value === 'string' && value.length > 0
+    );
+    const modelSelections = parseJsonStringRecord(session.modelSelections);
+    const delta = Math.max(
+      0,
+      parsedSummary.predictedConfidence - (session.outcomeConfidence ?? 0)
+    );
+    for (const agentId of selectedAgentIds) {
+      calibrationAgentModelRows.push({
+        agentId,
+        modelId: modelSelections[agentId] ?? 'default',
+        outcomeConfidence: session.outcomeConfidence ?? 0,
+        delta,
+      });
+    }
+  }
+  const calibration = summarizeCalibration(calibrationRows, calibrationAgentModelRows);
+
   return {
     sessionsAnalyzed: recentSessions.length,
     metrics: {
       timeoutRate: toPercent(timeoutEvents.length, recentSessions.length),
       resumeSuccessRate: toPercent(resumedSuccess, Math.max(1, resumedSessionIds.size)),
       agentDegradedRate: toPercent(degradedEvents.length, recentSessions.length),
+      unresolvedEvidenceRate: toPercent(
+        unresolvedEvidenceSessions.length,
+        recentSessions.length
+      ),
     },
     providerHotspots: Array.from(providerCounts.entries())
       .map(([provider, count]) => ({ provider, count }))
       .sort((left, right) => right.count - left.count)
       .slice(0, 5),
+    degradedAgentSessions: recentSessions
+      .filter((session) => degradedSessionCounts.has(session.id))
+      .slice(0, 5)
+      .map((session) => ({
+        sessionId: session.id,
+        status: session.status,
+        createdAt: normalizeDateLike(session.createdAt),
+        degradedEventCount: degradedSessionCounts.get(session.id) ?? 0,
+      })),
+    unresolvedEvidenceSessions: unresolvedEvidenceSessions.slice(0, 5),
+    calibration,
     recentFailures: recentSessions
       .filter((session) => session.status === 'failed')
       .slice(0, 5)
@@ -664,6 +940,227 @@ export async function getOperationalSummary(limit = 20) {
         status: session.status,
         createdAt: normalizeDateLike(session.createdAt),
       })),
+  };
+}
+
+export async function getCalibrationDashboard(input?: {
+  window?: '30d' | '90d' | '180d' | 'all';
+  decisionType?: string | null;
+  templateId?: string | null;
+}) {
+  const window = input?.window ?? '90d';
+  const windowDays =
+    window === '30d' ? 30 : window === '90d' ? 90 : window === '180d' ? 180 : null;
+  const now = Date.now();
+
+  const sessionRows = await db
+    .select({
+      id: sessions.id,
+      createdAt: sessions.createdAt,
+      templateId: sessions.templateId,
+      decisionType: sessions.decisionType,
+      outcomeConfidence: sessions.outcomeConfidence,
+      outcomeSummary: sessions.outcomeSummary,
+      actualOutcome: sessions.actualOutcome,
+      modelSelections: sessions.modelSelections,
+      selectedAgentIds: sessions.selectedAgentIds,
+      summaryContent: decisionSummaries.content,
+    })
+    .from(sessions)
+    .leftJoin(decisionSummaries, eq(decisionSummaries.sessionId, sessions.id))
+    .orderBy(desc(sessions.createdAt));
+
+  const filteredRows = sessionRows.filter((row) => {
+    if (windowDays !== null) {
+      const createdAt = new Date(row.createdAt).getTime();
+      if (Number.isFinite(createdAt) && now - createdAt > windowDays * 24 * 60 * 60 * 1000) {
+        return false;
+      }
+    }
+    if (input?.decisionType && row.decisionType !== input.decisionType) return false;
+    if (input?.templateId && (row.templateId ?? 'none') !== input.templateId) return false;
+    return true;
+  });
+
+  const calibrationRows: Array<{
+    sessionId: string;
+    createdAt: number | string;
+    templateId: string;
+    decisionType: string;
+    predictedConfidence: number;
+    outcomeConfidence: number;
+    supportedOnly: boolean;
+  }> = [];
+  const agentModelRows: Array<{
+    agentId: string;
+    modelId: string;
+    outcomeConfidence: number;
+    delta: number;
+  }> = [];
+
+  for (const row of filteredRows) {
+    const parsedSummary = parseDecisionSummaryAnalytics(row.summaryContent);
+    if (!parsedSummary) continue;
+    const hasReview =
+      (row.outcomeConfidence ?? 0) > 0 ||
+      Boolean(row.actualOutcome?.trim()) ||
+      Boolean(row.outcomeSummary?.trim());
+    if (!hasReview) continue;
+
+    calibrationRows.push({
+      sessionId: row.id,
+      createdAt: normalizeDateLike(row.createdAt),
+      templateId: row.templateId ?? 'none',
+      decisionType: row.decisionType,
+      predictedConfidence: parsedSummary.predictedConfidence,
+      outcomeConfidence: row.outcomeConfidence ?? 0,
+      supportedOnly: parsedSummary.supportedOnly,
+    });
+
+    const selectedAgentIds = parseJsonArray(row.selectedAgentIds).filter(
+      (value): value is string => typeof value === 'string' && value.length > 0
+    );
+    const modelSelections = parseJsonStringRecord(row.modelSelections);
+    const delta = Math.max(
+      0,
+      parsedSummary.predictedConfidence - (row.outcomeConfidence ?? 0)
+    );
+    for (const agentId of selectedAgentIds) {
+      agentModelRows.push({
+        agentId,
+        modelId: modelSelections[agentId] ?? 'default',
+        outcomeConfidence: row.outcomeConfidence ?? 0,
+        delta,
+      });
+    }
+  }
+
+  if (calibrationRows.length === 0) {
+    return {
+      window,
+      reviewedSessions: 0,
+      averagePredictedConfidence: 0,
+      averageOutcomeConfidence: 0,
+      averageOverconfidence: 0,
+      averageCalibrationGap: 0,
+      byTemplate: [],
+      byDecisionType: [],
+      sourcedVsUnsourced: {
+        sourcedSessions: 0,
+        unsourcedSessions: 0,
+        sourcedAverage: 0,
+        unsourcedAverage: 0,
+        delta: 0,
+      },
+      agentModelDrift: [],
+      timeline: [],
+      confidencePenaltyGuidance: [
+        '暂无复盘数据，当前 confidence 主要来自模型判断。',
+      ],
+      mostReliableTemplate: '',
+      largestBlindSpot: '',
+    };
+  }
+
+  const byTemplate = summarizeCalibrationBuckets(
+    calibrationRows,
+    (row) => row.templateId
+  );
+  const byDecisionType = summarizeCalibrationBuckets(
+    calibrationRows,
+    (row) => row.decisionType
+  );
+  const sourcedRows = calibrationRows.filter((row) => row.supportedOnly);
+  const unsourcedRows = calibrationRows.filter((row) => !row.supportedOnly);
+  const averagePredictedConfidence = average(
+    calibrationRows.map((row) => row.predictedConfidence)
+  );
+  const averageOutcomeConfidence = average(
+    calibrationRows.map((row) => row.outcomeConfidence)
+  );
+  const averageOverconfidence = Math.round(
+    average(
+      calibrationRows.map((row) =>
+        Math.max(0, row.predictedConfidence - row.outcomeConfidence)
+      )
+    )
+  );
+  const averageCalibrationGap = Math.round(
+    average(
+      calibrationRows.map((row) =>
+        Math.abs(row.predictedConfidence - row.outcomeConfidence)
+      )
+    )
+  );
+  const agentModelDrift = summarizeAgentModelDrift(agentModelRows);
+  const mostReliableTemplate = byTemplate[0]?.key ?? '';
+  const largestBlindSpot =
+    byDecisionType
+      .filter((item) => item.averageOverconfidence > 0)
+      .sort((left, right) => right.averageOverconfidence - left.averageOverconfidence)[0]
+      ?.key ?? '';
+
+  return {
+    window,
+    reviewedSessions: calibrationRows.length,
+    averagePredictedConfidence,
+    averageOutcomeConfidence,
+    averageOverconfidence,
+    averageCalibrationGap,
+    byTemplate: byTemplate.map((item) => ({
+      templateId: item.key,
+      reviewedSessions: item.reviewedSessions,
+      averagePredictedConfidence: item.averagePredictedConfidence,
+      averageOutcomeConfidence: item.averageOutcomeConfidence,
+      averageOverconfidence: item.averageOverconfidence,
+      hitRate: item.hitRate,
+    })),
+    byDecisionType: byDecisionType.map((item) => ({
+      decisionType: item.key,
+      reviewedSessions: item.reviewedSessions,
+      averagePredictedConfidence: item.averagePredictedConfidence,
+      averageOutcomeConfidence: item.averageOutcomeConfidence,
+      averageOverconfidence: item.averageOverconfidence,
+      hitRate: item.hitRate,
+    })),
+    sourcedVsUnsourced: {
+      sourcedSessions: sourcedRows.length,
+      unsourcedSessions: unsourcedRows.length,
+      sourcedAverage: average(sourcedRows.map((row) => row.outcomeConfidence)),
+      unsourcedAverage: average(unsourcedRows.map((row) => row.outcomeConfidence)),
+      delta:
+        sourcedRows.length > 0 && unsourcedRows.length > 0
+          ? average(sourcedRows.map((row) => row.outcomeConfidence)) -
+            average(unsourcedRows.map((row) => row.outcomeConfidence))
+          : 0,
+    },
+    agentModelDrift,
+    timeline: [...calibrationRows]
+      .sort(
+        (left, right) =>
+          new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+      )
+      .slice(0, 12)
+      .map((row) => ({
+        sessionId: row.sessionId,
+        createdAt: row.createdAt,
+        predictedConfidence: row.predictedConfidence,
+        outcomeConfidence: row.outcomeConfidence,
+        delta: Math.abs(row.predictedConfidence - row.outcomeConfidence),
+        templateId: row.templateId,
+        decisionType: row.decisionType,
+      })),
+    confidencePenaltyGuidance: buildConfidencePenaltyGuidance({
+      averageOverconfidence,
+      averageCalibrationGap,
+      sourcedDelta:
+        sourcedRows.length > 0 && unsourcedRows.length > 0
+          ? average(sourcedRows.map((row) => row.outcomeConfidence)) -
+            average(unsourcedRows.map((row) => row.outcomeConfidence))
+          : 0,
+    }),
+    mostReliableTemplate,
+    largestBlindSpot,
   };
 }
 
@@ -748,6 +1245,7 @@ export async function deleteSession(sessionId: string) {
     .where(eq(decisionSummaries.sessionId, sessionId));
   const run = await getSessionResearch(sessionId);
   if (run) {
+    deleteSnapshotFiles(run.sources);
     await db
       .delete(researchSources)
       .where(eq(researchSources.researchRunId, run.id));
@@ -838,7 +1336,11 @@ export async function listActionItems(sessionId: string): Promise<ActionItem[]> 
     content: row.content,
     status: normalizeActionItemStatus(row.status),
     source:
-      row.source === 'carried_forward' ? 'carried_forward' : 'generated',
+      row.source === 'carried_forward'
+        ? 'carried_forward'
+        : row.source === 'archived_generated'
+          ? 'archived_generated'
+          : 'generated',
     carriedFromSessionId: row.carriedFromSessionId ?? null,
     note: row.note ?? '',
     owner: row.owner ?? '',
@@ -989,15 +1491,22 @@ export async function drainPendingInterjections(input: {
 }
 
 async function syncGeneratedActionItems(sessionId: string, nextActions: string[]) {
-  const normalized = nextActions
-    .map((item) => item.trim())
-    .filter(Boolean);
+  const normalized = Array.from(
+    new Set(
+      nextActions
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  );
   const existing = await listActionItems(sessionId);
   const existingGeneratedByContent = new Map(
     existing
-      .filter((item) => item.source === 'generated')
+      .filter(
+        (item) => item.source === 'generated' || item.source === 'archived_generated'
+      )
       .map((item) => [item.content, item])
   );
+  const normalizedSet = new Set(normalized);
   const now = new Date();
 
   for (const [index, content] of normalized.entries()) {
@@ -1005,7 +1514,7 @@ async function syncGeneratedActionItems(sessionId: string, nextActions: string[]
     if (matched) {
       await db
         .update(actionItems)
-        .set({ sortOrder: index, updatedAt: now })
+        .set({ sortOrder: index, source: 'generated', updatedAt: now })
         .where(eq(actionItems.id, matched.id));
       continue;
     }
@@ -1030,6 +1539,19 @@ async function syncGeneratedActionItems(sessionId: string, nextActions: string[]
       updatedAt: now,
     });
   }
+
+  for (const item of existing) {
+    if (item.source !== 'generated') continue;
+    if (normalizedSet.has(item.content)) continue;
+    if (wasActionItemManuallyEdited(item)) continue;
+    await db
+      .update(actionItems)
+      .set({
+        source: 'archived_generated',
+        updatedAt: now,
+      })
+      .where(eq(actionItems.id, item.id));
+  }
 }
 
 function buildActionFingerprint(item: Pick<ActionItem, 'content' | 'owner' | 'dueAt'>) {
@@ -1038,6 +1560,66 @@ function buildActionFingerprint(item: Pick<ActionItem, 'content' | 'owner' | 'du
       ? normalizeOptionalDate(item.dueAt)?.getTime() ?? 'none'
       : 'none';
   return `${item.content.trim().toLowerCase()}::${item.owner.trim().toLowerCase()}::${normalizedDueAt}`;
+}
+
+function wasActionItemManuallyEdited(item: ActionItem) {
+  return (
+    item.status !== 'pending' ||
+    item.note.trim().length > 0 ||
+    item.owner.trim().length > 0 ||
+    Boolean(item.dueAt) ||
+    item.verificationNote.trim().length > 0 ||
+    item.priority !== 'medium'
+  );
+}
+
+async function getParentReviewComparison(
+  sessionId: string,
+  topicOverride?: string
+): Promise<{
+  sessionId: string;
+  topic: string;
+  recommendedOption: string;
+  predictedConfidence: number;
+  outcomeSummary: string;
+  actualOutcome: string;
+  outcomeConfidence: number;
+  retrospectiveNote: string;
+} | null> {
+  const [parentSession] = await db
+    .select({
+      id: sessions.id,
+      topic: sessions.topic,
+      outcomeSummary: sessions.outcomeSummary,
+      actualOutcome: sessions.actualOutcome,
+      outcomeConfidence: sessions.outcomeConfidence,
+      retrospectiveNote: sessions.retrospectiveNote,
+    })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+  if (!parentSession) return null;
+
+  const [summaryRow] = await db
+    .select()
+    .from(decisionSummaries)
+    .where(eq(decisionSummaries.sessionId, sessionId))
+    .limit(1);
+  if (!summaryRow) return null;
+
+  const normalized = normalizePersistedDecisionSummary(
+    JSON.parse(summaryRow.content) as DecisionSummary
+  );
+  return {
+    sessionId,
+    topic: topicOverride ?? parentSession.topic,
+    recommendedOption: normalized.recommendedOption,
+    predictedConfidence: normalized.confidence,
+    outcomeSummary: parentSession.outcomeSummary ?? '',
+    actualOutcome: parentSession.actualOutcome ?? '',
+    outcomeConfidence: parentSession.outcomeConfidence ?? 0,
+    retrospectiveNote: parentSession.retrospectiveNote ?? '',
+  };
 }
 
 export async function previewFollowUpCarryForward(
@@ -1083,6 +1665,7 @@ export async function previewFollowUpCarryForward(
     carryItems,
     inheritedActionCount: carryItems.length,
     skippedReason,
+    parentReviewComparison: await getParentReviewComparison(parentSessionId),
   };
 }
 
@@ -1133,6 +1716,32 @@ async function replaceDecisionClaims(
   sessionId: string,
   evidence: DecisionSummary['evidence']
 ) {
+  const researchRun = sqliteDb
+    .prepare('SELECT id FROM research_runs WHERE session_id = ? LIMIT 1')
+    .get(sessionId) as { id: string } | undefined;
+  const researchSourceRows = researchRun
+    ? (sqliteDb
+        .prepare(
+          'SELECT id, rank FROM research_sources WHERE research_run_id = ? ORDER BY rank ASC, created_at ASC'
+        )
+        .all(researchRun.id) as Array<{ id: string; rank: number }>)
+    : [];
+  const researchSources = attachCitationLabels(
+    researchSourceRows.map((row) => ({
+      id: row.id,
+      rank: Number(row.rank ?? 0),
+      title: '',
+      url: '',
+      domain: '',
+      snippet: '',
+      score: 0,
+      selected: true,
+      pinned: false,
+      stale: false,
+      qualityFlags: [],
+    }))
+  );
+
   const tx = sqliteDb.transaction(() => {
     const existingClaims = sqliteDb
       .prepare('SELECT id FROM decision_claims WHERE session_id = ?')
@@ -1174,7 +1783,9 @@ async function replaceDecisionClaims(
         now
       );
       for (const sourceId of entry.sourceIds) {
-        insertLink.run(nanoid(), claimId, sourceId, now);
+        const resolved = findResearchSourceByCitation(sourceId, researchSources);
+        if (!resolved) continue;
+        insertLink.run(nanoid(), claimId, resolved.id, now);
       }
     }
   });
@@ -1183,6 +1794,13 @@ async function replaceDecisionClaims(
 }
 
 export async function listDecisionClaims(sessionId: string): Promise<DecisionClaim[]> {
+  const researchRun = await getSessionResearch(sessionId);
+  const labelBySourceId = new Map(
+    (researchRun?.sources ?? []).map((source) => [
+      source.id,
+      source.citationLabel ?? getResearchSourceCitationLabel(source),
+    ])
+  );
   const claimRows = await db
     .select()
     .from(decisionClaims)
@@ -1213,7 +1831,9 @@ export async function listDecisionClaims(sessionId: string): Promise<DecisionCla
     sessionId: row.sessionId,
     claim: row.claim,
     kind: 'evidence',
-    sourceIds: sourceMap.get(row.id) ?? [],
+    sourceIds: (sourceMap.get(row.id) ?? [])
+      .map((sourceId) => labelBySourceId.get(sourceId))
+      .filter((sourceId): sourceId is string => Boolean(sourceId)),
     gapReason: row.gapReason?.trim() ?? '',
     createdAt: normalizeDateLike(row.createdAt),
   }));
@@ -1227,6 +1847,45 @@ function parseJsonArray(value?: string | null) {
   } catch {
     return [];
   }
+}
+
+function parseVerifiedFields(value?: string | null) {
+  return parseJsonArray(value)
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const candidate = item as Record<string, unknown>;
+      const confidence = candidate.confidence;
+      if (
+        typeof candidate.label !== 'string' ||
+        typeof candidate.value !== 'string' ||
+        (confidence !== 'high' && confidence !== 'medium' && confidence !== 'low')
+      ) {
+        return null;
+      }
+      return {
+        label: candidate.label,
+        value: candidate.value,
+        confidence,
+      };
+    })
+    .filter(
+      (
+        item
+      ): item is {
+        label: string;
+        value: string;
+        confidence: 'high' | 'medium' | 'low';
+      } => Boolean(item)
+    );
+}
+
+function parseJsonStringRecord(value?: string | null) {
+  const parsed = parseJsonObject(value);
+  return Object.fromEntries(
+    Object.entries(parsed).filter(
+      ([key, item]) => typeof key === 'string' && typeof item === 'string'
+    )
+  ) as Record<string, string>;
 }
 
 function normalizeActionPriority(value?: string | null): ActionItem['priority'] {
@@ -1265,6 +1924,420 @@ function summarizeActionItems(items: ActionItem[]): ActionStats {
   }
 
   return stats;
+}
+
+function summarizeCalibration(
+  rows: Array<{
+    sessionId: string;
+    createdAt: number | string;
+    templateId: string;
+    predictedConfidence: number;
+    outcomeConfidence: number;
+    supportedOnly: boolean;
+  }>,
+  agentModelRows: Array<{
+    agentId: string;
+    modelId: string;
+    outcomeConfidence: number;
+    delta: number;
+  }>
+) {
+  if (rows.length === 0) {
+    return {
+      reviewedSessions: 0,
+      averagePredictedConfidence: 0,
+      averageOutcomeConfidence: 0,
+      averageOverconfidence: 0,
+      averageCalibrationGap: 0,
+      sourcedVsUnsourcedOutcomeGap: {
+        sourcedAverage: 0,
+        unsourcedAverage: 0,
+        delta: 0,
+      },
+      templateHitRates: [],
+      agentModelOverconfidence: [],
+      overconfidenceTrend: [],
+    };
+  }
+
+  const totalOverconfidence = rows.reduce(
+    (sum, row) => sum + Math.max(0, row.predictedConfidence - row.outcomeConfidence),
+    0
+  );
+  const totalGap = rows.reduce(
+    (sum, row) => sum + Math.abs(row.predictedConfidence - row.outcomeConfidence),
+    0
+  );
+
+  const templateMap = new Map<
+    string,
+    { total: number; hits: number }
+  >();
+  for (const row of rows) {
+    const current = templateMap.get(row.templateId) ?? { total: 0, hits: 0 };
+    current.total += 1;
+    if (row.outcomeConfidence >= 60) {
+      current.hits += 1;
+    }
+    templateMap.set(row.templateId, current);
+  }
+
+  const sourced = rows.filter((row) => row.supportedOnly);
+  const unsourced = rows.filter((row) => !row.supportedOnly);
+  const sourcedAverage = average(sourced.map((row) => row.outcomeConfidence));
+  const unsourcedAverage = average(unsourced.map((row) => row.outcomeConfidence));
+  const agentModelMap = new Map<
+    string,
+    {
+      agentId: string;
+      modelId: string;
+      reviewedSessions: number;
+      deltaTotal: number;
+      outcomeTotal: number;
+    }
+  >();
+  for (const row of agentModelRows) {
+    const key = `${row.agentId}::${row.modelId}`;
+    const current = agentModelMap.get(key) ?? {
+      agentId: row.agentId,
+      modelId: row.modelId,
+      reviewedSessions: 0,
+      deltaTotal: 0,
+      outcomeTotal: 0,
+    };
+    current.reviewedSessions += 1;
+    current.deltaTotal += row.delta;
+    current.outcomeTotal += row.outcomeConfidence;
+    agentModelMap.set(key, current);
+  }
+
+  return {
+    reviewedSessions: rows.length,
+    averagePredictedConfidence: average(rows.map((row) => row.predictedConfidence)),
+    averageOutcomeConfidence: average(rows.map((row) => row.outcomeConfidence)),
+    averageOverconfidence: Math.round(totalOverconfidence / rows.length),
+    averageCalibrationGap: Math.round(totalGap / rows.length),
+    sourcedVsUnsourcedOutcomeGap: {
+      sourcedAverage,
+      unsourcedAverage,
+      delta: sourced.length > 0 && unsourced.length > 0 ? sourcedAverage - unsourcedAverage : 0,
+    },
+    templateHitRates: Array.from(templateMap.entries())
+      .map(([templateId, value]) => ({
+        templateId,
+        reviewedSessions: value.total,
+        hitRate: toPercent(value.hits, value.total),
+      }))
+      .sort((left, right) => right.hitRate - left.hitRate)
+      .slice(0, 5),
+    agentModelOverconfidence: Array.from(agentModelMap.values())
+      .map((value) => ({
+        agentId: value.agentId,
+        modelId: value.modelId,
+        reviewedSessions: value.reviewedSessions,
+        averageDelta: Math.round(value.deltaTotal / value.reviewedSessions),
+        averageOutcomeConfidence: Math.round(
+          value.outcomeTotal / value.reviewedSessions
+        ),
+      }))
+      .sort((left, right) => right.averageDelta - left.averageDelta)
+      .slice(0, 6),
+    overconfidenceTrend: [...rows]
+      .sort(
+        (left, right) =>
+          new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+      )
+      .slice(0, 6)
+      .map((row) => ({
+        sessionId: row.sessionId,
+        createdAt: row.createdAt,
+        predictedConfidence: row.predictedConfidence,
+        outcomeConfidence: row.outcomeConfidence,
+        delta: row.predictedConfidence - row.outcomeConfidence,
+      })),
+  };
+}
+
+function summarizeCalibrationBuckets<T extends { predictedConfidence: number; outcomeConfidence: number }>(
+  rows: T[],
+  getKey: (row: T) => string
+) {
+  const buckets = new Map<
+    string,
+    {
+      reviewedSessions: number;
+      predicted: number[];
+      outcome: number[];
+      overconfidence: number[];
+      hits: number;
+    }
+  >();
+
+  for (const row of rows) {
+    const key = getKey(row);
+    const current = buckets.get(key) ?? {
+      reviewedSessions: 0,
+      predicted: [],
+      outcome: [],
+      overconfidence: [],
+      hits: 0,
+    };
+    current.reviewedSessions += 1;
+    current.predicted.push(row.predictedConfidence);
+    current.outcome.push(row.outcomeConfidence);
+    current.overconfidence.push(
+      Math.max(0, row.predictedConfidence - row.outcomeConfidence)
+    );
+    if (row.outcomeConfidence >= 60) current.hits += 1;
+    buckets.set(key, current);
+  }
+
+  return Array.from(buckets.entries())
+    .map(([key, value]) => ({
+      key,
+      reviewedSessions: value.reviewedSessions,
+      averagePredictedConfidence: average(value.predicted),
+      averageOutcomeConfidence: average(value.outcome),
+      averageOverconfidence: Math.round(average(value.overconfidence)),
+      hitRate: toPercent(value.hits, value.reviewedSessions),
+    }))
+    .sort((left, right) => right.hitRate - left.hitRate)
+    .slice(0, 8);
+}
+
+function summarizeAgentModelDrift(
+  rows: Array<{
+    agentId: string;
+    modelId: string;
+    outcomeConfidence: number;
+    delta: number;
+  }>
+) {
+  const agentModelMap = new Map<
+    string,
+    {
+      agentId: string;
+      modelId: string;
+      reviewedSessions: number;
+      deltaTotal: number;
+      outcomeTotal: number;
+    }
+  >();
+
+  for (const row of rows) {
+    const key = `${row.agentId}::${row.modelId}`;
+    const current = agentModelMap.get(key) ?? {
+      agentId: row.agentId,
+      modelId: row.modelId,
+      reviewedSessions: 0,
+      deltaTotal: 0,
+      outcomeTotal: 0,
+    };
+    current.reviewedSessions += 1;
+    current.deltaTotal += row.delta;
+    current.outcomeTotal += row.outcomeConfidence;
+    agentModelMap.set(key, current);
+  }
+
+  return Array.from(agentModelMap.values())
+    .map((value) => ({
+      agentId: value.agentId,
+      modelId: value.modelId,
+      reviewedSessions: value.reviewedSessions,
+      averageDelta: Math.round(value.deltaTotal / value.reviewedSessions),
+      averageOutcomeConfidence: Math.round(
+        value.outcomeTotal / value.reviewedSessions
+      ),
+    }))
+    .sort((left, right) => right.averageDelta - left.averageDelta)
+    .slice(0, 10);
+}
+
+function buildConfidencePenaltyGuidance(input: {
+  averageOverconfidence: number;
+  averageCalibrationGap: number;
+  sourcedDelta: number;
+}) {
+  const guidance: string[] = [];
+  if (input.averageOverconfidence >= 15) {
+    guidance.push('当前系统整体偏乐观，建议默认保留更大的人工折扣。');
+  } else {
+    guidance.push('当前 overconfidence 可控，但高分建议仍应优先核验红线条件。');
+  }
+  if (input.averageCalibrationGap >= 20) {
+    guidance.push('预测与实际落差较大，优先查看 revisit trigger 与 pre-mortem。');
+  }
+  if (input.sourcedDelta > 0) {
+    guidance.push('有证据支撑的会话表现更稳，优先补足 unsupported claims。');
+  } else if (input.sourcedDelta < 0) {
+    guidance.push('证据数量不等于证据质量，来源集中或过时会抵消核验收益。');
+  } else {
+    guidance.push('当前 sourced vs unsourced 差异不明显，继续积累 outcome review 数据。');
+  }
+  return guidance;
+}
+
+async function getSessionCalibrationContext(
+  currentSessionId: string,
+  templateId: string | null,
+  decisionType: string
+) {
+  const rows = await db
+    .select({
+      id: sessions.id,
+      templateId: sessions.templateId,
+      decisionType: sessions.decisionType,
+      outcomeConfidence: sessions.outcomeConfidence,
+      outcomeSummary: sessions.outcomeSummary,
+      actualOutcome: sessions.actualOutcome,
+      content: decisionSummaries.content,
+    })
+    .from(sessions)
+    .leftJoin(decisionSummaries, eq(decisionSummaries.sessionId, sessions.id));
+
+  const relevantRows = rows
+    .filter((row) => row.id !== currentSessionId && Boolean(row.content))
+    .filter((row) =>
+      templateId ? row.templateId === templateId : row.decisionType === decisionType
+    )
+    .filter(
+      (row) =>
+        (row.outcomeConfidence ?? 0) > 0 ||
+        Boolean(row.outcomeSummary?.trim()) ||
+        Boolean(row.actualOutcome?.trim())
+    );
+
+  if (relevantRows.length === 0) {
+    return {
+      reviewedSessions: 0,
+      averageOverconfidence: 0,
+      templateHitRate: 0,
+      penalty: 0,
+      basedOn: templateId ? 'template' : 'decisionType',
+    };
+  }
+
+  const metrics = relevantRows
+    .map((row) => {
+      const parsed = parseDecisionSummaryAnalytics(row.content);
+      if (!parsed) return null;
+      const predictedConfidence = parsed.predictedConfidence;
+      const outcomeConfidence = row.outcomeConfidence ?? 0;
+      return {
+        predictedConfidence,
+        outcomeConfidence,
+        overconfidence: Math.max(0, predictedConfidence - outcomeConfidence),
+      };
+    })
+    .filter(
+      (
+        metric
+      ): metric is {
+        predictedConfidence: number;
+        outcomeConfidence: number;
+        overconfidence: number;
+      } => Boolean(metric)
+    );
+  if (metrics.length === 0) {
+    return {
+      reviewedSessions: 0,
+      averageOverconfidence: 0,
+      templateHitRate: 0,
+      penalty: 0,
+      basedOn: templateId ? 'template' : 'decisionType',
+    };
+  }
+  const averageOverconfidence = average(
+    metrics.map((metric) => metric.overconfidence)
+  );
+  const templateHitRate = toPercent(
+    metrics.filter((metric) => metric.outcomeConfidence >= 60).length,
+    metrics.length
+  );
+  const penalty =
+    metrics.length >= 2
+      ? Math.min(
+          14,
+          Math.round(averageOverconfidence / 2.5) +
+            (templateHitRate < 50 ? 3 : templateHitRate < 65 ? 1 : 0)
+        )
+      : 0;
+
+  return {
+    reviewedSessions: metrics.length,
+    averageOverconfidence,
+    templateHitRate,
+    penalty,
+    basedOn: templateId ? 'template' : 'decisionType',
+  };
+}
+
+function parseDecisionSummaryAnalytics(content?: string | null) {
+  if (!content) return null;
+  try {
+    const parsed = JSON.parse(content) as {
+      confidence?: unknown;
+      evidence?: unknown;
+    };
+    const confidence = normalizeConfidenceValue(parsed.confidence);
+    const evidence = Array.isArray(parsed.evidence) ? parsed.evidence : [];
+    let unresolvedEvidenceCount = 0;
+    let unsupportedCount = 0;
+
+    for (const item of evidence) {
+      const record =
+        item && typeof item === 'object' ? (item as Record<string, unknown>) : {};
+      const sourceIds = Array.isArray(record.sourceIds)
+        ? record.sourceIds.filter(
+            (value): value is string => typeof value === 'string' && value.trim().length > 0
+          )
+        : [];
+      const unresolvedSourceIndices = Array.isArray(record.unresolvedSourceIndices)
+        ? record.unresolvedSourceIndices.filter((value) =>
+            Number.isInteger(Number(value))
+          )
+        : [];
+      if (sourceIds.length === 0) {
+        unsupportedCount += 1;
+      }
+      if (sourceIds.length === 0 || unresolvedSourceIndices.length > 0) {
+        unresolvedEvidenceCount += 1;
+      }
+    }
+
+    return {
+      predictedConfidence: confidence,
+      supportedOnly: unsupportedCount === 0,
+      unresolvedEvidenceCount,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function deleteSnapshotFiles(sources: ResearchSource[]) {
+  for (const source of sources) {
+    if (!source.snapshotPath) continue;
+    try {
+      const resolvedPath = path.resolve(source.snapshotPath);
+      if (fs.existsSync(resolvedPath)) {
+        fs.unlinkSync(resolvedPath);
+      }
+    } catch {
+      // ignore snapshot cleanup failures
+    }
+  }
+}
+
+function average(values: number[]) {
+  if (values.length === 0) return 0;
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+}
+
+function normalizeConfidenceValue(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 40;
+  return Math.max(0, Math.min(100, Math.round(numeric)));
 }
 
 function normalizeOutcomeConfidence(value: number) {

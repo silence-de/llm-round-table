@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useEffectEvent } from 'react';
 
 interface ShortcutCallbacks {
   onTogglePause: () => void;
@@ -11,10 +11,8 @@ export function useKeyboardShortcuts(
   callbacks: ShortcutCallbacks,
   enabled: boolean
 ) {
-  // Keep a stable ref so the effect never re-subscribes just because a
-  // callback function identity changed between renders.
-  const callbacksRef = useRef(callbacks);
-  callbacksRef.current = callbacks;
+  const onEscape = useEffectEvent(callbacks.onEscape);
+  const onTogglePause = useEffectEvent(callbacks.onTogglePause);
 
   useEffect(() => {
     if (!enabled) return;
@@ -27,13 +25,13 @@ export function useKeyboardShortcuts(
 
       if (e.key === 'Escape') {
         e.preventDefault();
-        callbacksRef.current.onEscape();
+        onEscape();
         return;
       }
 
       if (e.key === ' ' && !isInteractive && !isRoleInteractive) {
         e.preventDefault();
-        callbacksRef.current.onTogglePause();
+        onTogglePause();
       }
     };
 

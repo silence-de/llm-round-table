@@ -35,6 +35,9 @@ export interface ResearchEvaluation {
 
 export interface ResearchSource {
   id: string;
+  citationLabel?: string;
+  sourceType?: 'research' | 'browser_verification';
+  verificationProfile?: string;
   title: string;
   url: string;
   domain: string;
@@ -47,6 +50,19 @@ export interface ResearchSource {
   stale: boolean;
   qualityFlags: string[];
   publishedDate?: string;
+  capturedAt?: number | string;
+  snapshotPath?: string;
+  claimHint?: string;
+  note?: string;
+  verificationNotes?: string[];
+  verifiedFields?: Array<{
+    label: string;
+    value: string;
+    confidence: 'high' | 'medium' | 'low';
+  }>;
+  extractionMethod?: 'playwright_dom' | 'fetch_html_fallback';
+  extractionQuality?: 'high' | 'medium' | 'low';
+  captureStatus?: 'screenshot' | 'snapshot_fallback';
 }
 
 export interface ResearchRunDetail {

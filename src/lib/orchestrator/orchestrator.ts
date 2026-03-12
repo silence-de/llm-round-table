@@ -25,6 +25,7 @@ import {
 import { conductResearch } from '../search/research';
 import type { ResearchRunStatus, ResearchSource } from '../search/types';
 import { formatControlInstruction } from '../decision/utils';
+import { attachCitationLabels } from '../search/utils';
 
 interface StreamTimeoutConfig {
   requestTimeoutMs: number;
@@ -137,6 +138,8 @@ export class DiscussionOrchestrator {
         : 0;
 
     // Phase 3+4: Analysis and Debate loop
+    // Execute all configured rounds unless the session is explicitly stopped.
+    // "maxDebateRounds" is treated as the target round count, not only an upper bound.
     for (let round = startRound; round < this.config.maxDebateRounds; round++) {
       if (await this.shouldStop()) {
         yield* this.emitStopped();
@@ -152,9 +155,15 @@ export class DiscussionOrchestrator {
       }
       yield* this.phaseAnalysis(round);
 
-      if (!this.lastAnalysis || this.lastAnalysis.shouldConverge) break;
+      const hasNextRound = round + 1 < this.config.maxDebateRounds;
+      if (!hasNextRound) {
+        break;
+      }
+      if (!this.lastAnalysis) {
+        continue;
+      }
 
-      if (this.lastAnalysis.disagreements.length > 0) {
+      if (this.lastAnalysis.disagreements.length > 0 && !this.lastAnalysis.shouldConverge) {
         if (await this.shouldStop()) {
           yield* this.emitStopped();
           return;
@@ -165,8 +174,6 @@ export class DiscussionOrchestrator {
           return;
         }
         yield* this.phaseDebate(round);
-      } else {
-        break;
       }
     }
 
@@ -294,7 +301,15 @@ export class DiscussionOrchestrator {
   }
 
   private estimateTokens(text: string): number {
-    return Math.max(1, Math.ceil(text.length / 4));
+    const cjkChars = (text.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu) ?? [])
+      .length;
+    const asciiChars = (text.match(/[\x00-\x7F]/g) ?? []).length;
+    const otherChars = Math.max(0, text.length - cjkChars - asciiChars);
+    const estimated =
+      cjkChars * 1.5 +
+      asciiChars / 4 +
+      otherChars * 0.8;
+    return Math.max(1, Math.ceil(estimated));
   }
 
   private getStreamTimeoutConfig(
@@ -513,8 +528,9 @@ export class DiscussionOrchestrator {
         brief: this.config.brief,
         config: this.config.researchConfig,
       });
+      const researchSources = attachCitationLabels(result.sources);
       this.researchBrief = result.summary;
-      this.researchSources = result.sources;
+      this.researchSources = researchSources;
       await this.persistResearchRun({
         status: result.status,
         queryPlan: result.queryPlan,
@@ -522,13 +538,13 @@ export class DiscussionOrchestrator {
         evaluation: result.evaluation,
       });
       if (this.config.onResearchSourcesPersist) {
-        await this.config.onResearchSourcesPersist(this.config.sessionId, result.sources);
+        await this.config.onResearchSourcesPersist(this.config.sessionId, researchSources);
       }
 
       // Emit sources as JSON-encoded content for the client to display
       yield {
         type: 'research_result',
-        content: JSON.stringify(result.sources),
+        content: JSON.stringify(researchSources),
         timestamp: Date.now(),
       };
 
@@ -1137,7 +1153,12 @@ export class DiscussionOrchestrator {
       });
 
       await this.config.onDecisionSummaryPersist(
-        parseDecisionSummaryContent(result.content, minutes, this.researchSources)
+        parseDecisionSummaryContent(
+          result.content,
+          minutes,
+          this.researchSources,
+          this.config.brief
+        )
       );
     } catch (error) {
       await this.persistSessionEvent({
@@ -1150,7 +1171,12 @@ export class DiscussionOrchestrator {
         message: error instanceof Error ? error.message : String(error),
       });
       await this.config.onDecisionSummaryPersist(
-        parseDecisionSummaryContent('', minutes, this.researchSources)
+        parseDecisionSummaryContent(
+          '',
+          minutes,
+          this.researchSources,
+          this.config.brief
+        )
       );
     }
   }

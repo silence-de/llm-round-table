@@ -39,6 +39,10 @@ export interface DecisionBrief {
   goal: string;
   background: string;
   constraints: string;
+  timeHorizon: string;
+  nonNegotiables: string;
+  acceptableDownside: string;
+  reviewAt: string;
   decisionType: DecisionType;
   desiredOutput: DesiredOutput;
   templateId?: string | null;
@@ -65,6 +69,9 @@ export interface DecisionSummary {
   risks: string[];
   openQuestions: string[];
   nextActions: string[];
+  alternativesRejected: string[];
+  redLines: string[];
+  revisitTriggers: string[];
   confidence: number;
   evidence: DecisionSummaryEvidence[];
 }
@@ -74,7 +81,7 @@ export interface ActionItem {
   sourceActionId?: string | null;
   content: string;
   status: ActionItemStatus;
-  source: 'generated' | 'carried_forward';
+  source: 'generated' | 'carried_forward' | 'archived_generated';
   carriedFromSessionId?: string | null;
   note: string;
   owner: string;
@@ -110,11 +117,18 @@ export interface DecisionTemplate {
   id: string;
   label: string;
   description: string;
+  family: 'career' | 'life' | 'money';
   decisionType: DecisionType;
   desiredOutput: DesiredOutput;
+  verificationProfileId: string;
+  evidenceExpectations: string[];
+  reviewWindowSuggestion: string;
+  defaultRedLines: string[];
+  defaultRevisitTriggers: string[];
   goal: string;
   background: string;
   constraints: string;
   focalQuestions: string;
   requiredDimensions: string;
+  analysisChecklist: string[];
 }

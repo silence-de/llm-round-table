@@ -16,6 +16,7 @@ import type { SSEEvent } from '@/lib/sse/types';
 export function useDiscussionStream() {
   const store = useDiscussionStore();
   const abortRef = useRef<AbortController | null>(null);
+  const watchdogRef = useRef<number | null>(null);
 
   const startDiscussion = useCallback(
     async (params: {
@@ -41,6 +42,17 @@ export function useDiscussionStream() {
       abortRef.current = new AbortController();
 
       try {
+        let lastEventAt = Date.now();
+        watchdogRef.current = window.setInterval(() => {
+          const state = useDiscussionStore.getState();
+          if (!state.isRunning) return;
+          if (Date.now() - lastEventAt > 30_000) {
+            state.setError(
+              'Connection to the discussion stream looks interrupted. Please refresh and use resume if needed.'
+            );
+          }
+        }, 5_000);
+
         const response = await fetch(`/api/sessions/${sessionId}/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -68,6 +80,7 @@ export function useDiscussionStream() {
             if (!part.startsWith('data: ')) continue;
             try {
               const event: SSEEvent = JSON.parse(part.slice(6));
+              lastEventAt = Date.now();
               handleEvent(event);
             } catch {
               // Skip malformed events
@@ -81,6 +94,10 @@ export function useDiscussionStream() {
           );
         }
       } finally {
+        if (watchdogRef.current !== null) {
+          window.clearInterval(watchdogRef.current);
+          watchdogRef.current = null;
+        }
         store.setRunning(false);
       }
     },
@@ -211,9 +228,16 @@ function handleEvent(event: SSEEvent) {
       s.finalizeModerator();
       break;
 
-    case 'discussion_complete':
+    case 'discussion_complete': {
+      const completedSessionId = useDiscussionStore.getState().sessionId;
       s.setRunning(false);
-      void hydrateSessionArtifactsFromSession();
+      if (completedSessionId) {
+        void hydrateSessionArtifactsFromSession(completedSessionId);
+      }
+      break;
+    }
+
+    case 'heartbeat':
       break;
 
     case 'resume_snapshot':
@@ -270,8 +294,7 @@ function handleEvent(event: SSEEvent) {
   }
 }
 
-async function hydrateSessionArtifactsFromSession() {
-  const sessionId = useDiscussionStore.getState().sessionId;
+async function hydrateSessionArtifactsFromSession(sessionId: string) {
   if (!sessionId) return;
 
   try {
@@ -288,6 +311,9 @@ async function hydrateSessionArtifactsFromSession() {
       actionItems?: ActionItem[];
       researchRun?: ResearchRunDetail | null;
     };
+    if (useDiscussionStore.getState().sessionId !== sessionId) {
+      return;
+    }
     useDiscussionStore.getState().setUsage({
       inputTokens: data.session?.usageInputTokens ?? 0,
       outputTokens: data.session?.usageOutputTokens ?? 0,

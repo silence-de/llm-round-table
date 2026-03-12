@@ -10,6 +10,10 @@ import type {
   DecisionType,
 } from './types';
 import type { ResearchSource } from '../search/types';
+import {
+  findResearchSourceByCitation,
+  getResearchSourceCitationLabel,
+} from '../search/utils';
 
 const ACTION_ITEM_TRANSITIONS: Record<ActionItemStatus, ActionItemStatus[]> = {
   pending: ['pending', 'in_progress'],
@@ -34,6 +38,10 @@ export const DEFAULT_DECISION_BRIEF: DecisionBrief = {
   goal: '',
   background: '',
   constraints: '',
+  timeHorizon: '',
+  nonNegotiables: '',
+  acceptableDownside: '',
+  reviewAt: '',
   decisionType: 'general',
   desiredOutput: 'recommendation',
   templateId: null,
@@ -85,6 +93,10 @@ export function normalizeDecisionBrief(
     goal: value?.goal?.trim() ?? '',
     background: value?.background?.trim() ?? '',
     constraints: value?.constraints?.trim() ?? '',
+    timeHorizon: value?.timeHorizon?.trim() ?? '',
+    nonNegotiables: value?.nonNegotiables?.trim() ?? '',
+    acceptableDownside: value?.acceptableDownside?.trim() ?? '',
+    reviewAt: value?.reviewAt?.trim() ?? '',
     decisionType: normalizeDecisionType(value?.decisionType),
     desiredOutput: normalizeDesiredOutput(value?.desiredOutput),
     templateId: value?.templateId?.trim() || null,
@@ -140,7 +152,8 @@ export function formatControlInstruction(
 export function parseDecisionSummary(
   content: string,
   fallbackSummary?: string,
-  researchSources: ResearchSource[] = []
+  researchSources: ResearchSource[] = [],
+  brief?: DecisionBrief
 ): DecisionSummary {
   try {
     let jsonStr = content;
@@ -155,35 +168,52 @@ export function parseDecisionSummary(
     }
 
     const parsed = JSON.parse(jsonStr) as Partial<DecisionSummary>;
-    return {
+    return ensureDecisionDossierMinimums(
+      {
       summary: parsed.summary?.trim() || fallbackSummary || '未能生成结构化总结。',
       recommendedOption: parsed.recommendedOption?.trim() || '暂无明确建议',
       why: normalizeStringArray(parsed.why),
       risks: normalizeStringArray(parsed.risks),
       openQuestions: normalizeStringArray(parsed.openQuestions),
       nextActions: normalizeStringArray(parsed.nextActions),
-      confidence: normalizeConfidence(parsed.confidence),
+      alternativesRejected: normalizeStringArray(parsed.alternativesRejected),
+      redLines: normalizeStringArray(parsed.redLines),
+      revisitTriggers: normalizeStringArray(parsed.revisitTriggers),
       evidence: normalizeEvidence(parsed.evidence, researchSources),
-    };
+      confidence: normalizeEvidenceConfidence(
+        parsed.confidence,
+        normalizeEvidence(parsed.evidence, researchSources),
+        researchSources
+      ),
+    },
+      brief
+    );
   } catch {
-    return {
+    return ensureDecisionDossierMinimums(
+      {
       summary: fallbackSummary || content.slice(0, 500) || '未能生成结构化总结。',
       recommendedOption: '暂无明确建议',
       why: [],
       risks: [],
       openQuestions: [],
       nextActions: [],
+      alternativesRejected: [],
+      redLines: [],
+      revisitTriggers: [],
       confidence: 40,
       evidence: [],
-    };
+    },
+      brief
+    );
   }
 }
 
 export function normalizePersistedDecisionSummary(
   value: DecisionSummary,
-  researchSources: ResearchSource[] = []
+  researchSources: ResearchSource[] = [],
+  brief?: DecisionBrief
 ): DecisionSummary {
-  return {
+  return ensureDecisionDossierMinimums({
     ...value,
     summary: value.summary?.trim() || '未能生成结构化总结。',
     recommendedOption: value.recommendedOption?.trim() || '暂无明确建议',
@@ -191,9 +221,71 @@ export function normalizePersistedDecisionSummary(
     risks: normalizeStringArray(value.risks),
     openQuestions: normalizeStringArray(value.openQuestions),
     nextActions: normalizeStringArray(value.nextActions),
-    confidence: normalizeConfidence(value.confidence),
+    alternativesRejected: normalizeStringArray(value.alternativesRejected),
+    redLines: normalizeStringArray(value.redLines),
+    revisitTriggers: normalizeStringArray(value.revisitTriggers),
     evidence: normalizeEvidence(value.evidence, researchSources),
+    confidence: normalizeEvidenceConfidence(
+      value.confidence,
+      normalizeEvidence(value.evidence, researchSources),
+      researchSources
+    ),
+  }, brief);
+}
+
+function ensureDecisionDossierMinimums(
+  value: DecisionSummary,
+  brief?: DecisionBrief
+): DecisionSummary {
+  const fallbackNextActions =
+    value.nextActions.length > 0
+      ? value.nextActions
+      : [
+          brief?.reviewAt
+            ? `在 ${brief.reviewAt} 前复核关键假设、行动项 owner 与执行进度`
+            : '确认执行 owner、验证方式与最近一次检查时间',
+        ];
+  const fallbackRedLines =
+    value.redLines.length > 0
+      ? value.redLines
+      : [
+          brief?.nonNegotiables
+            ? `若无法满足这些不可妥协项，则停止推进：${brief.nonNegotiables}`
+            : brief?.acceptableDownside
+              ? `若下行超过可接受范围，则停止推进：${brief.acceptableDownside}`
+              : '一旦关键假设失真或执行成本超出可承受范围，应暂停推进。',
+        ];
+  const fallbackRevisitTriggers =
+    value.revisitTriggers.length > 0
+      ? value.revisitTriggers
+      : [
+          brief?.reviewAt
+            ? `在 ${brief.reviewAt} 进行固定复盘，检查结果与前提是否仍成立`
+            : '出现新证据、关键风险变化或执行偏差时重新讨论。',
+        ];
+  const fallbackAlternativesRejected =
+    value.alternativesRejected.length > 0
+      ? value.alternativesRejected
+      : ['其他备选方案暂缺足够证据或当前约束下性价比更低，因此不优先推进。'];
+
+  return {
+    ...value,
+    nextActions: fallbackNextActions,
+    redLines: fallbackRedLines,
+    revisitTriggers: fallbackRevisitTriggers,
+    alternativesRejected: fallbackAlternativesRejected,
   };
+}
+
+export function classifyEvidenceStatus(
+  evidence: DecisionSummaryEvidence
+): 'supported' | 'inference' | 'verify' {
+  if (evidence.sourceIds.length > 0) return 'supported';
+  const reason = evidence.gapReason?.toLowerCase() ?? '';
+  if (/待验证|验证|核验|确认|check|verify|unknown|missing|unclear/.test(reason)) {
+    return 'verify';
+  }
+  return 'inference';
 }
 
 function normalizeDecisionType(value?: string): DecisionType {
@@ -244,18 +336,6 @@ function normalizeEvidence(value: unknown, researchSources: ResearchSource[]) {
   return evidence.filter((item) => item.claim.trim().length > 0);
 }
 
-function resolveEvidenceSourceSet(researchSources: ResearchSource[]) {
-  const activeSourceIds = new Set(
-    researchSources
-      .filter((source) => source.selected && !source.excludedReason?.trim())
-      .map((source) => source.id)
-  );
-  if (activeSourceIds.size > 0) {
-    return activeSourceIds;
-  }
-  return new Set(researchSources.map((source) => source.id));
-}
-
 function normalizeGapReason(record: Record<string, unknown>) {
   if (typeof record.gapReason !== 'string') return '';
   return record.gapReason.trim();
@@ -267,21 +347,20 @@ function normalizeEvidenceItem(
 ): DecisionSummaryEvidence {
   const record =
     item && typeof item === 'object' ? (item as Record<string, unknown>) : {};
-  const sourceIdSet = resolveEvidenceSourceSet(researchSources);
-  const directSourceIds = normalizeStringArray(record.sourceIds).filter(
-    (sourceId) => sourceIdSet.size === 0 || sourceIdSet.has(sourceId)
-  );
+  const directSourceIds = normalizeStringArray(record.sourceIds)
+    .map((sourceId) => findResearchSourceByCitation(sourceId, researchSources))
+    .filter((source): source is ResearchSource => Boolean(source))
+    .map((source) => getResearchSourceCitationLabel(source));
   const legacySourceIndices = Array.isArray(record.sourceIndices)
     ? record.sourceIndices
         .map((index) => Number(index))
         .filter((index) => Number.isInteger(index) && index >= 0)
     : [];
   const mappedSourceIds = legacySourceIndices
-    .map((index) => researchSources[index]?.id)
-    .filter(
-      (sourceId): sourceId is string =>
-        Boolean(sourceId) && (sourceIdSet.size === 0 || sourceIdSet.has(sourceId))
-    );
+    .map((index) =>
+      researchSources[index] ? getResearchSourceCitationLabel(researchSources[index]) : null
+    )
+    .filter((sourceId): sourceId is string => Boolean(sourceId));
   const unresolvedSourceIndices = legacySourceIndices.filter(
     (index) => !researchSources[index]?.id
   );
@@ -302,4 +381,36 @@ function normalizeEvidenceItem(
       ? { unresolvedSourceIndices }
       : {}),
   };
+}
+
+function normalizeEvidenceConfidence(
+  value: unknown,
+  evidence: DecisionSummaryEvidence[],
+  researchSources: ResearchSource[]
+) {
+  let confidence = normalizeConfidence(value);
+  if (evidence.length === 0) {
+    return confidence;
+  }
+
+  const unsupportedClaims = evidence.filter((item) => item.sourceIds.length === 0).length;
+  confidence -= Math.min(unsupportedClaims * 8, 24);
+
+  const citedSources = evidence
+    .flatMap((item) =>
+      item.sourceIds
+        .map((sourceId) => findResearchSourceByCitation(sourceId, researchSources))
+        .filter((source): source is ResearchSource => Boolean(source))
+    );
+  const uniqueDomains = new Set(citedSources.map((source) => source.domain).filter(Boolean));
+  const staleCount = citedSources.filter((source) => source.stale).length;
+
+  if (citedSources.length > 0 && staleCount / citedSources.length >= 0.5) {
+    confidence -= 10;
+  }
+  if (citedSources.length >= 2 && uniqueDomains.size <= 1) {
+    confidence -= 6;
+  }
+
+  return normalizeConfidence(confidence);
 }

@@ -5,6 +5,10 @@ import type {
   DiscussionAgenda,
 } from '../decision/types';
 import { parseDecisionSummary } from '../decision/utils';
+import {
+  DECISION_TEMPLATES,
+  PERSONAL_DECISION_CHECKLIST,
+} from '../decision/templates';
 import type { AgentResponse, ModeratorAnalysis } from './types';
 
 export function buildOpeningPrompt(
@@ -98,13 +102,15 @@ ${responsesText}
     }
   ],
   "shouldConverge": false,
-  "moderatorNarrative": "2-3 句话的总结，用于向参与者播报"
+  "moderatorNarrative": "2-3 句话的总结，用于向参与者播报，并指出当前最强反例或待验证点"
 }
 
 注意：
 - agreements 和 disagreements 中的 supporters/positions 使用参与者的 id（${responses.map((r) => r.agentId).join(', ')}）
 - shouldConverge 为 true 表示各方已充分表达、分歧已缩小，可以进入总结阶段
 - 如果 agenda 要求输出建议，请优先判断是否已经足够收敛
+- moderatorNarrative 必须指出当前最强反例，并将关键判断归类为「有证据支持 / 暂属推断 / 待验证」之一
+- moderatorNarrative 必须点出当前最强反例、关键不确定性或仍待验证的问题
 - 用中文填写所有描述文字`;
 }
 
@@ -204,9 +210,21 @@ export function buildDecisionSummaryPrompt(input: {
     input.researchSources.length > 0
       ? [
           '可引用的 research source 列表：',
-          ...input.researchSources.map(
-            (source) => `R${source.rank}: ${source.title} (${source.url})`
-          ),
+          ...input.researchSources.map((source) => {
+            const facts =
+              source.verifiedFields && source.verifiedFields.length > 0
+                ? `；captured signals (manual review): ${source.verifiedFields
+                    .slice(0, 4)
+                    .map((field) => `${field.label}=${field.value}`)
+                    .join(' | ')}`
+                : '';
+            const claimHint = source.claimHint ? `；claim hint: ${source.claimHint}` : '';
+            const sourceType =
+              source.sourceType === 'browser_verification'
+                ? 'browser verification'
+                : 'research';
+            return `R${source.rank}: ${source.title} (${source.url}) [${sourceType}]${facts}${claimHint}`;
+          }),
           '',
           '如果某条结论明显受到了这些 source 的支持，请在 evidence 的 sourceIds 中引用对应的 source id，例如 ["R1", "R2"]。',
         ].join('\n')
@@ -232,6 +250,9 @@ ${researchSection}
   "risks": ["核心风险1", "核心风险2"],
   "openQuestions": ["待验证问题1"],
   "nextActions": ["下一步行动1", "下一步行动2"],
+  "alternativesRejected": ["为什么不选备选方案1"],
+  "redLines": ["一旦出现什么条件就不应继续推进"],
+  "revisitTriggers": ["在什么信号出现后必须重新讨论"],
   "confidence": 76,
   "evidence": [
     {
@@ -246,6 +267,10 @@ ${researchSection}
 - 如果 agenda.requestRecommendation 为 false，也要给出当前最优倾向，但要明确说明不确定性。
 - confidence 用 0-100 的整数。
 - 每条 evidence 至少满足以下之一：sourceIds 非空；或给出 gapReason。
+- 所有关键判断都必须可归类为：有证据支持、暂无证据但属于推断、明确待验证；后两类都要写 gapReason。
+- 如果某条 why / risk / recommendation 缺少可引用证据，要在 evidence 中明确写出 gapReason。
+- alternativesRejected 要说明为什么不选其他方案；redLines 要说明触发放弃的条件；revisitTriggers 要说明何时必须复盘。
+- nextActions、redLines、revisitTriggers 不能为空；若讨论中缺失，请根据 brief 与约束补足最小可执行版本。
 - 所有文本都用中文。`;
 }
 
@@ -264,13 +289,25 @@ export function parseAnalysis(content: string): ModeratorAnalysis {
       jsonStr = braceMatch[0];
     }
 
-    return JSON.parse(jsonStr) as ModeratorAnalysis;
+    const parsed = JSON.parse(jsonStr) as Partial<ModeratorAnalysis>;
+    return {
+      agreements: Array.isArray(parsed.agreements) ? parsed.agreements : [],
+      disagreements: Array.isArray(parsed.disagreements)
+        ? parsed.disagreements
+        : [],
+      shouldConverge: parsed.shouldConverge === true,
+      moderatorNarrative:
+        typeof parsed.moderatorNarrative === 'string' &&
+        parsed.moderatorNarrative.trim().length > 0
+          ? parsed.moderatorNarrative
+          : content.slice(0, 500),
+    };
   } catch {
     // Fallback if JSON parsing fails
     return {
       agreements: [],
       disagreements: [],
-      shouldConverge: true,
+      shouldConverge: false,
       moderatorNarrative: content.slice(0, 500),
     };
   }
@@ -279,9 +316,10 @@ export function parseAnalysis(content: string): ModeratorAnalysis {
 export function parseDecisionSummaryContent(
   content: string,
   fallbackSummary?: string,
-  researchSources: ResearchSource[] = []
+  researchSources: ResearchSource[] = [],
+  brief?: DecisionBrief
 ): DecisionSummary {
-  return parseDecisionSummary(content, fallbackSummary, researchSources);
+  return parseDecisionSummary(content, fallbackSummary, researchSources, brief);
 }
 
 function buildDecisionContextBlock(
@@ -290,15 +328,38 @@ function buildDecisionContextBlock(
   researchBrief?: string,
   parentContext?: string
 ) {
+  const template = brief.templateId
+    ? DECISION_TEMPLATES.find((item) => item.id === brief.templateId) ?? null
+    : null;
+  const analysisChecklist = template?.analysisChecklist ?? PERSONAL_DECISION_CHECKLIST;
+  const effectiveRedLines =
+    template && !brief.nonNegotiables.trim()
+      ? template.defaultRedLines.join('；')
+      : brief.nonNegotiables;
+  const effectiveRevisitWindow =
+    brief.reviewAt || template?.reviewWindowSuggestion || '';
   const lines = [
     `讨论议题：「${brief.topic}」`,
     brief.goal ? `目标：${brief.goal}` : '',
     brief.background ? `背景：${brief.background}` : '',
     brief.constraints ? `约束：${brief.constraints}` : '',
+    brief.timeHorizon ? `时间尺度：${brief.timeHorizon}` : '',
+    effectiveRedLines ? `不可妥协项：${effectiveRedLines}` : '',
+    brief.acceptableDownside ? `可接受下行：${brief.acceptableDownside}` : '',
+    effectiveRevisitWindow ? `建议复盘时间：${effectiveRevisitWindow}` : '',
     `决策类型：${brief.decisionType}`,
     `期望输出：${brief.desiredOutput}`,
+    template ? `模板：${template.label}（${template.family}）` : '',
+    template ? `核验 profile：${template.verificationProfileId}` : '',
+    `个人决策分析框架：${analysisChecklist.join('、')}`,
     agenda.focalQuestions ? `重点问题：${agenda.focalQuestions}` : '',
     agenda.requiredDimensions ? `必须覆盖维度：${agenda.requiredDimensions}` : '',
+    template?.evidenceExpectations.length
+      ? `证据预期：${template.evidenceExpectations.join('；')}`
+      : '',
+    template?.defaultRevisitTriggers.length
+      ? `默认复盘触发器：${template.defaultRevisitTriggers.join('；')}`
+      : '',
     agenda.requestRecommendation ? '需要最终建议：是' : '需要最终建议：否',
     parentContext ? `历史上下文：${parentContext}` : '',
     researchBrief

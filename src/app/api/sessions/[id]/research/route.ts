@@ -64,6 +64,10 @@ export async function POST(
         goal: detail.session.goal,
         background: detail.session.background,
         constraints: detail.session.constraints,
+        timeHorizon: detail.session.timeHorizon,
+        nonNegotiables: detail.session.nonNegotiables,
+        acceptableDownside: detail.session.acceptableDownside,
+        reviewAt: detail.session.reviewAt ?? '',
         decisionType: detail.session.decisionType as
           | 'general'
           | 'investment'

@@ -1,22 +1,21 @@
 import type { Metadata } from 'next';
-import { Geist, Geist_Mono } from 'next/font/google';
 import { ThemeProvider } from '@/components/theme-provider';
 import { ToastBridgeProvider } from '@/components/ui/toaster';
 import './globals.css';
 
-const GeistSans = Geist({
-  subsets: ['latin'],
-  variable: '--font-geist-sans',
-});
-
-const GeistMono = Geist_Mono({
-  subsets: ['latin'],
-  variable: '--font-geist-mono',
-});
-
 export const metadata: Metadata = {
-  title: 'Round Table - Multi-Agent Discussion',
-  description: 'Multi-agent round-table discussion system for personal advisory',
+  title: 'Round Table - Trusted Personal Decision Assistant',
+  description: 'Evidence-backed personal decision assistant for important life decisions.',
+  manifest: '/site.webmanifest',
+  icons: {
+    icon: [
+      { url: '/brand/round-table-favicon.svg', type: 'image/svg+xml' },
+      { url: '/brand/round-table-favicon-32.png', sizes: '32x32', type: 'image/png' },
+      { url: '/brand/round-table-favicon-16.png', sizes: '16x16', type: 'image/png' },
+    ],
+    shortcut: '/brand/round-table-favicon.svg',
+    apple: '/brand/round-table-apple-touch-icon.png',
+  },
 };
 
 export default function RootLayout({
@@ -25,7 +24,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${GeistSans.variable} ${GeistMono.variable}`}>
+    <html lang="en" suppressHydrationWarning>
       <body className="antialiased">
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
           <ToastBridgeProvider />

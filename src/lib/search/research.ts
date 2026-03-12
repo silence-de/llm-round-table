@@ -7,6 +7,7 @@ import type {
   ResearchSource,
 } from './types';
 import {
+  buildResearchSummaryText,
   buildResearchQueryPlan,
   buildSourceQualityFlags,
   evaluateResearchQuality,
@@ -102,7 +103,7 @@ export async function conductResearch(input: {
       };
     });
 
-  const summary = formatBriefText(selectedSources, input.brief.topic);
+  const summary = buildResearchSummaryText(selectedSources, input.brief.topic);
   const evaluation = evaluateResearchQuality({
     brief: input.brief,
     queryPlan,
@@ -118,25 +119,6 @@ export async function conductResearch(input: {
     evaluation,
     sources: selectedSources,
   };
-}
-
-function formatBriefText(sources: ResearchSource[], topic: string) {
-  if (sources.length === 0) return '';
-
-  const lines = [
-    `【Research Intelligence】关于「${topic}」的研究来源：`,
-    '',
-    ...sources.map((source) => {
-      const date = source.publishedDate
-        ? ` (${source.publishedDate.slice(0, 10)})`
-        : '';
-      return `R${source.rank}. ${source.title}${date}\n   ${source.snippet}`;
-    }),
-    '',
-    '请参考以上来源进行讨论，并明确区分结论、风险和仍待验证的问题。',
-  ];
-
-  return lines.join('\n');
 }
 
 function extractDomain(url: string) {

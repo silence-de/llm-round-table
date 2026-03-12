@@ -191,6 +191,21 @@ export async function POST(
         parentDetail.decisionSummary?.recommendedOption
           ? `上次推荐方向：${parentDetail.decisionSummary.recommendedOption}`
           : '',
+        parentDetail.decisionSummary
+          ? `上次预测置信度：${parentDetail.decisionSummary.confidence}%`
+          : '',
+        parentDetail.session.outcomeSummary
+          ? `上次实际结果摘要：${parentDetail.session.outcomeSummary}`
+          : '',
+        parentDetail.session.actualOutcome
+          ? `上次实际结果：${parentDetail.session.actualOutcome}`
+          : '',
+        (parentDetail.session.outcomeConfidence ?? 0) > 0
+          ? `上次结果置信度：${parentDetail.session.outcomeConfidence}%`
+          : '',
+        parentDetail.session.retrospectiveNote
+          ? `上次复盘笔记：${parentDetail.session.retrospectiveNote}`
+          : '',
         parentDetail.minutes?.content
           ? `上次纪要要点：${parentDetail.minutes.content.slice(0, 300)}`
           : '',
@@ -285,6 +300,21 @@ export async function POST(
 
   const stream = new ReadableStream({
     async start(controller) {
+      const heartbeat = setInterval(() => {
+        try {
+          controller.enqueue(
+            encoder.encode(
+              encodeSSE({
+                type: 'heartbeat',
+                timestamp: Date.now(),
+              })
+            )
+          );
+        } catch {
+          // ignore enqueue errors after stream shutdown
+        }
+      }, 15_000);
+
       try {
         if (resumeSnapshot) {
           controller.enqueue(
@@ -316,6 +346,7 @@ export async function POST(
         });
         controller.enqueue(encoder.encode(errorEvent));
       } finally {
+        clearInterval(heartbeat);
         req.signal.removeEventListener('abort', onAbort);
         controller.close();
       }

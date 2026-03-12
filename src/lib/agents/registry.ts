@@ -142,11 +142,7 @@ export const AGENT_CATALOG: AgentDefinition[] = [
       'long-term-investor',
       'contrarian',
     ],
-    availableModels: [
-      { id: 'Pro/zai-org/GLM-5', label: 'GLM-5 (Pro)' },
-      { id: 'zai-org/GLM-5', label: 'GLM-5' },
-      { id: 'THUDM/GLM-Z1-32B', label: 'GLM-Z1-32B' },
-    ],
+    availableModels: [{ id: 'Pro/zai-org/GLM-5', label: 'GLM-5 (Pro)' }],
   },
   {
     id: 'qwen',
@@ -186,6 +182,10 @@ function normalizeConfiguredModelId(agent: AgentDefinition, modelId?: string): s
     if (/^(?:pro\/)?moonshotai\/kimi-k2\.5$/i.test(trimmed) || /^kimi-k2\.5$/i.test(trimmed)) {
       return 'kimi-k2.5';
     }
+  }
+
+  if (agent.id === 'glm' && /^(?:pro\/)?zai-org\/glm-5$/i.test(trimmed)) {
+    return 'Pro/zai-org/GLM-5';
   }
 
   return trimmed;

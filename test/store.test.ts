@@ -26,6 +26,9 @@ test('store reset clears live and replay state while preserving stage mode', () 
     risks: [],
     openQuestions: [],
     nextActions: [],
+    alternativesRejected: [],
+    redLines: [],
+    revisitTriggers: [],
     confidence: 70,
     evidence: [],
   });

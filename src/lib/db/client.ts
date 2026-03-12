@@ -25,6 +25,10 @@ CREATE TABLE IF NOT EXISTS sessions (
   goal TEXT NOT NULL DEFAULT '',
   background TEXT NOT NULL DEFAULT '',
   constraints TEXT NOT NULL DEFAULT '',
+  time_horizon TEXT NOT NULL DEFAULT '',
+  non_negotiables TEXT NOT NULL DEFAULT '',
+  acceptable_downside TEXT NOT NULL DEFAULT '',
+  review_at TEXT,
   decision_type TEXT NOT NULL DEFAULT 'general',
   desired_output TEXT NOT NULL DEFAULT 'recommendation',
   template_id TEXT,
@@ -94,6 +98,8 @@ CREATE TABLE IF NOT EXISTS research_runs (
 CREATE TABLE IF NOT EXISTS research_sources (
   id TEXT PRIMARY KEY,
   research_run_id TEXT NOT NULL,
+  source_type TEXT NOT NULL DEFAULT 'research',
+  verification_profile TEXT,
   title TEXT NOT NULL,
   url TEXT NOT NULL,
   domain TEXT NOT NULL DEFAULT '',
@@ -106,6 +112,15 @@ CREATE TABLE IF NOT EXISTS research_sources (
   stale INTEGER NOT NULL DEFAULT 0,
   quality_flags TEXT NOT NULL DEFAULT '[]',
   published_date TEXT,
+  captured_at INTEGER,
+  snapshot_path TEXT,
+  claim_hint TEXT,
+  note TEXT,
+  verification_notes TEXT NOT NULL DEFAULT '[]',
+  verified_fields TEXT NOT NULL DEFAULT '[]',
+  extraction_method TEXT,
+  extraction_quality TEXT,
+  capture_status TEXT,
   created_at INTEGER NOT NULL
 );
 
@@ -190,6 +205,10 @@ ensureColumn('sessions', 'personas', "TEXT NOT NULL DEFAULT '{}'");
 ensureColumn('sessions', 'goal', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('sessions', 'background', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('sessions', 'constraints', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('sessions', 'time_horizon', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('sessions', 'non_negotiables', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('sessions', 'acceptable_downside', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('sessions', 'review_at', 'TEXT');
 ensureColumn('sessions', 'decision_type', "TEXT NOT NULL DEFAULT 'general'");
 ensureColumn(
   'sessions',
@@ -212,10 +231,29 @@ ensureColumn('sessions', 'usage_output_tokens', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('sessions', 'stop_requested', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('interjections', 'control_type', "TEXT NOT NULL DEFAULT 'general'");
 ensureColumn('research_runs', 'rerun_count', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('research_sources', 'source_type', "TEXT NOT NULL DEFAULT 'research'");
 ensureColumn('research_sources', 'pinned', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('research_sources', 'rank', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('research_sources', 'excluded_reason', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('research_sources', 'stale', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('research_sources', 'captured_at', 'INTEGER');
+ensureColumn('research_sources', 'snapshot_path', 'TEXT');
+ensureColumn('research_sources', 'verification_profile', 'TEXT');
+ensureColumn('research_sources', 'claim_hint', 'TEXT');
+ensureColumn('research_sources', 'note', 'TEXT');
+ensureColumn(
+  'research_sources',
+  'verification_notes',
+  "TEXT NOT NULL DEFAULT '[]'"
+);
+ensureColumn(
+  'research_sources',
+  'verified_fields',
+  "TEXT NOT NULL DEFAULT '[]'"
+);
+ensureColumn('research_sources', 'extraction_method', 'TEXT');
+ensureColumn('research_sources', 'extraction_quality', 'TEXT');
+ensureColumn('research_sources', 'capture_status', 'TEXT');
 ensureColumn('action_items', 'owner', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('action_items', 'source_action_id', 'TEXT');
 ensureColumn('action_items', 'due_at', 'INTEGER');
