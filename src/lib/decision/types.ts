@@ -94,6 +94,8 @@ export interface DecisionSummary {
   rawConfidence?: number;
   confidence: number;
   evidence: DecisionSummaryEvidence[];
+  adjustedConfidence?: number;      // persisted adjusted confidence (after penalty deductions)
+  confidenceFrozenAt?: number;      // timestamp when adjustedConfidence was last computed and frozen
 }
 
 export interface ActionItem {

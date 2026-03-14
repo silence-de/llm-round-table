@@ -14,9 +14,21 @@ const PDF_FONTS = {
   bold: 'RoundTableBold',
 };
 const PDF_FONT_CANDIDATES = [
+  // 1. Explicit override via env var (highest priority).
   process.env.ROUND_TABLE_PDF_CJK_FONT?.trim() || '',
-  resolveModuleAssetPath('next/dist/compiled/@vercel/og/noto-sans-v27-latin-regular.ttf'),
+  // 2. Project-local CJK font (drop a NotoSansSC-Regular.ttf into public/fonts/).
   path.join(process.cwd(), 'public', 'fonts', 'NotoSansSC-Regular.ttf'),
+  // 3. macOS system fonts with full CJK coverage (Arial Unicode ~23 MB).
+  '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
+  '/Library/Fonts/Arial Unicode.ttf',
+  '/System/Library/Fonts/Supplemental/NISC18030.ttf',
+  // 4. Linux CJK fonts (Noto CJK).
+  '/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf',
+  '/usr/share/fonts/opentype/noto/NotoSansSC-Regular.otf',
+  '/usr/share/fonts/truetype/noto/NotoSansSC-Regular.ttf',
+  // 5. Latin-only fallbacks (no CJK glyphs; Chinese will render as boxes, but
+  //    the PDF will at least be generated without an error).
+  resolveModuleAssetPath('next/dist/compiled/@vercel/og/noto-sans-v27-latin-regular.ttf'),
   path.join(
     process.cwd(),
     'node_modules',
@@ -27,11 +39,6 @@ const PDF_FONT_CANDIDATES = [
     'og',
     'noto-sans-v27-latin-regular.ttf'
   ),
-  '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
-  '/System/Library/Fonts/Supplemental/NISC18030.ttf',
-  '/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf',
-  '/usr/share/fonts/opentype/noto/NotoSansSC-Regular.otf',
-  '/usr/share/fonts/truetype/noto/NotoSansSC-Regular.ttf',
   '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
   '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
 ].filter(Boolean);
@@ -108,9 +115,10 @@ export async function buildSessionArtifactFile(detail: SessionArtifactDetailLike
   }
 
   fs.mkdirSync(PDF_OUTPUT_DIR, { recursive: true });
+  const topicSlug = sanitizeFilenameUnicode(detail.session.topic);
   const filePath = path.join(
     PDF_OUTPUT_DIR,
-    `${sanitizeFilename(`${detail.session.id}-decision-dossier`)}.pdf`
+    `${topicSlug}-decision-dossier.pdf`
   );
   await writeDecisionPdf(detail, filePath);
   return {
@@ -121,6 +129,13 @@ export async function buildSessionArtifactFile(detail: SessionArtifactDetailLike
 }
 
 async function writeDecisionPdf(detail: SessionArtifactDetailLike, outputPath: string) {
+  // Resolve the font BEFORE constructing PDFDocument. PDFKit initialises with
+  // 'Helvetica' by default, which triggers an AFM file lookup. In the Next.js server
+  // runtime the internal __dirname of pdfkit resolves to /ROOT, making that lookup
+  // fail with ENOENT. Passing our own font file path as the `font` constructor option
+  // overrides the default and prevents the Helvetica AFM load entirely.
+  const { filePath: fontPath, buffer: fontBuffer } = findPdfFont();
+
   await new Promise<void>((resolve, reject) => {
     const generatedAt = new Date().toISOString();
     const summary = detail.decisionSummary;
@@ -131,6 +146,8 @@ async function writeDecisionPdf(detail: SessionArtifactDetailLike, outputPath: s
     const doc = new PDFDocument({
       size: 'A4',
       margin: PAGE.margin,
+      // Supplying the custom font path here prevents PDFKit from loading Helvetica.afm.
+      font: fontPath,
       info: {
         Title: `${detail.session.topic} - Decision Dossier`,
         Author: 'Round Table',
@@ -138,7 +155,7 @@ async function writeDecisionPdf(detail: SessionArtifactDetailLike, outputPath: s
         Keywords: 'decision dossier, round table, personal decision assistant',
       },
     });
-    registerPdfFonts(doc);
+    registerPdfFonts(doc, fontBuffer);
     const stream = fs.createWriteStream(outputPath);
     stream.on('finish', () => resolve());
     stream.on('error', reject);
@@ -675,6 +692,19 @@ function usableBottom(doc: PDFKit.PDFDocument) {
   return doc.page.height - PAGE.margin - PAGE.footerHeight - 14;
 }
 
+/** Strip characters that are forbidden in filenames across macOS / Windows / Linux.
+ *  Preserves Unicode letters and digits (including CJK) so Chinese topics remain readable. */
+function sanitizeFilenameUnicode(value: string, maxLength = 60) {
+  return value
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-') // forbidden on Windows + control chars
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .trim()
+    .slice(0, maxLength)
+    .replace(/-$/g, ''); // trim trailing dash after slice
+}
+
+/** Legacy ASCII-only sanitiser (kept for non-filename uses). */
 function sanitizeFilename(value: string) {
   return value.replace(/[^a-z0-9-_]+/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
@@ -693,17 +723,15 @@ function toPdfSafeText(value: string) {
   return value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim();
 }
 
-function registerPdfFonts(doc: PDFKit.PDFDocument) {
+function findPdfFont(): { filePath: string; buffer: Buffer } {
   const uniqueCandidates = Array.from(new Set(PDF_FONT_CANDIDATES));
   for (const candidate of uniqueCandidates) {
     if (!isPdfFontFilePath(candidate) || !fs.existsSync(candidate)) {
       continue;
     }
     try {
-      const fontBuffer = fs.readFileSync(candidate);
-      doc.registerFont(PDF_FONTS.body, fontBuffer);
-      doc.registerFont(PDF_FONTS.bold, fontBuffer);
-      return;
+      const buffer = fs.readFileSync(candidate);
+      return { filePath: candidate, buffer };
     } catch {
       // Try the next candidate.
     }
@@ -711,6 +739,11 @@ function registerPdfFonts(doc: PDFKit.PDFDocument) {
   throw new Error(
     'No usable PDF font file found. Set ROUND_TABLE_PDF_CJK_FONT to a valid .ttf/.otf font path.'
   );
+}
+
+function registerPdfFonts(doc: PDFKit.PDFDocument, fontBuffer: Buffer) {
+  doc.registerFont(PDF_FONTS.body, fontBuffer);
+  doc.registerFont(PDF_FONTS.bold, fontBuffer);
 }
 
 function isPdfFontFilePath(value: string) {

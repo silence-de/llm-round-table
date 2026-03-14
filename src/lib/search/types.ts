@@ -55,6 +55,7 @@ export interface ResearchSource {
   claimHint?: string;
   note?: string;
   verificationNotes?: string[];
+  /** Signals extracted from page text via keyword-sentence matching. Not semantically validated. Manual review required. */
   verifiedFields?: Array<{
     label: string;
     value: string;

@@ -54,6 +54,7 @@ export class DiscussionOrchestrator {
   }> = [];
   private lastAnalysis: ModeratorAnalysis | null = null;
   private interjectionContext: string[] = [];
+  private forceConvergeRequested = false;
   private stopState = { checkedAt: 0, value: false };
   private researchBrief: string | null = null;
   private researchSources: ResearchSource[] = [];
@@ -155,6 +156,16 @@ export class DiscussionOrchestrator {
       }
       yield* this.phaseAnalysis(round);
 
+      if (this.forceConvergeRequested) {
+        // User explicitly requested convergence — override LLM shouldConverge decision
+        yield {
+          type: 'system_note',
+          content: 'Convergence forced by user control.',
+          timestamp: Date.now(),
+        };
+        break;
+      }
+
       const hasNextRound = round + 1 < this.config.maxDebateRounds;
       if (!hasNextRound) {
         break;
@@ -222,6 +233,9 @@ export class DiscussionOrchestrator {
       : [];
 
     for (const interjection of queue) {
+      if (interjection.controlType === 'force_converge') {
+        this.forceConvergeRequested = true;
+      }
       const normalizedContent = formatControlInstruction(
         interjection.controlType,
         interjection.content

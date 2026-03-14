@@ -109,10 +109,11 @@ export function DecisionSummaryCard({
         </div>
         {browserVerificationCount > 0 && (
           <div className="rounded-xl border rt-border-soft p-2 text-[11px] rt-text-dim">
-            <p className="font-semibold rt-text-strong">Browser verification semantics</p>
+            <p className="font-semibold rt-text-strong">Browser capture</p>
             <p className="mt-1">
-              Browser verification means the page was captured and selected facts may have been
-              extracted. It does not mean every claim is fully verified.
+              Browser capture means the page was fetched and signals may have been extracted from
+              page text via keyword-sentence matching. It does not mean every claim is semantically
+              verified.
             </p>
             <p className="mt-1">
               Captured pages: {browserVerificationCount}. Manual review still required for{' '}

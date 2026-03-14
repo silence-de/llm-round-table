@@ -164,6 +164,21 @@ function summarizeActionStats(items: ActionItem[]): ActionStats {
   };
 }
 
+// ─── Filename helpers ─────────────────────────────────────────────────────────
+
+/** Convert a session topic into a safe filename segment.
+ *  Preserves Unicode (CJK) characters; strips only chars that are forbidden
+ *  in filenames on macOS / Windows / Linux. */
+function toFilenameSlug(topic: string, maxLength = 60): string {
+  return topic
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .trim()
+    .slice(0, maxLength)
+    .replace(/-$/g, '');
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function HomePage() {
@@ -977,7 +992,7 @@ export default function HomePage() {
   const handleExportLiveTranscript = useCallback(() => {
     const exportedTopic = brief.topic.trim() || 'Live discussion';
     downloadMarkdown(
-      `transcript-${sessionId ?? 'live'}.md`,
+      `${toFilenameSlug(exportedTopic)}-transcript.md`,
       buildTranscriptMarkdown({
         topic: exportedTopic,
         status: isRunning ? phase || 'running' : 'idle',
@@ -989,7 +1004,7 @@ export default function HomePage() {
   const handleExportLiveDecisionCard = useCallback(() => {
     if (!decisionSummary) return;
     downloadMarkdown(
-      `decision-${sessionId ?? 'current'}.md`,
+      `${toFilenameSlug(brief.topic.trim() || 'Live discussion')}-decision.md`,
       buildDecisionSummaryMarkdown({
         topic: brief.topic.trim() || 'Live discussion',
         status: isRunning ? phase || 'running' : 'completed',
@@ -1001,7 +1016,7 @@ export default function HomePage() {
   const handleExportLiveDossier = useCallback(() => {
     if (!decisionSummary) return;
     downloadMarkdown(
-      `dossier-${sessionId ?? 'current'}.md`,
+      `${toFilenameSlug(brief.topic.trim() || 'Live discussion')}-dossier.md`,
       buildDecisionDossierMarkdown({
         topic: brief.topic.trim() || 'Live discussion',
         status: isRunning ? phase || 'running' : 'completed',
@@ -1033,7 +1048,7 @@ export default function HomePage() {
   const handleExportLiveChecklist = useCallback(() => {
     if (actionItems.length === 0) return;
     downloadMarkdown(
-      `checklist-${sessionId ?? 'current'}.md`,
+      `${toFilenameSlug(brief.topic.trim() || 'Live discussion')}-checklist.md`,
       buildExecutionChecklistMarkdown({
         topic: brief.topic.trim() || 'Live discussion',
         status: isRunning ? phase || 'running' : 'completed',
@@ -1050,7 +1065,7 @@ export default function HomePage() {
   const handleExportHistoryTranscript = useCallback(() => {
     if (!historyDetail) return;
     downloadMarkdown(
-      `transcript-${historyDetail.session.id}.md`,
+      `${toFilenameSlug(historyDetail.session.topic)}-transcript.md`,
       buildTranscriptMarkdown({
         topic: historyDetail.session.topic,
         status: historyDetail.session.status,
@@ -1068,7 +1083,7 @@ export default function HomePage() {
   const handleExportHistoryDecisionCard = useCallback(() => {
     if (!historyDetail?.decisionSummary) return;
     downloadMarkdown(
-      `decision-${historyDetail.session.id}.md`,
+      `${toFilenameSlug(historyDetail.session.topic)}-decision.md`,
       buildDecisionSummaryMarkdown({
         topic: historyDetail.session.topic,
         status: historyDetail.session.decisionStatus,
@@ -1080,7 +1095,7 @@ export default function HomePage() {
   const handleExportHistoryDossier = useCallback(() => {
     if (!historyDetail?.decisionSummary) return;
     downloadMarkdown(
-      `dossier-${historyDetail.session.id}.md`,
+      `${toFilenameSlug(historyDetail.session.topic)}-dossier.md`,
       buildDecisionDossierMarkdown({
         topic: historyDetail.session.topic,
         status: historyDetail.session.decisionStatus,
@@ -1109,7 +1124,7 @@ export default function HomePage() {
   const handleExportHistoryChecklist = useCallback(() => {
     if (!historyDetail || historyDetail.actionItems.length === 0) return;
     downloadMarkdown(
-      `checklist-${historyDetail.session.id}.md`,
+      `${toFilenameSlug(historyDetail.session.topic)}-checklist.md`,
       buildExecutionChecklistMarkdown({
         topic: historyDetail.session.topic,
         status: historyDetail.session.decisionStatus,
@@ -2447,6 +2462,57 @@ export default function HomePage() {
                 </div>
               )}
 
+              {historyDetail && !loadingHistory && (
+                <div className="flex items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 shrink-0 text-xs"
+                    onClick={handleExportHistoryTranscript}
+                  >
+                    Export Transcript
+                  </Button>
+                  {historyDetail.decisionSummary && (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 shrink-0 text-xs"
+                        onClick={handleExportHistoryDecisionCard}
+                      >
+                        Export Decision
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 shrink-0 text-xs"
+                        onClick={handleExportHistoryDossier}
+                      >
+                        Export Dossier
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 shrink-0 text-xs"
+                        onClick={handleExportHistoryPdf}
+                      >
+                        Export PDF
+                      </Button>
+                    </>
+                  )}
+                  {historyDetail.actionItems.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 shrink-0 text-xs"
+                      onClick={handleExportHistoryChecklist}
+                    >
+                      Export Checklist
+                    </Button>
+                  )}
+                </div>
+              )}
+
               {/* Follow-latest button when auto-scroll is paused */}
               {ui.autoScroll === 'paused' && !historyDetail && (
                 <Button
@@ -2831,7 +2897,7 @@ export default function HomePage() {
                         className="h-7 text-xs"
                         onClick={() =>
                           downloadMarkdown(
-                            `minutes-${sessionId ?? 'current'}.md`,
+                            `${toFilenameSlug(brief.topic.trim() || 'Live discussion')}-minutes.md`,
                             currentSummary
                           )
                         }
@@ -3726,7 +3792,7 @@ export default function HomePage() {
                             className="h-6 px-2 text-xs"
                             onClick={() =>
                               downloadMarkdown(
-                                `minutes-${historyDetail.session.id}.md`,
+                                `${toFilenameSlug(historyDetail.session.topic)}-minutes.md`,
                                 historyDetail.minutes?.content ?? ''
                               )
                             }

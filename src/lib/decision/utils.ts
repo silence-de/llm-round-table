@@ -238,6 +238,9 @@ export function normalizePersistedDecisionSummary(
     evidence,
     rawConfidence: confidenceMeta.rawConfidence,
     confidence: confidenceMeta.adjustedConfidence,
+    // Preserve persisted frozen values so they are not discarded during normalization
+    adjustedConfidence: value.adjustedConfidence,
+    confidenceFrozenAt: value.confidenceFrozenAt,
   }, brief);
 }
 

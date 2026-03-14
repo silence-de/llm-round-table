@@ -21,7 +21,9 @@ export async function GET(
       status: 200,
       headers: {
         'Content-Type': artifact.contentType,
-        'Content-Disposition': `attachment; filename="${artifact.fileName}"`,
+        // RFC 5987: filename* supports UTF-8 encoded filenames (e.g. Chinese topics).
+        // The plain filename= ASCII fallback keeps older clients happy.
+        'Content-Disposition': `attachment; filename="decision-dossier.pdf"; filename*=UTF-8''${encodeURIComponent(artifact.fileName)}`,
         'Cache-Control': 'no-store',
       },
     });

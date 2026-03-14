@@ -35,7 +35,7 @@ export async function verifyWebPageSource(input: {
   if (playwrightExtraction) {
     finalUrl = playwrightExtraction.url;
     title = cleanupText(playwrightExtraction.title) || finalUrl;
-    bodyText = cleanupText(playwrightExtraction.bodyText);
+    bodyText = playwrightExtraction.bodyText;
     snippet = bodyText.slice(0, 360) || 'No readable excerpt captured.';
     extractionQuality = bodyText.length >= 180 ? 'high' : 'medium';
   } else {
@@ -63,6 +63,7 @@ export async function verifyWebPageSource(input: {
     sessionId: input.sessionId,
     url: finalUrl,
     capturedAt,
+    screenshotBuffer: playwrightExtraction?.screenshotBuffer,
   });
   const snapshotPath =
     screenshotPath ??
@@ -103,7 +104,7 @@ export async function verifyWebPageSource(input: {
     pinned: true,
     rank: 1,
     excludedReason: '',
-    stale: false,
+    stale: false, // TODO: apply isStale() based on page publishedDate once extraction supports it
     qualityFlags: [
       'browser_capture',
       profile ? `profile:${profile.id}` : 'profile:generic',
@@ -130,6 +131,21 @@ function normalizeVerificationUrl(value: string) {
   const parsed = new URL(candidate);
   if (!['http:', 'https:'].includes(parsed.protocol)) {
     throw new Error('verification url must use http or https');
+  }
+  // SSRF protection: reject loopback, private, link-local, and cloud metadata addresses
+  const hostname = parsed.hostname.toLowerCase();
+  const isPrivate =
+    hostname === 'localhost' ||
+    hostname === 'metadata.google.internal' ||
+    /^127\./.test(hostname) ||
+    /^10\./.test(hostname) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) ||
+    /^192\.168\./.test(hostname) ||
+    /^169\.254\./.test(hostname) ||
+    hostname === '::1' ||
+    /^fe80:/i.test(hostname);
+  if (isPrivate) {
+    throw new Error('verification url points to a private or restricted address');
   }
   return parsed.toString();
 }
@@ -343,6 +359,7 @@ async function capturePageScreenshot(input: {
   sessionId: string;
   url: string;
   capturedAt: number;
+  screenshotBuffer?: Buffer | null;
 }) {
   if (
     process.env.NODE_ENV === 'test' ||
@@ -361,6 +378,10 @@ async function capturePageScreenshot(input: {
       snapshotDir,
       `${input.sessionId}-${input.capturedAt}-${nanoid(6)}.png`
     );
+    if (input.screenshotBuffer) {
+      fs.writeFileSync(filePath, input.screenshotBuffer);
+      return filePath;
+    }
     await execFileAsync(
       'npx',
       ['-y', 'playwright', 'screenshot', '--device=Desktop Chrome', input.url, filePath],
@@ -403,6 +424,7 @@ async function extractPlaywrightBodyText(url: string): Promise<{
   title: string;
   bodyText: string;
   url: string;
+  screenshotBuffer: Buffer | null;
 } | null> {
   if (
     process.env.NODE_ENV === 'test' ||
@@ -420,9 +442,14 @@ async function extractPlaywrightBodyText(url: string): Promise<{
               target: string,
               options: { waitUntil: 'domcontentloaded'; timeout: number }
             ) => Promise<void>;
+            waitForLoadState: (
+              state: string,
+              options: { timeout: number }
+            ) => Promise<void>;
             title: () => Promise<string>;
             evaluate: (pageFn: () => string) => Promise<string>;
             url: () => string;
+            screenshot: (options: { type: 'png' }) => Promise<Buffer>;
           }>;
           close: () => Promise<void>;
         }>;
@@ -433,16 +460,29 @@ async function extractPlaywrightBodyText(url: string): Promise<{
       const page = await browser.newPage({
         userAgent: USER_AGENT,
       });
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 10_000 });
-      const [title, bodyText, finalUrl] = await Promise.all([
-        page.title(),
-        page.evaluate(() => document.body?.innerText ?? ''),
-        page.url(),
-      ]);
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 12_000 });
+      let bodyText = cleanupText(await page.evaluate(() => document.body?.innerText ?? ''));
+      if (bodyText.length < 200) {
+        try {
+          await page.waitForLoadState('networkidle', { timeout: 8_000 });
+          bodyText = cleanupText(await page.evaluate(() => document.body?.innerText ?? ''));
+        } catch {
+          // networkidle timed out — keep whatever we already have
+        }
+      }
+      const title = await page.title();
+      const finalUrl = page.url();
+      let screenshotBuffer: Buffer | null = null;
+      try {
+        screenshotBuffer = await page.screenshot({ type: 'png' });
+      } catch {
+        // screenshot failed, continue without it
+      }
       return {
         title,
         bodyText,
         url: finalUrl || url,
+        screenshotBuffer,
       };
     } finally {
       await browser.close();

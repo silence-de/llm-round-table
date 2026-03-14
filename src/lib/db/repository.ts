@@ -255,8 +255,21 @@ export async function upsertDecisionSummary(
   summary: DecisionSummary
 ) {
   const now = new Date();
-  const serialized = JSON.stringify(summary);
-  const analytics = buildDecisionSummaryAnalytics(summary);
+  // Compute and freeze adjustedConfidence at write time so the stored value
+  // does not drift as research sources change after the session completes.
+  const researchRun = await getSessionResearch(sessionId);
+  const confidenceMeta = buildDecisionConfidenceMeta(
+    summary.rawConfidence ?? summary.confidence,
+    summary.evidence ?? [],
+    researchRun?.sources ?? []
+  );
+  const enrichedSummary: DecisionSummary = {
+    ...summary,
+    adjustedConfidence: confidenceMeta.adjustedConfidence,
+    confidenceFrozenAt: Date.now(),
+  };
+  const serialized = JSON.stringify(enrichedSummary);
+  const analytics = buildDecisionSummaryAnalytics(enrichedSummary);
   const existing = await db
     .select({ sessionId: decisionSummaries.sessionId })
     .from(decisionSummaries)
@@ -276,8 +289,8 @@ export async function upsertDecisionSummary(
         updatedAt: now,
       })
       .where(eq(decisionSummaries.sessionId, sessionId));
-    await syncGeneratedActionItems(sessionId, summary.nextActions);
-    await replaceDecisionClaims(sessionId, summary.evidence);
+    await syncGeneratedActionItems(sessionId, enrichedSummary.nextActions);
+    await replaceDecisionClaims(sessionId, enrichedSummary.evidence);
     return;
   }
 
@@ -293,8 +306,8 @@ export async function upsertDecisionSummary(
     updatedAt: now,
   });
 
-  await syncGeneratedActionItems(sessionId, summary.nextActions);
-  await replaceDecisionClaims(sessionId, summary.evidence);
+  await syncGeneratedActionItems(sessionId, enrichedSummary.nextActions);
+  await replaceDecisionClaims(sessionId, enrichedSummary.evidence);
 }
 
 export async function upsertResearchRun(
@@ -719,10 +732,24 @@ export async function getSessionDetail(sessionId: string) {
     : null;
   const confidenceMeta =
     baseDecisionSummary
-      ? buildDecisionConfidenceMeta(
-          baseDecisionSummary.rawConfidence ?? baseDecisionSummary.confidence,
-          baseDecisionSummary.evidence,
-          researchRun?.sources ?? []
+      ? (baseDecisionSummary.adjustedConfidence !== undefined
+          ? {
+              // Use persisted value — don't recompute to avoid drift over time
+              rawConfidence: baseDecisionSummary.rawConfidence ?? baseDecisionSummary.confidence,
+              adjustedConfidence: baseDecisionSummary.adjustedConfidence,
+              totalPenalty: Math.max(0, (baseDecisionSummary.rawConfidence ?? baseDecisionSummary.confidence) - baseDecisionSummary.adjustedConfidence),
+              adjustments: [],
+              evidenceBackedClaims: baseDecisionSummary.evidence.filter(e => e.sourceIds.length > 0).length,
+              unsupportedClaims: baseDecisionSummary.evidence.filter(e => e.sourceIds.length === 0).length,
+              citedSources: 0,
+              citedDomains: 0,
+              staleSources: 0,
+            }
+          : buildDecisionConfidenceMeta(
+              baseDecisionSummary.rawConfidence ?? baseDecisionSummary.confidence,
+              baseDecisionSummary.evidence,
+              researchRun?.sources ?? []
+            )
         )
       : null;
   const calibrationContext = await getSessionCalibrationContext(

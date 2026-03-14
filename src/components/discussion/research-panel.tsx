@@ -162,7 +162,7 @@ export function ResearchPanel({
                 <Input
                   value={verifyUrl}
                   onChange={(event) => setVerifyUrl(event.target.value)}
-                  placeholder="Paste a URL to verify live"
+                  placeholder="Paste a URL to capture"
                   className="rt-input h-9 text-xs"
                 />
               </div>
@@ -190,7 +190,7 @@ export function ResearchPanel({
                     setVerificationNote('');
                   }}
                 >
-                  Verify
+                  Capture
                 </Button>
               </div>
               <Textarea
@@ -206,7 +206,7 @@ export function ResearchPanel({
               {verificationProfileId && (
                 <div className="mt-2 rounded-lg border rt-border-soft p-2">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
-                    Verification expectations
+                    Extraction targets
                   </p>
                   <div className="mt-1 flex flex-wrap gap-1">
                     {lookupProfile(verificationProfileId)?.extractionTargets.map((item) => (
@@ -399,7 +399,7 @@ export function ResearchPanel({
                               rel="noopener noreferrer"
                               className="shrink-0 rt-text-muted hover:rt-text-strong"
                               onClick={(event) => event.stopPropagation()}
-                              title="Open verification snapshot"
+                              title="Browser-captured — manual review recommended"
                             >
                               <Globe className="h-3.5 w-3.5" />
                             </a>
@@ -530,7 +530,10 @@ export function ResearchPanel({
                       {source.verifiedFields?.length ? (
                         <div className="mt-2 rounded-lg border rt-border-soft p-2">
                           <p className="text-[10px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
-                            Extracted signals (manual review)
+                            Extracted signals
+                          </p>
+                          <p className="mt-0.5 text-[10px] rt-text-dim">
+                            Extracted from page text — not semantically validated. Manual review recommended.
                           </p>
                           <div className="mt-1 space-y-1.5">
                             {source.verifiedFields.map((field, index) => (
@@ -543,7 +546,11 @@ export function ResearchPanel({
                                     {field.label}
                                   </p>
                                   <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
-                                    {field.confidence}
+                                    {field.confidence === 'high'
+                                      ? 'strong signal'
+                                      : field.confidence === 'medium'
+                                        ? 'signal'
+                                        : 'weak signal'}
                                   </span>
                                 </div>
                                 <p className="mt-1 text-[11px] leading-relaxed rt-text-dim">

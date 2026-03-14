@@ -76,9 +76,18 @@ export function useSessionHistory({
     [activeHistoryId, onError, refreshSessions]
   );
 
+  // Keep a ref to onError so the fetch effect doesn't need it as a dependency.
+  // This prevents a new onError function reference (created by the parent on every
+  // render) from re-triggering the effect and causing an infinite update loop.
+  const onErrorRef = useRef(onError);
+  useEffect(() => {
+    onErrorRef.current = onError;
+  });
+
   useEffect(() => {
     if (compareSessionIds.length === 0) {
-      setCompareDetails([]);
+      // Use functional updater: if already empty, React bails out (no re-render).
+      setCompareDetails((prev) => (prev.length === 0 ? prev : []));
       return;
     }
 
@@ -99,14 +108,14 @@ export function useSessionHistory({
       })
       .catch((error) => {
         if (!cancelled) {
-          onError(error instanceof Error ? error.message : String(error));
+          onErrorRef.current(error instanceof Error ? error.message : String(error));
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [compareSessionIds, onError]);
+  }, [compareSessionIds]);
 
   return {
     sessions,
