@@ -15,6 +15,7 @@ import {
   findResearchSourceByCitation,
   getResearchSourceCitationLabel,
 } from '../search/utils';
+import { validateDecisionSummary } from './validators';
 
 const ACTION_ITEM_TRANSITIONS: Record<ActionItemStatus, ActionItemStatus[]> = {
   pending: ['pending', 'in_progress'],
@@ -175,7 +176,7 @@ export function parseDecisionSummary(
       evidence,
       researchSources
     );
-    return ensureDecisionDossierMinimums(
+    const decisionSummary = ensureDecisionDossierMinimums(
       {
       summary: parsed.summary?.trim() || fallbackSummary || '未能生成结构化总结。',
       recommendedOption: parsed.recommendedOption?.trim() || '暂无明确建议',
@@ -192,8 +193,15 @@ export function parseDecisionSummary(
     },
       brief
     );
+    const validationResult = validateDecisionSummary(decisionSummary, brief ?? {
+      topic: '', goal: '', background: '', constraints: '',
+      timeHorizon: '', nonNegotiables: '', acceptableDownside: '',
+      reviewAt: '', decisionType: 'general', desiredOutput: 'recommendation',
+    }, 0);
+    decisionSummary.trustViolations = validationResult.violations;
+    return decisionSummary;
   } catch {
-    return ensureDecisionDossierMinimums(
+    const decisionSummary = ensureDecisionDossierMinimums(
       {
       summary: fallbackSummary || content.slice(0, 500) || '未能生成结构化总结。',
       recommendedOption: '暂无明确建议',
@@ -210,6 +218,13 @@ export function parseDecisionSummary(
     },
       brief
     );
+    const validationResult = validateDecisionSummary(decisionSummary, brief ?? {
+      topic: '', goal: '', background: '', constraints: '',
+      timeHorizon: '', nonNegotiables: '', acceptableDownside: '',
+      reviewAt: '', decisionType: 'general', desiredOutput: 'recommendation',
+    }, 0);
+    decisionSummary.trustViolations = validationResult.violations;
+    return decisionSummary;
   }
 }
 

@@ -96,6 +96,7 @@ export interface DecisionSummary {
   evidence: DecisionSummaryEvidence[];
   adjustedConfidence?: number;      // persisted adjusted confidence (after penalty deductions)
   confidenceFrozenAt?: number;      // timestamp when adjustedConfidence was last computed and frozen
+  trustViolations?: TrustViolation[];
 }
 
 export interface ActionItem {
@@ -153,4 +154,17 @@ export interface DecisionTemplate {
   focalQuestions: string;
   requiredDimensions: string;
   analysisChecklist: string[];
+}
+
+export interface TrustViolation {
+  field: string;
+  rule: string;
+  severity: 'error' | 'warning';
+  message: string;
+}
+
+export interface TrustValidationResult {
+  valid: boolean;
+  violations: TrustViolation[];
+  score: number;  // 0-100, 用于内部评估，不对用户展示
 }

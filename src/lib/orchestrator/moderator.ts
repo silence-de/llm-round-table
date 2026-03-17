@@ -9,7 +9,8 @@ import {
   DECISION_TEMPLATES,
   PERSONAL_DECISION_CHECKLIST,
 } from '../decision/templates';
-import type { AgentResponse, ModeratorAnalysis } from './types';
+import type { AgentResponse, ModeratorAnalysis, StructuredAgentReply, StructuredAgentKeyPoint, TaskLedger } from './types';
+import { ledgerToPromptBlock } from './task-ledger';
 
 export function buildOpeningPrompt(
   brief: DecisionBrief,
@@ -55,10 +56,12 @@ ${buildDecisionContextBlock(brief, agenda, researchBrief)}
           .join('\n')}`
       : '';
 
+  const structuredInstruction = `\n\n---\n在你的自然语言回复结束后，请另起一行输出 "---STRUCTURED---"，然后输出以下 JSON（不要用代码块包裹）：\n{\n  "stance": "support | oppose | mixed | unsure 选其一",\n  "keyPoints": [\n    { "claim": "核心观点", "reasoning": "支撑理由", "evidenceCited": ["R1"], "confidenceBand": "high | medium | low" }\n  ],\n  "caveats": ["需要注意的限制或前提"],\n  "questionsForOthers": ["想向其他参与者提出的问题"],\n  "narrative": "与自然语言回复相同的内容"\n}`;
+
   if (persona) {
-    return `${base}\n\n你的角色设定：${persona}${interjectionText}`;
+    return `${base}\n\n你的角色设定：${persona}${interjectionText}${structuredInstruction}`;
   }
-  return `${base}${interjectionText}`;
+  return `${base}${interjectionText}${structuredInstruction}`;
 }
 
 export function buildAnalysisPrompt(
@@ -66,7 +69,8 @@ export function buildAnalysisPrompt(
   agenda: DiscussionAgenda,
   responses: AgentResponse[],
   interjections?: string[],
-  parentContext?: string
+  parentContext?: string,
+  ledger?: TaskLedger
 ): string {
   const responsesText = responses
     .map((r) => `### ${r.displayName}\n${r.content}`)
@@ -80,11 +84,15 @@ export function buildAnalysisPrompt(
           .join('\n')}\n`
       : '';
 
+  const ledgerBlock = ledger
+    ? `\n当前决策进展（TaskLedger）：\n${ledgerToPromptBlock(ledger)}\n`
+    : '';
+
   return `你是圆桌讨论的主持人。
 ${buildDecisionContextBlock(brief, agenda, undefined, parentContext)}
-${interjectionText}
+${interjectionText}${ledgerBlock}
 
-各参与者的观点如下：
+本轮各参与者的观点如下：
 
 ${responsesText}
 
@@ -121,7 +129,8 @@ export function buildDebatePrompt(
   previousContent: string,
   disagreement: string,
   followUpQuestion: string,
-  interjections?: string[]
+  interjections?: string[],
+  ledger?: TaskLedger
 ): string {
   const interjectionText =
     interjections && interjections.length > 0
@@ -131,9 +140,13 @@ export function buildDebatePrompt(
           .join('\n')}\n`
       : '';
 
+  const ledgerBlock = ledger
+    ? `\n当前决策进展（TaskLedger）：\n${ledgerToPromptBlock(ledger)}\n`
+    : '';
+
   return `继续圆桌讨论。
 ${buildDecisionContextBlock(brief, agenda)}
-${interjectionText}
+${interjectionText}${ledgerBlock}
 
 你此前的观点：
 ${previousContent}
@@ -320,6 +333,52 @@ export function parseDecisionSummaryContent(
   brief?: DecisionBrief
 ): DecisionSummary {
   return parseDecisionSummary(content, fallbackSummary, researchSources, brief);
+}
+
+export function parseStructuredAgentReply(content: string): {
+  narrative: string;
+  structured?: StructuredAgentReply;
+} {
+  const separator = '---STRUCTURED---';
+  const idx = content.indexOf(separator);
+  if (idx === -1) {
+    return { narrative: content };
+  }
+  const narrative = content.slice(0, idx).trim();
+  const jsonPart = content.slice(idx + separator.length).trim();
+  try {
+    const parsed = JSON.parse(jsonPart) as Partial<StructuredAgentReply>;
+    const validStances = ['support', 'oppose', 'mixed', 'unsure'] as const;
+    const validBands = ['high', 'medium', 'low'] as const;
+    if (
+      !parsed.stance ||
+      !validStances.includes(parsed.stance as typeof validStances[number])
+    ) {
+      return { narrative };
+    }
+    const structured: StructuredAgentReply = {
+      stance: parsed.stance as StructuredAgentReply['stance'],
+      keyPoints: Array.isArray(parsed.keyPoints)
+        ? parsed.keyPoints.filter(
+            (kp): kp is StructuredAgentKeyPoint =>
+              typeof kp?.claim === 'string' &&
+              typeof kp?.reasoning === 'string' &&
+              Array.isArray(kp?.evidenceCited) &&
+              validBands.includes(kp?.confidenceBand as typeof validBands[number])
+          )
+        : [],
+      caveats: Array.isArray(parsed.caveats)
+        ? parsed.caveats.filter((c): c is string => typeof c === 'string')
+        : [],
+      questionsForOthers: Array.isArray(parsed.questionsForOthers)
+        ? parsed.questionsForOthers.filter((q): q is string => typeof q === 'string')
+        : [],
+      narrative: typeof parsed.narrative === 'string' ? parsed.narrative : narrative,
+    };
+    return { narrative, structured };
+  } catch {
+    return { narrative };
+  }
 }
 
 function buildDecisionContextBlock(

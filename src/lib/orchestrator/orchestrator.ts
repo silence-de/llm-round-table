@@ -7,6 +7,8 @@ import type {
   PersistableMessage,
 } from './types';
 import { DiscussionPhase } from './types';
+import { initTaskLedger, updateLedgerFromAnalysis } from './task-ledger';
+import type { TaskLedger } from './types';
 import { getProvider } from '../llm/provider-registry';
 import { getModelId } from '../agents/registry';
 import type { ProviderType, SessionAgent } from '../agents/types';
@@ -21,10 +23,12 @@ import {
   buildSummaryPrompt,
   parseDecisionSummaryContent,
   parseAnalysis,
+  parseStructuredAgentReply,
 } from './moderator';
 import { conductResearch } from '../search/research';
 import type { ResearchRunStatus, ResearchSource } from '../search/types';
 import { formatControlInstruction } from '../decision/utils';
+import { buildEvaluatorPrompt, parseEvaluation } from '../decision/evaluator';
 import { attachCitationLabels } from '../search/utils';
 
 interface StreamTimeoutConfig {
@@ -64,10 +68,12 @@ export class DiscussionOrchestrator {
     1,
     Number(process.env.ROUND_TABLE_AGENT_DEGRADE_TIMEOUT_THRESHOLD ?? 2)
   );
+  private taskLedger!: TaskLedger;
 
   constructor(config: DiscussionConfig) {
     this.config = config;
     this.seedResumeState(config.resumeState);
+    this.taskLedger = initTaskLedger(config.brief, config.agenda);
   }
 
   async *run(): AsyncIterable<SSEEvent> {
@@ -293,7 +299,7 @@ export class DiscussionOrchestrator {
   }
 
   private async persistSessionEvent(event: {
-    type: 'timeout' | 'agent_degraded' | 'provider_error';
+    type: 'timeout' | 'agent_degraded' | 'provider_error' | 'summary_evaluation' | 'phase_started' | 'phase_completed' | 'phase_failed';
     provider?: string;
     modelId?: string;
     phase?: string;
@@ -304,6 +310,30 @@ export class DiscussionOrchestrator {
   }) {
     if (!this.config.onSessionEventPersist) return;
     await this.config.onSessionEventPersist(event);
+  }
+
+  private async emitPhaseEvent(
+    type: 'phase_started' | 'phase_completed' | 'phase_failed',
+    phase: string,
+    extra?: {
+      round?: number;
+      durationMs?: number;
+      agentCount?: number;
+      degradedCount?: number;
+      errorMessage?: string;
+    }
+  ) {
+    await this.persistSessionEvent({
+      type,
+      phase,
+      message: extra?.errorMessage ?? '',
+      metadata: {
+        ...(extra?.round !== undefined && { round: extra.round }),
+        ...(extra?.durationMs !== undefined && { durationMs: extra.durationMs }),
+        ...(extra?.agentCount !== undefined && { agentCount: extra.agentCount }),
+        ...(extra?.degradedCount !== undefined && { degradedCount: extra.degradedCount }),
+      },
+    });
   }
 
   private getActiveParticipants() {
@@ -529,6 +559,8 @@ export class DiscussionOrchestrator {
       phase: DiscussionPhase.RESEARCH,
       timestamp: Date.now(),
     };
+    const _phaseStartTime = Date.now();
+    await this.emitPhaseEvent('phase_started', DiscussionPhase.RESEARCH);
     yield { type: 'research_start', timestamp: Date.now() };
 
     try {
@@ -584,9 +616,15 @@ export class DiscussionOrchestrator {
           content: result.evaluation?.gaps.join('\n') || 'Research failed.',
           timestamp: Date.now(),
         };
+        await this.emitPhaseEvent('phase_completed', DiscussionPhase.RESEARCH, {
+          durationMs: Date.now() - _phaseStartTime,
+        });
         return;
       }
 
+      await this.emitPhaseEvent('phase_completed', DiscussionPhase.RESEARCH, {
+        durationMs: Date.now() - _phaseStartTime,
+      });
       yield {
         type: 'research_complete',
         content: result.summary,
@@ -609,6 +647,10 @@ export class DiscussionOrchestrator {
           staleFlags: ['no_sources'],
         },
       });
+      await this.emitPhaseEvent('phase_failed', DiscussionPhase.RESEARCH, {
+        durationMs: Date.now() - _phaseStartTime,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
       yield {
         type: 'research_failed',
         content: err instanceof Error ? err.message : String(err),
@@ -623,6 +665,8 @@ export class DiscussionOrchestrator {
       phase: DiscussionPhase.OPENING,
       timestamp: Date.now(),
     };
+    const _phaseStartTime = Date.now();
+    await this.emitPhaseEvent('phase_started', DiscussionPhase.OPENING);
 
     const moderator = this.config.agents.find(
       (a) => a.definition.id === this.config.moderatorAgentId
@@ -709,6 +753,9 @@ export class DiscussionOrchestrator {
       phase: DiscussionPhase.OPENING,
     });
     await this.persistUsage({ outputTokens: this.estimateTokens(fullContent) });
+    await this.emitPhaseEvent('phase_completed', DiscussionPhase.OPENING, {
+      durationMs: Date.now() - _phaseStartTime,
+    });
   }
 
   private async *phaseInitialResponses(): AsyncIterable<SSEEvent> {
@@ -717,6 +764,8 @@ export class DiscussionOrchestrator {
       phase: DiscussionPhase.INITIAL_RESPONSES,
       timestamp: Date.now(),
     };
+    const _phaseStartTime = Date.now();
+    await this.emitPhaseEvent('phase_started', DiscussionPhase.INITIAL_RESPONSES);
 
     const participants = this.getActiveParticipants();
     if (participants.length === 0) {
@@ -791,28 +840,37 @@ export class DiscussionOrchestrator {
     }
 
     for (const agent of participants) {
-      const content = contentCollectors.get(agent.definition.id) ?? '';
+      const fullContent = contentCollectors.get(agent.definition.id) ?? '';
+      const { narrative, structured } = parseStructuredAgentReply(fullContent);
       const response: AgentResponse = {
         agentId: agent.definition.id,
         displayName: agent.definition.displayName,
-        content,
+        content: narrative,  // 使用 narrative 作为 content（不含 JSON 部分）
+        structured,
       };
       this.agentResponses.set(agent.definition.id, response);
       this.allMessages.push({
-        ...response,
+        agentId: agent.definition.id,
+        displayName: agent.definition.displayName,
+        content: narrative,
         phase: DiscussionPhase.INITIAL_RESPONSES,
       });
       await this.persistMessage({
         role: 'agent',
         agentId: agent.definition.id,
         displayName: agent.definition.displayName,
-        content,
+        content: narrative,
         phase: DiscussionPhase.INITIAL_RESPONSES,
       });
-      if (content) {
-        await this.persistUsage({ outputTokens: this.estimateTokens(content) });
+      if (narrative) {
+        await this.persistUsage({ outputTokens: this.estimateTokens(narrative) });
       }
     }
+    await this.emitPhaseEvent('phase_completed', DiscussionPhase.INITIAL_RESPONSES, {
+      durationMs: Date.now() - _phaseStartTime,
+      agentCount: this.getActiveParticipants().length,
+      degradedCount: this.degradedAgentIds.size,
+    });
   }
 
   private async *phaseAnalysis(round: number): AsyncIterable<SSEEvent> {
@@ -822,6 +880,8 @@ export class DiscussionOrchestrator {
       round,
       timestamp: Date.now(),
     };
+    const _phaseStartTime = Date.now();
+    await this.emitPhaseEvent('phase_started', DiscussionPhase.ANALYSIS, { round });
 
     const moderator = this.config.agents.find(
       (a) => a.definition.id === this.config.moderatorAgentId
@@ -840,12 +900,22 @@ export class DiscussionOrchestrator {
     const modelId = getModelId(moderator.definition, moderator.selectedModelId);
     const responses = Array.from(this.agentResponses.values());
 
+    const responsesForPrompt = responses.map((r) => {
+      if (!r.structured) return r;
+      const kpSummary = r.structured.keyPoints
+        .map((kp) => `${kp.claim}（置信度：${kp.confidenceBand}${kp.evidenceCited.length > 0 ? '，引用：' + kp.evidenceCited.join('/') : ''}）`)
+        .join('；');
+      const enhancedContent = `${r.content}\n[结构化摘要] 立场：${r.structured.stance}${kpSummary ? '，核心观点：' + kpSummary : ''}${r.structured.caveats.length > 0 ? '，注意事项：' + r.structured.caveats.join('；') : ''}`;
+      return { ...r, content: enhancedContent };
+    });
+
     const prompt = buildAnalysisPrompt(
       this.config.brief,
       this.config.agenda,
-      responses,
+      responsesForPrompt,
       this.interjectionContext,
-      this.config.parentContext
+      this.config.parentContext,
+      this.taskLedger
     );
     if (await this.shouldStop()) {
       return;
@@ -883,6 +953,11 @@ export class DiscussionOrchestrator {
         timeoutType: 'request',
         message: error instanceof Error ? error.message : String(error),
       });
+      await this.emitPhaseEvent('phase_failed', DiscussionPhase.ANALYSIS, {
+        round,
+        durationMs: Date.now() - _phaseStartTime,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
       analysis = {
         agreements: [],
         disagreements: [],
@@ -898,6 +973,7 @@ export class DiscussionOrchestrator {
     }
 
     this.lastAnalysis = analysis;
+    this.taskLedger = updateLedgerFromAnalysis(this.taskLedger, analysis, round);
 
     // Stream the narrative to the client
     for (const char of analysis.moderatorNarrative) {
@@ -925,6 +1001,10 @@ export class DiscussionOrchestrator {
       phase: DiscussionPhase.ANALYSIS,
       round,
     });
+    await this.emitPhaseEvent('phase_completed', DiscussionPhase.ANALYSIS, {
+      round,
+      durationMs: Date.now() - _phaseStartTime,
+    });
   }
 
   private async *phaseDebate(round: number): AsyncIterable<SSEEvent> {
@@ -936,6 +1016,8 @@ export class DiscussionOrchestrator {
       round,
       timestamp: Date.now(),
     };
+    const _phaseStartTime = Date.now();
+    await this.emitPhaseEvent('phase_started', DiscussionPhase.DEBATE, { round });
 
     const participants = this.getActiveParticipants();
     if (participants.length === 0) {
@@ -975,7 +1057,8 @@ export class DiscussionOrchestrator {
                   previousResponse?.content ?? '',
                   disagreement.point,
                   disagreement.followUpQuestion,
-                  this.interjectionContext
+                  this.interjectionContext,
+                  this.taskLedger
                 ),
               },
             ],
@@ -1031,6 +1114,10 @@ export class DiscussionOrchestrator {
         }
       }
     }
+    await this.emitPhaseEvent('phase_completed', DiscussionPhase.DEBATE, {
+      round,
+      durationMs: Date.now() - _phaseStartTime,
+    });
   }
 
   private async *phaseSummary(): AsyncIterable<SSEEvent> {
@@ -1039,6 +1126,8 @@ export class DiscussionOrchestrator {
       phase: DiscussionPhase.SUMMARY,
       timestamp: Date.now(),
     };
+    const _phaseStartTime = Date.now();
+    await this.emitPhaseEvent('phase_started', DiscussionPhase.SUMMARY);
 
     const moderator = this.config.agents.find(
       (a) => a.definition.id === this.config.moderatorAgentId
@@ -1124,6 +1213,9 @@ export class DiscussionOrchestrator {
     if (this.config.onSummaryPersist) {
       await this.config.onSummaryPersist(fullContent);
     }
+    await this.emitPhaseEvent('phase_completed', DiscussionPhase.SUMMARY, {
+      durationMs: Date.now() - _phaseStartTime,
+    });
   }
 
   private async generateDecisionSummary() {
@@ -1166,9 +1258,63 @@ export class DiscussionOrchestrator {
         outputTokens: result.usage?.outputTokens ?? this.estimateTokens(result.content),
       });
 
+      // --- Evaluator Gate ---
+      let finalContent = result.content;
+      try {
+        const evalPrompt = buildEvaluatorPrompt(
+          this.config.brief,
+          this.config.agenda,
+          parseDecisionSummaryContent(result.content, minutes, this.researchSources, this.config.brief)
+        );
+        const evalResult = await provider.chat({
+          model: modelId,
+          messages: [{ role: 'user', content: evalPrompt }],
+          temperature: 0.1,
+          maxTokens: 600,
+          timeoutMs,
+        });
+        const evaluation = parseEvaluation(evalResult.content);
+
+        // Persist evaluation as session event
+        await this.persistSessionEvent({
+          type: 'summary_evaluation',
+          phase: DiscussionPhase.SUMMARY,
+          message: evaluation.overallNote,
+          metadata: {
+            pass: evaluation.pass,
+            checks: evaluation.checks,
+          },
+        });
+
+        // If failed, retry once with feedback
+        if (!evaluation.pass) {
+          const failedChecks = evaluation.checks
+            .filter((c) => !c.pass)
+            .map((c) => `- ${c.name}: ${c.reason}`)
+            .join('\n');
+          const retryFeedback = `以下评审项未通过，请修正后重新生成决策摘要：\n${failedChecks}`;
+          const retryPromptWithFeedback = prompt + `\n\n【评审反馈，必须修正】\n${retryFeedback}`;
+          const retryResult = await provider.chat({
+            model: modelId,
+            messages: [{ role: 'user', content: retryPromptWithFeedback }],
+            temperature: 0.2,
+            maxTokens: 1800,
+            timeoutMs,
+          });
+          await this.persistUsage({
+            inputTokens: this.estimateTokens(retryPromptWithFeedback),
+            outputTokens: this.estimateTokens(retryResult.content),
+          });
+          finalContent = retryResult.content;
+        }
+      } catch {
+        // Evaluator failure is non-fatal; continue with original content
+      }
+      // --- End Evaluator Gate ---
+
       await this.config.onDecisionSummaryPersist(
         parseDecisionSummaryContent(
-          result.content,
+          finalContent,
           minutes,
           this.researchSources,
           this.config.brief

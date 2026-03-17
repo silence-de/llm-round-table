@@ -61,10 +61,26 @@ export interface DiscussionConfig {
   ) => Promise<void> | void;
 }
 
+export interface StructuredAgentKeyPoint {
+  claim: string;
+  reasoning: string;
+  evidenceCited: string[];  // citation labels like "R1", "R2"
+  confidenceBand: 'high' | 'medium' | 'low';
+}
+
+export interface StructuredAgentReply {
+  stance: 'support' | 'oppose' | 'mixed' | 'unsure';
+  keyPoints: StructuredAgentKeyPoint[];
+  caveats: string[];
+  questionsForOthers: string[];
+  narrative: string;  // 自然语言版本，给 UI 展示
+}
+
 export interface AgentResponse {
   agentId: string;
   displayName: string;
-  content: string;
+  content: string;  // 保留原始文本，向后兼容
+  structured?: StructuredAgentReply;  // 新增
 }
 
 export interface ModeratorAnalysis {
@@ -142,7 +158,11 @@ export interface DiscussionSessionEvent {
     | 'resume_preview'
     | 'resume_started'
     | 'browser_verification'
-    | 'provider_error';
+    | 'provider_error'
+    | 'summary_evaluation'
+    | 'phase_started'
+    | 'phase_completed'
+    | 'phase_failed';
   provider?: string;
   modelId?: string;
   phase?: string;
@@ -150,4 +170,25 @@ export interface DiscussionSessionEvent {
   timeoutType?: 'startup' | 'idle' | 'request';
   message?: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface TaskLedger {
+  /** brief 的标准化单段摘要 */
+  briefSummary: string;
+  /** 不可妥协项，从 brief.nonNegotiables 提取 */
+  nonNegotiables: string[];
+  /** 已达成共识的 claim */
+  acceptedClaims: Array<{ claim: string; supportedBy: string[]; round: number }>;
+  /** 已被否决/撤回的 claim */
+  rejectedClaims: Array<{ claim: string; rejectedReason: string; round: number }>;
+  /** 尚未解决的分歧 */
+  unresolvedDisagreements: Array<{ point: string; positions: Record<string, string> }>;
+  /** 已识别的证据空白 */
+  evidenceGaps: string[];
+  /** 当前轮次需要回答的问题 */
+  currentQuestions: string[];
+  /** 收敛条件是否满足 */
+  convergenceReached: boolean;
+  /** 上次更新的轮次 */
+  lastUpdatedRound: number;
 }
