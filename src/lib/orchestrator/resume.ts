@@ -2,8 +2,10 @@ import type { ResearchSource } from '../search/types';
 import type {
   DiscussionResumeSnapshot,
   DiscussionResumeState,
+  StructuredAgentReply,
 } from './types';
 import { DiscussionPhase } from './types';
+import { listAgentReplyArtifacts } from '../db/repository';
 
 interface SessionDetailLike {
   session: {
@@ -257,7 +259,7 @@ function buildAgentResponses(
     : getTrailingDebateRound(detail.messages);
   const responses = new Map<
     string,
-    { agentId: string; displayName: string; content: string }
+    { agentId: string; displayName: string; content: string; structured?: StructuredAgentReply }
   >();
 
   for (const message of detail.messages) {
@@ -289,6 +291,39 @@ function buildAgentResponses(
   }
 
   return Array.from(responses.values());
+}
+
+/**
+ * Enrich agent responses with structured data from persisted artifacts.
+ * Falls back gracefully if no artifacts exist (backward compat).
+ */
+export async function enrichAgentResponsesFromArtifacts(
+  sessionId: string,
+  responses: Array<{ agentId: string; displayName: string; content: string; structured?: StructuredAgentReply }>
+): Promise<typeof responses> {
+  try {
+    const artifacts = await listAgentReplyArtifacts(sessionId);
+    if (artifacts.length === 0) return responses;
+
+    const artifactMap = new Map(
+      artifacts.map((a) => [a.agentId, a])
+    );
+
+    return responses.map((r) => {
+      if (r.structured) return r; // already has structured data
+      const artifact = artifactMap.get(r.agentId);
+      if (!artifact || !artifact.parseSuccess) return r;
+      try {
+        const structured = JSON.parse(artifact.artifactJson) as StructuredAgentReply;
+        return { ...r, structured };
+      } catch {
+        return r;
+      }
+    });
+  } catch {
+    // DB not available or table missing — degrade silently
+    return responses;
+  }
 }
 
 function getStableResearchBrief(detail: SessionDetailLike) {

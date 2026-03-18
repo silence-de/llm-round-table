@@ -45,6 +45,7 @@ import type { SessionVerificationMeta } from '../session/types';
 import { db, sqliteDb } from './client';
 import {
   actionItems,
+  agentReplyArtifacts,
   claimSourceLinks,
   decisionClaims,
   decisionSummaries,
@@ -2606,4 +2607,106 @@ function normalizeDateLike(value: unknown) {
   return typeof value === 'string' || typeof value === 'number'
     ? value
     : Date.now();
+}
+
+// ── Agent Reply Artifacts ──────────────────────────────────────────
+
+export async function upsertAgentReplyArtifact(input: {
+  sessionId: string;
+  agentId: string;
+  phase: string;
+  round?: number | null;
+  schemaVersion: string;
+  artifactJson: string;
+  parseSuccess: boolean;
+  citationResolveRate?: number | null;
+  warnings?: string[];
+}) {
+  const now = new Date();
+  const existing = db
+    .select()
+    .from(agentReplyArtifacts)
+    .where(
+      and(
+        eq(agentReplyArtifacts.sessionId, input.sessionId),
+        eq(agentReplyArtifacts.agentId, input.agentId),
+        eq(agentReplyArtifacts.phase, input.phase)
+      )
+    )
+    .all()
+    .find((row) => (row.round ?? null) === (input.round ?? null));
+
+  if (existing) {
+    db.update(agentReplyArtifacts)
+      .set({
+        schemaVersion: input.schemaVersion,
+        artifactJson: input.artifactJson,
+        parseSuccess: input.parseSuccess ? 1 : 0,
+        citationResolveRate: input.citationResolveRate ?? null,
+        warnings: JSON.stringify(input.warnings ?? []),
+      })
+      .where(eq(agentReplyArtifacts.id, existing.id))
+      .run();
+    return existing.id;
+  }
+
+  const id = nanoid();
+  db.insert(agentReplyArtifacts)
+    .values({
+      id,
+      sessionId: input.sessionId,
+      agentId: input.agentId,
+      phase: input.phase,
+      round: input.round ?? null,
+      schemaVersion: input.schemaVersion,
+      artifactJson: input.artifactJson,
+      parseSuccess: input.parseSuccess ? 1 : 0,
+      citationResolveRate: input.citationResolveRate ?? null,
+      warnings: JSON.stringify(input.warnings ?? []),
+      createdAt: now,
+    })
+    .run();
+  return id;
+}
+
+export async function getAgentReplyArtifact(
+  sessionId: string,
+  agentId: string,
+  phase: string,
+  round?: number | null
+) {
+  const rows = db
+    .select()
+    .from(agentReplyArtifacts)
+    .where(
+      and(
+        eq(agentReplyArtifacts.sessionId, sessionId),
+        eq(agentReplyArtifacts.agentId, agentId),
+        eq(agentReplyArtifacts.phase, phase)
+      )
+    )
+    .all();
+  return rows.find((row) => (row.round ?? null) === (round ?? null)) ?? null;
+}
+
+export async function listAgentReplyArtifacts(
+  sessionId: string,
+  phase?: string,
+  round?: number | null
+) {
+  const conditions = [eq(agentReplyArtifacts.sessionId, sessionId)];
+  if (phase) {
+    conditions.push(eq(agentReplyArtifacts.phase, phase));
+  }
+  const rows = db
+    .select()
+    .from(agentReplyArtifacts)
+    .where(and(...conditions))
+    .orderBy(asc(agentReplyArtifacts.createdAt))
+    .all();
+
+  if (round !== undefined && round !== null) {
+    return rows.filter((row) => row.round === round);
+  }
+  return rows;
 }

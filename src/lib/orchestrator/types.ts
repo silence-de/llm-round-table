@@ -61,19 +61,35 @@ export interface DiscussionConfig {
   ) => Promise<void> | void;
 }
 
+export type ClaimType = 'fact' | 'assumption' | 'projection' | 'value_judgment';
+
 export interface StructuredAgentKeyPoint {
   claim: string;
   reasoning: string;
-  evidenceCited: string[];  // citation labels like "R1", "R2"
+  claimType: ClaimType;
+  citationLabels: string[];  // citation labels like "R1", "R2" — mutually exclusive with gapReason
+  gapReason: string | null;  // why no citation — mutually exclusive with citationLabels
   confidenceBand: 'high' | 'medium' | 'low';
+  /** @deprecated use citationLabels */
+  evidenceCited?: string[];
+}
+
+export interface StructuredReplyParseMetadata {
+  success: boolean;
+  citationResolveRate: number;  // 0-1, ratio of claims with citationLabels
+  warnings: string[];
 }
 
 export interface StructuredAgentReply {
+  schemaVersion: 'rt.agent.reply.v1';
   stance: 'support' | 'oppose' | 'mixed' | 'unsure';
-  keyPoints: StructuredAgentKeyPoint[];
+  claims: StructuredAgentKeyPoint[];
   caveats: string[];
   questionsForOthers: string[];
   narrative: string;  // 自然语言版本，给 UI 展示
+  parseMetadata?: StructuredReplyParseMetadata;
+  /** @deprecated use claims */
+  keyPoints?: StructuredAgentKeyPoint[];
 }
 
 export interface AgentResponse {

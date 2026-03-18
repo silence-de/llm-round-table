@@ -30,6 +30,7 @@ import type { ResearchRunStatus, ResearchSource } from '../search/types';
 import { formatControlInstruction } from '../decision/utils';
 import { buildEvaluatorPrompt, parseEvaluation } from '../decision/evaluator';
 import { attachCitationLabels } from '../search/utils';
+import { upsertAgentReplyArtifact } from '../db/repository';
 
 interface StreamTimeoutConfig {
   requestTimeoutMs: number;
@@ -841,7 +842,7 @@ export class DiscussionOrchestrator {
 
     for (const agent of participants) {
       const fullContent = contentCollectors.get(agent.definition.id) ?? '';
-      const { narrative, structured } = parseStructuredAgentReply(fullContent);
+      const { narrative, structured, parseMetadata } = parseStructuredAgentReply(fullContent);
       const response: AgentResponse = {
         agentId: agent.definition.id,
         displayName: agent.definition.displayName,
@@ -862,6 +863,19 @@ export class DiscussionOrchestrator {
         content: narrative,
         phase: DiscussionPhase.INITIAL_RESPONSES,
       });
+      if (structured) {
+        await upsertAgentReplyArtifact({
+          sessionId: this.config.sessionId,
+          agentId: agent.definition.id,
+          phase: DiscussionPhase.INITIAL_RESPONSES,
+          round: null,
+          schemaVersion: structured.schemaVersion,
+          artifactJson: JSON.stringify(structured),
+          parseSuccess: parseMetadata.success,
+          citationResolveRate: parseMetadata.citationResolveRate,
+          warnings: parseMetadata.warnings,
+        });
+      }
       if (narrative) {
         await this.persistUsage({ outputTokens: this.estimateTokens(narrative) });
       }
@@ -902,8 +916,8 @@ export class DiscussionOrchestrator {
 
     const responsesForPrompt = responses.map((r) => {
       if (!r.structured) return r;
-      const kpSummary = r.structured.keyPoints
-        .map((kp) => `${kp.claim}（置信度：${kp.confidenceBand}${kp.evidenceCited.length > 0 ? '，引用：' + kp.evidenceCited.join('/') : ''}）`)
+      const kpSummary = r.structured.claims
+        .map((kp) => `${kp.claim}（${kp.claimType}，置信度：${kp.confidenceBand}${kp.citationLabels.length > 0 ? '，引用：' + kp.citationLabels.join('/') : kp.gapReason ? '，缺证原因：' + kp.gapReason : ''}）`)
         .join('；');
       const enhancedContent = `${r.content}\n[结构化摘要] 立场：${r.structured.stance}${kpSummary ? '，核心观点：' + kpSummary : ''}${r.structured.caveats.length > 0 ? '，注意事项：' + r.structured.caveats.join('；') : ''}`;
       return { ...r, content: enhancedContent };

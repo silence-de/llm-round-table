@@ -172,3 +172,17 @@ export const interjections = sqliteTable('interjections', {
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   consumedAt: integer('consumed_at', { mode: 'timestamp_ms' }),
 });
+
+export const agentReplyArtifacts = sqliteTable('agent_reply_artifacts', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull(),
+  agentId: text('agent_id').notNull(),
+  phase: text('phase').notNull(),
+  round: integer('round'),
+  schemaVersion: text('schema_version').notNull(),
+  artifactJson: text('artifact_json').notNull(),
+  parseSuccess: integer('parse_success').notNull(),
+  citationResolveRate: real('citation_resolve_rate'),
+  warnings: text('warnings').notNull().default('[]'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+});

@@ -9,6 +9,7 @@ import type { ChatParams, ChatResponse, LLMProvider, StreamChunk } from '@/lib/l
 
 export function resetTestDatabase() {
   sqliteDb.exec(`
+    DELETE FROM agent_reply_artifacts;
     DELETE FROM action_items;
     DELETE FROM claim_source_links;
     DELETE FROM decision_claims;

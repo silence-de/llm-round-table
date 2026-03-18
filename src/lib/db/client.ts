@@ -191,6 +191,23 @@ CREATE TABLE IF NOT EXISTS interjections (
   created_at INTEGER NOT NULL,
   consumed_at INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS agent_reply_artifacts (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  phase TEXT NOT NULL,
+  round INTEGER,
+  schema_version TEXT NOT NULL,
+  artifact_json TEXT NOT NULL,
+  parse_success INTEGER NOT NULL,
+  citation_resolve_rate REAL,
+  warnings TEXT NOT NULL DEFAULT '[]',
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_artifact_session_agent ON agent_reply_artifacts(session_id, agent_id);
+CREATE INDEX IF NOT EXISTS idx_artifact_phase_round ON agent_reply_artifacts(phase, round);
 `);
 
 // Lightweight in-place migrations for existing local DB files.

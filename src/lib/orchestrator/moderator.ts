@@ -9,7 +9,7 @@ import {
   DECISION_TEMPLATES,
   PERSONAL_DECISION_CHECKLIST,
 } from '../decision/templates';
-import type { AgentResponse, ModeratorAnalysis, StructuredAgentReply, StructuredAgentKeyPoint, TaskLedger } from './types';
+import type { AgentResponse, ModeratorAnalysis, StructuredAgentReply, StructuredAgentKeyPoint, StructuredReplyParseMetadata, TaskLedger, ClaimType } from './types';
 import { ledgerToPromptBlock } from './task-ledger';
 
 export function buildOpeningPrompt(
@@ -56,7 +56,28 @@ ${buildDecisionContextBlock(brief, agenda, researchBrief)}
           .join('\n')}`
       : '';
 
-  const structuredInstruction = `\n\n---\n在你的自然语言回复结束后，请另起一行输出 "---STRUCTURED---"，然后输出以下 JSON（不要用代码块包裹）：\n{\n  "stance": "support | oppose | mixed | unsure 选其一",\n  "keyPoints": [\n    { "claim": "核心观点", "reasoning": "支撑理由", "evidenceCited": ["R1"], "confidenceBand": "high | medium | low" }\n  ],\n  "caveats": ["需要注意的限制或前提"],\n  "questionsForOthers": ["想向其他参与者提出的问题"],\n  "narrative": "与自然语言回复相同的内容"\n}`;
+  const structuredInstruction = [
+    '\n\n---',
+    '在你的自然语言回复结束后，请另起一行输出 "---STRUCTURED---"，然后输出以下 JSON（不要用代码块包裹）：',
+    '{',
+    '  "schemaVersion": "rt.agent.reply.v1",',
+    '  "stance": "support | oppose | mixed | unsure 选其一",',
+    '  "claims": [',
+    '    {',
+    '      "claim": "核心观点",',
+    '      "reasoning": "支撑理由",',
+    '      "claimType": "fact | assumption | projection | value_judgment 选其一",',
+    '      "citationLabels": ["R1"],',
+    '      "gapReason": null,',
+    '      "confidenceBand": "high | medium | low"',
+    '    }',
+    '  ],',
+    '  "caveats": ["需要注意的限制或前提"],',
+    '  "questionsForOthers": ["想向其他参与者提出的问题"],',
+    '  "narrative": "与自然语言回复相同的内容"',
+    '}',
+    '注意：每条 claim 中 citationLabels 和 gapReason 互斥——如果有引用来源，citationLabels 非空且 gapReason 为 null；如果没有引用来源，citationLabels 为空数组且 gapReason 说明缺失原因。',
+  ].join('\n');
 
   if (persona) {
     return `${base}\n\n你的角色设定：${persona}${interjectionText}${structuredInstruction}`;
@@ -338,47 +359,161 @@ export function parseDecisionSummaryContent(
 export function parseStructuredAgentReply(content: string): {
   narrative: string;
   structured?: StructuredAgentReply;
+  parseMetadata: StructuredReplyParseMetadata;
 } {
   const separator = '---STRUCTURED---';
   const idx = content.indexOf(separator);
   if (idx === -1) {
-    return { narrative: content };
+    return {
+      narrative: content,
+      parseMetadata: { success: false, citationResolveRate: 0, warnings: ['no separator found'] },
+    };
   }
   const narrative = content.slice(0, idx).trim();
   const jsonPart = content.slice(idx + separator.length).trim();
   try {
-    const parsed = JSON.parse(jsonPart) as Partial<StructuredAgentReply>;
+    const parsed = JSON.parse(jsonPart) as Record<string, unknown>;
     const validStances = ['support', 'oppose', 'mixed', 'unsure'] as const;
     const validBands = ['high', 'medium', 'low'] as const;
+    const validClaimTypes: ClaimType[] = ['fact', 'assumption', 'projection', 'value_judgment'];
+    const warnings: string[] = [];
+
     if (
       !parsed.stance ||
       !validStances.includes(parsed.stance as typeof validStances[number])
     ) {
-      return { narrative };
+      return {
+        narrative,
+        parseMetadata: { success: false, citationResolveRate: 0, warnings: ['invalid or missing stance'] },
+      };
     }
+
+    // Accept both v1 "claims" and legacy "keyPoints"
+    const rawClaims = Array.isArray(parsed.claims)
+      ? parsed.claims
+      : Array.isArray(parsed.keyPoints)
+        ? parsed.keyPoints
+        : [];
+
+    if (Array.isArray(parsed.keyPoints) && !Array.isArray(parsed.claims)) {
+      warnings.push('legacy keyPoints field used, migrated to claims');
+    }
+
+    const claims: StructuredAgentKeyPoint[] = [];
+    for (const kp of rawClaims) {
+      if (typeof kp?.claim !== 'string' || typeof kp?.reasoning !== 'string') continue;
+      if (!validBands.includes(kp?.confidenceBand as typeof validBands[number])) continue;
+
+      // Normalize citationLabels from either citationLabels or legacy evidenceCited
+      const citationLabels = Array.isArray(kp.citationLabels)
+        ? kp.citationLabels.filter((l: unknown): l is string => typeof l === 'string')
+        : Array.isArray(kp.evidenceCited)
+          ? kp.evidenceCited.filter((l: unknown): l is string => typeof l === 'string')
+          : [];
+
+      if (Array.isArray(kp.evidenceCited) && !Array.isArray(kp.citationLabels)) {
+        warnings.push(`claim "${kp.claim.slice(0, 30)}": legacy evidenceCited migrated to citationLabels`);
+      }
+
+      const gapReason = typeof kp.gapReason === 'string' ? kp.gapReason : null;
+      const claimType = validClaimTypes.includes(kp.claimType as ClaimType)
+        ? (kp.claimType as ClaimType)
+        : 'assumption';
+
+      if (kp.claimType && !validClaimTypes.includes(kp.claimType as ClaimType)) {
+        warnings.push(`claim "${kp.claim.slice(0, 30)}": invalid claimType "${kp.claimType}", defaulted to assumption`);
+      }
+
+      // Validate mutual exclusion: citationLabels vs gapReason
+      if (citationLabels.length > 0 && gapReason) {
+        warnings.push(`claim "${kp.claim.slice(0, 30)}": citationLabels and gapReason both present, clearing gapReason`);
+      }
+
+      claims.push({
+        claim: kp.claim,
+        reasoning: kp.reasoning,
+        claimType,
+        citationLabels,
+        gapReason: citationLabels.length > 0 ? null : gapReason,
+        confidenceBand: kp.confidenceBand as 'high' | 'medium' | 'low',
+      });
+    }
+
+    const citationResolveRate = claims.length > 0
+      ? claims.filter((c) => c.citationLabels.length > 0).length / claims.length
+      : 0;
+
+    if (!parsed.schemaVersion) {
+      warnings.push('missing schemaVersion, treated as v1');
+    }
+
     const structured: StructuredAgentReply = {
+      schemaVersion: 'rt.agent.reply.v1',
       stance: parsed.stance as StructuredAgentReply['stance'],
-      keyPoints: Array.isArray(parsed.keyPoints)
-        ? parsed.keyPoints.filter(
-            (kp): kp is StructuredAgentKeyPoint =>
-              typeof kp?.claim === 'string' &&
-              typeof kp?.reasoning === 'string' &&
-              Array.isArray(kp?.evidenceCited) &&
-              validBands.includes(kp?.confidenceBand as typeof validBands[number])
-          )
-        : [],
+      claims,
       caveats: Array.isArray(parsed.caveats)
-        ? parsed.caveats.filter((c): c is string => typeof c === 'string')
+        ? (parsed.caveats as unknown[]).filter((c): c is string => typeof c === 'string')
         : [],
       questionsForOthers: Array.isArray(parsed.questionsForOthers)
-        ? parsed.questionsForOthers.filter((q): q is string => typeof q === 'string')
+        ? (parsed.questionsForOthers as unknown[]).filter((q): q is string => typeof q === 'string')
         : [],
       narrative: typeof parsed.narrative === 'string' ? parsed.narrative : narrative,
     };
-    return { narrative, structured };
+
+    const parseMetadata: StructuredReplyParseMetadata = {
+      success: true,
+      citationResolveRate,
+      warnings,
+    };
+    structured.parseMetadata = parseMetadata;
+
+    return { narrative, structured, parseMetadata };
   } catch {
-    return { narrative };
+    return {
+      narrative,
+      parseMetadata: { success: false, citationResolveRate: 0, warnings: ['JSON parse failed'] },
+    };
   }
+}
+
+export interface StructuredReplyValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+export function validateStructuredReply(reply: StructuredAgentReply): StructuredReplyValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const validStances = ['support', 'oppose', 'mixed', 'unsure'];
+  const validBands = ['high', 'medium', 'low'];
+  const validClaimTypes: ClaimType[] = ['fact', 'assumption', 'projection', 'value_judgment'];
+
+  if (!validStances.includes(reply.stance)) {
+    errors.push(`invalid stance: "${reply.stance}"`);
+  }
+
+  if (reply.schemaVersion !== 'rt.agent.reply.v1') {
+    warnings.push(`unexpected schemaVersion: "${reply.schemaVersion}"`);
+  }
+
+  for (const claim of reply.claims) {
+    if (!validClaimTypes.includes(claim.claimType)) {
+      errors.push(`claim "${claim.claim.slice(0, 30)}": invalid claimType "${claim.claimType}"`);
+    }
+    if (!validBands.includes(claim.confidenceBand)) {
+      errors.push(`claim "${claim.claim.slice(0, 30)}": invalid confidenceBand "${claim.confidenceBand}"`);
+    }
+    // Mutual exclusion check
+    if (claim.citationLabels.length > 0 && claim.gapReason) {
+      warnings.push(`claim "${claim.claim.slice(0, 30)}": citationLabels and gapReason both present`);
+    }
+    if (claim.citationLabels.length === 0 && !claim.gapReason) {
+      warnings.push(`claim "${claim.claim.slice(0, 30)}": neither citationLabels nor gapReason provided`);
+    }
+  }
+
+  return { valid: errors.length === 0, errors, warnings };
 }
 
 function buildDecisionContextBlock(
