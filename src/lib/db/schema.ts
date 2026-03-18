@@ -186,3 +186,47 @@ export const agentReplyArtifacts = sqliteTable('agent_reply_artifacts', {
   warnings: text('warnings').notNull().default('[]'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 });
+
+export const taskLedgerCheckpoints = sqliteTable('task_ledger_checkpoints', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull(),
+  phase: text('phase').notNull(),
+  ledgerVersion: integer('ledger_version').notNull().default(1),
+  ledgerJson: text('ledger_json').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
+export const ledgerValidationMetrics = sqliteTable('ledger_validation_metrics', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull(),
+  coverageRate: real('coverage_rate').notNull().default(0),
+  coveredCount: integer('covered_count').notNull().default(0),
+  totalCount: integer('total_count').notNull().default(0),
+  coveragePassed: integer('coverage_passed').notNull().default(0),
+  riskCount: integer('risk_count').notNull().default(0),
+  highSeverityCount: integer('high_severity_count').notNull().default(0),
+  overallPassed: integer('overall_passed').notNull().default(0),
+  evaluatedAt: integer('evaluated_at', { mode: 'timestamp_ms' }).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
+export const judgeEvaluations = sqliteTable('judge_evaluations', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull(),
+  summaryVersion: integer('summary_version').notNull().default(1),
+  passedCount: integer('passed_count').notNull().default(0),
+  totalDimensions: integer('total_dimensions').notNull().default(4),
+  overallPassed: integer('overall_passed').notNull().default(0),
+  dimensionsJson: text('dimensions_json').notNull().default('[]'),
+  evaluatedAt: integer('evaluated_at', { mode: 'timestamp_ms' }).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
+export const summaryVersions = sqliteTable('summary_versions', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull(),
+  version: integer('version').notNull().default(1),
+  summaryJson: text('summary_json').notNull(),
+  rewriteTriggered: integer('rewrite_triggered').notNull().default(0),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+});

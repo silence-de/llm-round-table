@@ -1,10 +1,16 @@
 import type { DecisionBrief, DiscussionAgenda } from '../decision/types';
-import type { ModeratorAnalysis, TaskLedger } from './types';
+import type { CursorWaitingOn, LedgerCursor, LedgerPhaseHistoryEntry, LedgerRiskEntry, LedgerDecisionSnapshot, ModeratorAnalysis, TaskLedger } from './types';
+import { DiscussionPhase } from './types';
 
 /**
  * 从 brief + agenda 初始化一个空 TaskLedger
  */
-export function initTaskLedger(brief: DecisionBrief, agenda: DiscussionAgenda): TaskLedger {
+export function initTaskLedger(
+  brief: DecisionBrief,
+  agenda: DiscussionAgenda,
+  sessionId: string = '',
+  initialPhase: DiscussionPhase = DiscussionPhase.CREATED
+): TaskLedger {
   // 构建 briefSummary：拼接 topic + goal + constraints，不超过 200 字
   const parts = [
     brief.topic ? `议题：${brief.topic}` : '',
@@ -36,6 +42,17 @@ export function initTaskLedger(brief: DecisionBrief, agenda: DiscussionAgenda): 
       : [],
     convergenceReached: false,
     lastUpdatedRound: -1,
+    ledgerVersion: 1,
+    threadId: sessionId,
+    currentPhase: initialPhase,
+    phaseHistory: [],
+    riskRegister: [],
+    decisionSnapshot: null,
+    cursor: {
+      nextTaskId: null,
+      waitingOn: 'none',
+      stallSignal: { stalled: false, reason: '' },
+    },
   };
 }
 
@@ -132,6 +149,57 @@ export function serializeLedger(ledger: TaskLedger): string {
 }
 
 /**
+ * 更新 ledger 的当前阶段，并追加 phase history 记录
+ */
+export function updateLedgerPhase(
+  ledger: TaskLedger,
+  newPhase: DiscussionPhase,
+  keyOutputs: string[] = []
+): TaskLedger {
+  const now = Date.now();
+  const updatedHistory = ledger.phaseHistory.map((entry) =>
+    entry.phase === ledger.currentPhase && entry.completedAt === null
+      ? { ...entry, completedAt: now, keyOutputs }
+      : entry
+  );
+  // 如果当前阶段没有 history 记录，补一条
+  const hasCurrentEntry = updatedHistory.some((e) => e.phase === ledger.currentPhase);
+  if (!hasCurrentEntry && ledger.currentPhase !== newPhase) {
+    updatedHistory.push({
+      phase: ledger.currentPhase,
+      enteredAt: now,
+      completedAt: now,
+      keyOutputs,
+    });
+  }
+  return {
+    ...ledger,
+    currentPhase: newPhase,
+    phaseHistory: [
+      ...updatedHistory,
+      { phase: newPhase, enteredAt: now, completedAt: null, keyOutputs: [] },
+    ],
+    cursor: {
+      ...ledger.cursor,
+      waitingOn: 'none',
+    },
+  };
+}
+
+/**
+ * 更新 ledger cursor
+ */
+export function updateLedgerCursor(
+  ledger: TaskLedger,
+  cursor: Partial<LedgerCursor>
+): TaskLedger {
+  return {
+    ...ledger,
+    cursor: { ...ledger.cursor, ...cursor },
+  };
+}
+
+/**
  * 从 JSON 字符串反序列化 TaskLedger（用于读取持久化数据）
  */
 export function deserializeLedger(json: string): TaskLedger | null {
@@ -154,6 +222,17 @@ export function deserializeLedger(json: string): TaskLedger | null {
       currentQuestions: Array.isArray(parsed.currentQuestions) ? parsed.currentQuestions : [],
       convergenceReached: parsed.convergenceReached === true,
       lastUpdatedRound: typeof parsed.lastUpdatedRound === 'number' ? parsed.lastUpdatedRound : -1,
+      ledgerVersion: typeof parsed.ledgerVersion === 'number' ? parsed.ledgerVersion : 1,
+      threadId: typeof parsed.threadId === 'string' ? parsed.threadId : '',
+      currentPhase: typeof parsed.currentPhase === 'string' ? parsed.currentPhase as DiscussionPhase : DiscussionPhase.CREATED,
+      phaseHistory: Array.isArray(parsed.phaseHistory) ? parsed.phaseHistory : [],
+      riskRegister: Array.isArray(parsed.riskRegister) ? parsed.riskRegister : [],
+      decisionSnapshot: parsed.decisionSnapshot ?? null,
+      cursor: parsed.cursor && typeof parsed.cursor === 'object' ? parsed.cursor as LedgerCursor : {
+        nextTaskId: null,
+        waitingOn: 'none' as CursorWaitingOn,
+        stallSignal: { stalled: false, reason: '' },
+      },
     };
   } catch {
     return null;

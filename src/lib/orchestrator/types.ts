@@ -207,4 +207,40 @@ export interface TaskLedger {
   convergenceReached: boolean;
   /** 上次更新的轮次 */
   lastUpdatedRound: number;
+  ledgerVersion: number;
+  threadId: string;
+  currentPhase: DiscussionPhase;
+  phaseHistory: LedgerPhaseHistoryEntry[];
+  riskRegister: LedgerRiskEntry[];
+  decisionSnapshot: LedgerDecisionSnapshot | null;
+  cursor: LedgerCursor;
+}
+
+export type CursorWaitingOn = 'human_input' | 'moderator_review' | 'agent_processing' | 'none';
+
+export interface LedgerCursor {
+  nextTaskId: string | null;
+  waitingOn: CursorWaitingOn;
+  stallSignal: { stalled: boolean; reason: string };
+}
+
+export interface LedgerPhaseHistoryEntry {
+  phase: DiscussionPhase;
+  enteredAt: number;
+  completedAt: number | null;
+  keyOutputs: string[];
+}
+
+export interface LedgerRiskEntry {
+  riskId: string;
+  description: string;
+  severity: 'high' | 'medium' | 'low';
+  sourceMessageId?: string;
+}
+
+export interface LedgerDecisionSnapshot {
+  recommendedOption: string;
+  rationale: string;
+  confidence: number;
+  openQuestions: string[];
 }

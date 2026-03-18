@@ -31,14 +31,17 @@ export function PhaseIndicator({
   round,
   isRunning,
   moderator,
+  ledgerPhase,
 }: {
   phase: string;
   round: number;
   isRunning: boolean;
   moderator?: string;
+  ledgerPhase?: string;
 }) {
-  const phaseInfo = PHASE_LABELS[phase] ?? {
-    label: phase || '就绪',
+  const displayPhase = ledgerPhase ?? phase;
+  const phaseInfo = PHASE_LABELS[displayPhase] ?? {
+    label: displayPhase || '就绪',
     tone: 'color-mix(in srgb, var(--rt-text-muted) 70%, var(--rt-hh6-headline))',
   };
 
@@ -54,6 +57,9 @@ export function PhaseIndicator({
           }}
         >
           {phaseInfo.label}
+          {ledgerPhase && (
+            <span className="ml-1.5 text-[10px] font-normal opacity-70">(ledger)</span>
+          )}
         </Badge>
       </motion.div>
       {round > 0 && (

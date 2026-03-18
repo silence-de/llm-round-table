@@ -3,9 +3,12 @@ import type {
   DiscussionResumeSnapshot,
   DiscussionResumeState,
   StructuredAgentReply,
+  TaskLedger,
 } from './types';
 import { DiscussionPhase } from './types';
 import { listAgentReplyArtifacts } from '../db/repository';
+import { resumeNeedsExternalInput } from './cursor-fsm';
+import { deserializeLedger } from './task-ledger';
 
 interface SessionDetailLike {
   session: {
@@ -33,6 +36,8 @@ interface SessionDetailLike {
 export interface DiscussionResumePlan {
   state: DiscussionResumeState;
   snapshot: DiscussionResumeSnapshot;
+  ledger?: TaskLedger | null;
+  needsExternalInput?: boolean;
 }
 
 export function buildResumePlan(detail: SessionDetailLike): DiscussionResumePlan {
@@ -202,6 +207,24 @@ export function buildResumeSnapshot(detail: SessionDetailLike) {
   return buildResumePlan(detail).snapshot;
 }
 
+/**
+ * 用 ledger checkpoint 数据丰富 resume plan
+ * 如果 ledger 的 cursor.waitingOn === 'human_input'，标记 needsExternalInput
+ */
+export function enrichResumePlanWithLedger(
+  plan: DiscussionResumePlan,
+  ledgerJson: string | null | undefined
+): DiscussionResumePlan {
+  if (!ledgerJson) return plan;
+  const ledger = deserializeLedger(ledgerJson);
+  if (!ledger) return plan;
+  return {
+    ...plan,
+    ledger,
+    needsExternalInput: resumeNeedsExternalInput(ledger.cursor),
+  };
+}
+
 function withSnapshot(
   state: DiscussionResumeState,
   summary: {
@@ -220,6 +243,8 @@ function withSnapshot(
       discarded: summary.discarded,
       reason: summary.reason,
     },
+    ledger: null,
+    needsExternalInput: false,
   };
 }
 

@@ -208,6 +208,57 @@ CREATE TABLE IF NOT EXISTS agent_reply_artifacts (
 
 CREATE INDEX IF NOT EXISTS idx_artifact_session_agent ON agent_reply_artifacts(session_id, agent_id);
 CREATE INDEX IF NOT EXISTS idx_artifact_phase_round ON agent_reply_artifacts(phase, round);
+
+CREATE TABLE IF NOT EXISTS task_ledger_checkpoints (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  phase TEXT NOT NULL,
+  ledger_version INTEGER NOT NULL DEFAULT 1,
+  ledger_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ledger_checkpoints_session ON task_ledger_checkpoints(session_id);
+
+CREATE TABLE IF NOT EXISTS ledger_validation_metrics (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  coverage_rate REAL NOT NULL DEFAULT 0,
+  covered_count INTEGER NOT NULL DEFAULT 0,
+  total_count INTEGER NOT NULL DEFAULT 0,
+  coverage_passed INTEGER NOT NULL DEFAULT 0,
+  risk_count INTEGER NOT NULL DEFAULT 0,
+  high_severity_count INTEGER NOT NULL DEFAULT 0,
+  overall_passed INTEGER NOT NULL DEFAULT 0,
+  evaluated_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ledger_validation_session ON ledger_validation_metrics(session_id);
+
+CREATE TABLE IF NOT EXISTS judge_evaluations (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  summary_version INTEGER NOT NULL DEFAULT 1,
+  passed_count INTEGER NOT NULL DEFAULT 0,
+  total_dimensions INTEGER NOT NULL DEFAULT 4,
+  overall_passed INTEGER NOT NULL DEFAULT 0,
+  dimensions_json TEXT NOT NULL DEFAULT '[]',
+  evaluated_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS summary_versions (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  summary_json TEXT NOT NULL,
+  rewrite_triggered INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_judge_evaluations_session ON judge_evaluations(session_id);
+CREATE INDEX IF NOT EXISTS idx_summary_versions_session ON summary_versions(session_id);
 `);
 
 // Lightweight in-place migrations for existing local DB files.
@@ -312,6 +363,8 @@ ensureColumn(
 );
 ensureColumn('action_items', 'priority', "TEXT NOT NULL DEFAULT 'medium'");
 ensureColumn('decision_claims', 'gap_reason', "TEXT NOT NULL DEFAULT ''");
+
+// task_ledger_checkpoints is created fresh, no migrations needed yet
 
 export const sqliteDb = sqlite;
 export const db = drizzle(sqlite);

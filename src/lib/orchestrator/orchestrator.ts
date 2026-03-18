@@ -7,7 +7,7 @@ import type {
   PersistableMessage,
 } from './types';
 import { DiscussionPhase } from './types';
-import { initTaskLedger, updateLedgerFromAnalysis } from './task-ledger';
+import { initTaskLedger, updateLedgerFromAnalysis, updateLedgerPhase, updateLedgerCursor, serializeLedger } from './task-ledger';
 import type { TaskLedger } from './types';
 import { getProvider } from '../llm/provider-registry';
 import { getModelId } from '../agents/registry';
@@ -30,7 +30,7 @@ import type { ResearchRunStatus, ResearchSource } from '../search/types';
 import { formatControlInstruction } from '../decision/utils';
 import { buildEvaluatorPrompt, parseEvaluation } from '../decision/evaluator';
 import { attachCitationLabels } from '../search/utils';
-import { upsertAgentReplyArtifact } from '../db/repository';
+import { upsertAgentReplyArtifact, upsertLedgerCheckpoint } from '../db/repository';
 
 interface StreamTimeoutConfig {
   requestTimeoutMs: number;
@@ -74,7 +74,7 @@ export class DiscussionOrchestrator {
   constructor(config: DiscussionConfig) {
     this.config = config;
     this.seedResumeState(config.resumeState);
-    this.taskLedger = initTaskLedger(config.brief, config.agenda);
+    this.taskLedger = initTaskLedger(config.brief, config.agenda, config.sessionId, DiscussionPhase.CREATED);
   }
 
   async *run(): AsyncIterable<SSEEvent> {
@@ -562,6 +562,8 @@ export class DiscussionOrchestrator {
     };
     const _phaseStartTime = Date.now();
     await this.emitPhaseEvent('phase_started', DiscussionPhase.RESEARCH);
+    this.taskLedger = updateLedgerPhase(this.taskLedger, DiscussionPhase.RESEARCH, []);
+    void shadowWriteLedgerCheckpoint(this.config.sessionId, this.taskLedger, DiscussionPhase.RESEARCH);
     yield { type: 'research_start', timestamp: Date.now() };
 
     try {
@@ -620,12 +622,16 @@ export class DiscussionOrchestrator {
         await this.emitPhaseEvent('phase_completed', DiscussionPhase.RESEARCH, {
           durationMs: Date.now() - _phaseStartTime,
         });
+        this.taskLedger = updateLedgerPhase(this.taskLedger, DiscussionPhase.RESEARCH, []);
+        void shadowWriteLedgerCheckpoint(this.config.sessionId, this.taskLedger, DiscussionPhase.RESEARCH);
         return;
       }
 
       await this.emitPhaseEvent('phase_completed', DiscussionPhase.RESEARCH, {
         durationMs: Date.now() - _phaseStartTime,
       });
+      this.taskLedger = updateLedgerPhase(this.taskLedger, DiscussionPhase.RESEARCH, []);
+      void shadowWriteLedgerCheckpoint(this.config.sessionId, this.taskLedger, DiscussionPhase.RESEARCH);
       yield {
         type: 'research_complete',
         content: result.summary,
@@ -668,6 +674,8 @@ export class DiscussionOrchestrator {
     };
     const _phaseStartTime = Date.now();
     await this.emitPhaseEvent('phase_started', DiscussionPhase.OPENING);
+    this.taskLedger = updateLedgerPhase(this.taskLedger, DiscussionPhase.OPENING, []);
+    void shadowWriteLedgerCheckpoint(this.config.sessionId, this.taskLedger, DiscussionPhase.OPENING);
 
     const moderator = this.config.agents.find(
       (a) => a.definition.id === this.config.moderatorAgentId
@@ -757,6 +765,8 @@ export class DiscussionOrchestrator {
     await this.emitPhaseEvent('phase_completed', DiscussionPhase.OPENING, {
       durationMs: Date.now() - _phaseStartTime,
     });
+    this.taskLedger = updateLedgerPhase(this.taskLedger, DiscussionPhase.OPENING, []);
+    void shadowWriteLedgerCheckpoint(this.config.sessionId, this.taskLedger, DiscussionPhase.OPENING);
   }
 
   private async *phaseInitialResponses(): AsyncIterable<SSEEvent> {
@@ -767,6 +777,8 @@ export class DiscussionOrchestrator {
     };
     const _phaseStartTime = Date.now();
     await this.emitPhaseEvent('phase_started', DiscussionPhase.INITIAL_RESPONSES);
+    this.taskLedger = updateLedgerPhase(this.taskLedger, DiscussionPhase.INITIAL_RESPONSES, []);
+    void shadowWriteLedgerCheckpoint(this.config.sessionId, this.taskLedger, DiscussionPhase.INITIAL_RESPONSES);
 
     const participants = this.getActiveParticipants();
     if (participants.length === 0) {
@@ -885,6 +897,8 @@ export class DiscussionOrchestrator {
       agentCount: this.getActiveParticipants().length,
       degradedCount: this.degradedAgentIds.size,
     });
+    this.taskLedger = updateLedgerPhase(this.taskLedger, DiscussionPhase.INITIAL_RESPONSES, []);
+    void shadowWriteLedgerCheckpoint(this.config.sessionId, this.taskLedger, DiscussionPhase.INITIAL_RESPONSES);
   }
 
   private async *phaseAnalysis(round: number): AsyncIterable<SSEEvent> {
@@ -896,6 +910,8 @@ export class DiscussionOrchestrator {
     };
     const _phaseStartTime = Date.now();
     await this.emitPhaseEvent('phase_started', DiscussionPhase.ANALYSIS, { round });
+    this.taskLedger = updateLedgerPhase(this.taskLedger, DiscussionPhase.ANALYSIS, []);
+    void shadowWriteLedgerCheckpoint(this.config.sessionId, this.taskLedger, DiscussionPhase.ANALYSIS);
 
     const moderator = this.config.agents.find(
       (a) => a.definition.id === this.config.moderatorAgentId
@@ -988,6 +1004,9 @@ export class DiscussionOrchestrator {
 
     this.lastAnalysis = analysis;
     this.taskLedger = updateLedgerFromAnalysis(this.taskLedger, analysis, round);
+    this.taskLedger = updateLedgerCursor(this.taskLedger, {
+      waitingOn: analysis.shouldConverge ? 'none' : 'agent_processing',
+    });
 
     // Stream the narrative to the client
     for (const char of analysis.moderatorNarrative) {
@@ -1019,6 +1038,8 @@ export class DiscussionOrchestrator {
       round,
       durationMs: Date.now() - _phaseStartTime,
     });
+    this.taskLedger = updateLedgerPhase(this.taskLedger, DiscussionPhase.ANALYSIS, []);
+    void shadowWriteLedgerCheckpoint(this.config.sessionId, this.taskLedger, DiscussionPhase.ANALYSIS);
   }
 
   private async *phaseDebate(round: number): AsyncIterable<SSEEvent> {
@@ -1032,6 +1053,8 @@ export class DiscussionOrchestrator {
     };
     const _phaseStartTime = Date.now();
     await this.emitPhaseEvent('phase_started', DiscussionPhase.DEBATE, { round });
+    this.taskLedger = updateLedgerPhase(this.taskLedger, DiscussionPhase.DEBATE, []);
+    void shadowWriteLedgerCheckpoint(this.config.sessionId, this.taskLedger, DiscussionPhase.DEBATE);
 
     const participants = this.getActiveParticipants();
     if (participants.length === 0) {
@@ -1132,6 +1155,8 @@ export class DiscussionOrchestrator {
       round,
       durationMs: Date.now() - _phaseStartTime,
     });
+    this.taskLedger = updateLedgerPhase(this.taskLedger, DiscussionPhase.DEBATE, []);
+    void shadowWriteLedgerCheckpoint(this.config.sessionId, this.taskLedger, DiscussionPhase.DEBATE);
   }
 
   private async *phaseSummary(): AsyncIterable<SSEEvent> {
@@ -1142,6 +1167,8 @@ export class DiscussionOrchestrator {
     };
     const _phaseStartTime = Date.now();
     await this.emitPhaseEvent('phase_started', DiscussionPhase.SUMMARY);
+    this.taskLedger = updateLedgerPhase(this.taskLedger, DiscussionPhase.SUMMARY, []);
+    void shadowWriteLedgerCheckpoint(this.config.sessionId, this.taskLedger, DiscussionPhase.SUMMARY);
 
     const moderator = this.config.agents.find(
       (a) => a.definition.id === this.config.moderatorAgentId
@@ -1230,6 +1257,8 @@ export class DiscussionOrchestrator {
     await this.emitPhaseEvent('phase_completed', DiscussionPhase.SUMMARY, {
       durationMs: Date.now() - _phaseStartTime,
     });
+    this.taskLedger = updateLedgerPhase(this.taskLedger, DiscussionPhase.SUMMARY, []);
+    void shadowWriteLedgerCheckpoint(this.config.sessionId, this.taskLedger, DiscussionPhase.SUMMARY);
   }
 
   private async generateDecisionSummary() {
@@ -1380,6 +1409,23 @@ export class DiscussionOrchestrator {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });
+  }
+}
+
+async function shadowWriteLedgerCheckpoint(
+  sessionId: string,
+  ledger: TaskLedger,
+  phase: string
+): Promise<void> {
+  try {
+    await upsertLedgerCheckpoint({
+      sessionId,
+      phase,
+      ledgerVersion: ledger.ledgerVersion,
+      ledgerJson: serializeLedger(ledger),
+    });
+  } catch {
+    // shadow mode: never throw, never block main flow
   }
 }
 

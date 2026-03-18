@@ -6,6 +6,12 @@ import { buildDecisionConfidenceMeta, classifyEvidenceStatus } from '@/lib/decis
 import type { ResearchEvaluation, ResearchSource } from '@/lib/search/types';
 import { findResearchSourceByCitation, getResearchSourceCitationLabel } from '@/lib/search/utils';
 
+interface RiskRegisterItem {
+  riskId: string;
+  description: string;
+  severity: 'high' | 'medium' | 'low';
+}
+
 interface DecisionSummaryCardProps {
   title?: string;
   decisionSummary: DecisionSummary;
@@ -14,6 +20,7 @@ interface DecisionSummaryCardProps {
   confidenceMeta?: DecisionConfidenceMeta | null;
   researchStatus?: 'running' | 'completed' | 'partial' | 'skipped' | 'failed' | 'idle';
   footer?: React.ReactNode;
+  riskRegister?: RiskRegisterItem[];
 }
 
 export function DecisionSummaryCard({
@@ -24,6 +31,7 @@ export function DecisionSummaryCard({
   confidenceMeta = null,
   researchStatus = 'idle',
   footer,
+  riskRegister,
 }: DecisionSummaryCardProps) {
   const trustSignals = summarizeTrustSignals(
     decisionSummary,
@@ -125,6 +133,31 @@ export function DecisionSummaryCard({
         <Section heading="Recommended Option" body={decisionSummary.recommendedOption} />
         <ListSection heading="Why" items={decisionSummary.why} />
         <ListSection heading="Risks" items={decisionSummary.risks} />
+        {riskRegister && riskRegister.length > 0 && (
+          <div className="space-y-1">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+              结构化风险
+            </p>
+            <div className="space-y-1">
+              {riskRegister.map((item) => (
+                <div key={item.riskId} className="flex items-start gap-2 text-sm rt-text-strong">
+                  <span
+                    className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                      item.severity === 'high'
+                        ? 'bg-red-500/20 text-red-300'
+                        : item.severity === 'medium'
+                          ? 'bg-amber-500/20 text-amber-300'
+                          : 'bg-emerald-500/20 text-emerald-300'
+                    }`}
+                  >
+                    {item.severity}
+                  </span>
+                  <span>{item.description}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <ListSection heading="Open Questions" items={decisionSummary.openQuestions} />
         <ListSection heading="Next Actions" items={decisionSummary.nextActions} />
         <ListSection

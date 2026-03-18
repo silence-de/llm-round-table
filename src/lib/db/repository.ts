@@ -50,12 +50,16 @@ import {
   decisionClaims,
   decisionSummaries,
   interjections,
+  judgeEvaluations,
+  ledgerValidationMetrics,
   messages,
   minutes,
   researchRuns,
   researchSources,
   sessionEvents,
   sessions,
+  summaryVersions,
+  taskLedgerCheckpoints,
 } from './schema';
 
 export async function createSession(input: {
@@ -2709,4 +2713,114 @@ export async function listAgentReplyArtifacts(
     return rows.filter((row) => row.round === round);
   }
   return rows;
+}
+
+export async function upsertLedgerCheckpoint(input: {
+  sessionId: string;
+  phase: string;
+  ledgerVersion: number;
+  ledgerJson: string;
+}): Promise<void> {
+  const id = nanoid();
+  await db.insert(taskLedgerCheckpoints).values({
+    id,
+    sessionId: input.sessionId,
+    phase: input.phase,
+    ledgerVersion: input.ledgerVersion,
+    ledgerJson: input.ledgerJson,
+    createdAt: new Date(),
+  });
+}
+
+export async function getLatestLedgerCheckpoint(sessionId: string) {
+  const rows = await db
+    .select()
+    .from(taskLedgerCheckpoints)
+    .where(eq(taskLedgerCheckpoints.sessionId, sessionId))
+    .orderBy(desc(taskLedgerCheckpoints.createdAt))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function listLedgerCheckpoints(sessionId: string) {
+  return db
+    .select()
+    .from(taskLedgerCheckpoints)
+    .where(eq(taskLedgerCheckpoints.sessionId, sessionId))
+    .orderBy(asc(taskLedgerCheckpoints.createdAt));
+}
+
+export async function recordLedgerValidationMetric(input: {
+  sessionId: string;
+  coverageRate: number;
+  coveredCount: number;
+  totalCount: number;
+  coveragePassed: boolean;
+  riskCount: number;
+  highSeverityCount: number;
+  overallPassed: boolean;
+  evaluatedAt: number;
+}): Promise<void> {
+  const id = nanoid();
+  await db.insert(ledgerValidationMetrics).values({
+    id,
+    sessionId: input.sessionId,
+    coverageRate: input.coverageRate,
+    coveredCount: input.coveredCount,
+    totalCount: input.totalCount,
+    coveragePassed: input.coveragePassed ? 1 : 0,
+    riskCount: input.riskCount,
+    highSeverityCount: input.highSeverityCount,
+    overallPassed: input.overallPassed ? 1 : 0,
+    evaluatedAt: new Date(input.evaluatedAt),
+    createdAt: new Date(),
+  });
+}
+
+export async function recordJudgeEvaluation(input: {
+  sessionId: string;
+  summaryVersion: number;
+  passedCount: number;
+  totalDimensions: number;
+  overallPassed: boolean;
+  dimensionsJson: string;
+  evaluatedAt: number;
+}): Promise<void> {
+  const id = nanoid();
+  await db.insert(judgeEvaluations).values({
+    id,
+    sessionId: input.sessionId,
+    summaryVersion: input.summaryVersion,
+    passedCount: input.passedCount,
+    totalDimensions: input.totalDimensions,
+    overallPassed: input.overallPassed ? 1 : 0,
+    dimensionsJson: input.dimensionsJson,
+    evaluatedAt: new Date(input.evaluatedAt),
+    createdAt: new Date(),
+  });
+}
+
+export async function upsertSummaryVersion(input: {
+  sessionId: string;
+  version: number;
+  summaryJson: string;
+  rewriteTriggered: boolean;
+}): Promise<void> {
+  const id = nanoid();
+  await db.insert(summaryVersions).values({
+    id,
+    sessionId: input.sessionId,
+    version: input.version,
+    summaryJson: input.summaryJson,
+    rewriteTriggered: input.rewriteTriggered ? 1 : 0,
+    createdAt: new Date(),
+  });
+}
+
+export async function listSummaryVersions(sessionId: string) {
+  return db
+    .select()
+    .from(summaryVersions)
+    .where(eq(summaryVersions.sessionId, sessionId))
+    .orderBy(asc(summaryVersions.version));
 }
