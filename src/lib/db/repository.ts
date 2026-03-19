@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import type { PersonaSelection } from '../agents/types';
 import type {
@@ -741,34 +741,19 @@ export async function getSessionDetail(sessionId: string) {
         }
       )
     : null;
-  const confidenceMeta =
-    baseDecisionSummary
-      ? (baseDecisionSummary.adjustedConfidence !== undefined
-          ? {
-              // Use persisted value — don't recompute to avoid drift over time
-              rawConfidence: baseDecisionSummary.rawConfidence ?? baseDecisionSummary.confidence,
-              adjustedConfidence: baseDecisionSummary.adjustedConfidence,
-              totalPenalty: Math.max(0, (baseDecisionSummary.rawConfidence ?? baseDecisionSummary.confidence) - baseDecisionSummary.adjustedConfidence),
-              adjustments: [],
-              evidenceBackedClaims: baseDecisionSummary.evidence.filter(e => e.sourceIds.length > 0).length,
-              unsupportedClaims: baseDecisionSummary.evidence.filter(e => e.sourceIds.length === 0).length,
-              citedSources: 0,
-              citedDomains: 0,
-              staleSources: 0,
-            }
-          : buildDecisionConfidenceMeta(
-              baseDecisionSummary.rawConfidence ?? baseDecisionSummary.confidence,
-              baseDecisionSummary.evidence,
-              researchRun?.sources ?? []
-            )
-        )
-      : null;
   const calibrationContext = await getSessionCalibrationContext(
     session.id,
     session.templateId ?? null,
     session.decisionType
   );
   const normalizedDecisionSummary = baseDecisionSummary;
+  const confidenceMeta = baseDecisionSummary
+    ? buildDecisionConfidenceMeta(
+        baseDecisionSummary.rawConfidence ?? baseDecisionSummary.confidence,
+        baseDecisionSummary.evidence,
+        researchRun?.sources ?? []
+      )
+    : null;
   const actionStats = summarizeActionItems(sessionActionItems);
   const unresolvedEvidence =
     normalizedDecisionSummary?.evidence
@@ -1371,31 +1356,18 @@ export async function updateSessionUsage(
   sessionId: string,
   usage: { inputDelta?: number; outputDelta?: number }
 ) {
-  const [current] = await db
-    .select({
-      usageInputTokens: sessions.usageInputTokens,
-      usageOutputTokens: sessions.usageOutputTokens,
-    })
-    .from(sessions)
-    .where(eq(sessions.id, sessionId))
-    .limit(1);
+  const inputDelta = Math.round(Number(usage.inputDelta ?? 0));
+  const outputDelta = Math.round(Number(usage.outputDelta ?? 0));
 
-  if (!current) return;
-
-  await db
-    .update(sessions)
-    .set({
-      usageInputTokens: Math.max(
-        0,
-        (current.usageInputTokens ?? 0) + (usage.inputDelta ?? 0)
-      ),
-      usageOutputTokens: Math.max(
-        0,
-        (current.usageOutputTokens ?? 0) + (usage.outputDelta ?? 0)
-      ),
-      updatedAt: new Date(),
-    })
-    .where(eq(sessions.id, sessionId));
+  sqliteDb
+    .prepare(
+      `UPDATE sessions
+       SET usage_input_tokens = MAX(0, usage_input_tokens + ?),
+           usage_output_tokens = MAX(0, usage_output_tokens + ?),
+           updated_at = ?
+       WHERE id = ?`
+    )
+    .run(inputDelta, outputDelta, Date.now(), sessionId);
 }
 
 export async function listRoundMessages(sessionId: string, phase: string, round: number) {
@@ -2915,16 +2887,10 @@ export async function getPhaseReliabilityMetrics(
           'phase_completed',
           'phase_failed',
         ]),
-        // createdAt >= since
+        gte(sessionEvents.createdAt, since)
       )
     )
     .orderBy(asc(sessionEvents.createdAt));
-
-  // Filter by window in JS (Drizzle SQLite doesn't support date comparison directly)
-  const filtered = rows.filter((row) => {
-    const ts = normalizeDateLike(row.createdAt);
-    return Number(ts) >= since.getTime();
-  });
 
   type PhaseBucket = {
     started: number;
@@ -2938,7 +2904,7 @@ export async function getPhaseReliabilityMetrics(
   // Track start times per session+phase for duration calculation
   const startTimes = new Map<string, number>();
 
-  for (const row of filtered) {
+  for (const row of rows) {
     const phase = row.phase ?? 'unknown';
     const bucket = byPhase.get(phase) ?? {
       started: 0,

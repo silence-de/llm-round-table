@@ -17,6 +17,16 @@ export async function GET(
     return apiError(404, 'NOT_FOUND', 'snapshot not found');
   }
   const resolvedPath = path.resolve(source.snapshotPath);
+  const dataDir = process.env.ROUND_TABLE_DATA_DIR?.trim()
+    ? path.resolve(process.env.ROUND_TABLE_DATA_DIR)
+    : path.join(process.cwd(), 'data');
+  const captureDir = path.resolve(path.join(dataDir, 'verification-captures'));
+  const insideCaptureDir =
+    resolvedPath === captureDir ||
+    resolvedPath.startsWith(`${captureDir}${path.sep}`);
+  if (!insideCaptureDir) {
+    return apiError(403, 'UNAUTHORIZED', 'snapshot path outside capture directory');
+  }
   if (!fs.existsSync(resolvedPath)) {
     return apiError(404, 'NOT_FOUND', 'snapshot file missing');
   }

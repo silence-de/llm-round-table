@@ -308,11 +308,8 @@ export function classifyEvidenceStatus(
 ): 'evidence_backed' | 'extracted' | 'captured' | 'inferred' | 'ungrounded' {
   // Use explicit verificationStatus if present
   if (evidence.verificationStatus) return evidence.verificationStatus;
-  if (evidence.sourceIds.length > 0) return 'extracted';
-  const reason = evidence.gapReason?.toLowerCase() ?? '';
-  if (/待验证|验证|核验|确认|check|verify|unknown|missing|unclear/.test(reason)) {
-    return 'inferred';
-  }
+  if (evidence.sourceIds.length > 0) return 'evidence_backed';
+  if (evidence.gapReason?.trim()) return 'inferred';
   return 'ungrounded';
 }
 
@@ -432,13 +429,15 @@ export function buildDecisionConfidenceMeta(
     };
   }
 
-  const unsupportedClaims = evidence.filter((item) => item.sourceIds.length === 0).length;
-  const citedSources = evidence
-    .flatMap((item) =>
-      item.sourceIds
-        .map((sourceId) => findResearchSourceByCitation(sourceId, researchSources))
-        .filter((source): source is ResearchSource => Boolean(source))
-    );
+  const resolvedSourcesByClaim = evidence.map((item) =>
+    item.sourceIds
+      .map((sourceId) => findResearchSourceByCitation(sourceId, researchSources))
+      .filter((source): source is ResearchSource => Boolean(source))
+  );
+  const unsupportedClaims = resolvedSourcesByClaim.filter(
+    (resolvedSources) => resolvedSources.length === 0
+  ).length;
+  const citedSources = resolvedSourcesByClaim.flatMap((resolvedSources) => resolvedSources);
   const uniqueCitedSources = new Map(citedSources.map((source) => [source.id, source]));
   const uniqueDomains = new Set(citedSources.map((source) => source.domain).filter(Boolean));
   const staleCount = citedSources.filter((source) => source.stale).length;

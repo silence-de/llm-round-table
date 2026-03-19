@@ -150,10 +150,10 @@ test('parseDecisionSummary backfills dossier fields from brief when missing', ()
   assert.equal(summary.alternativesRejected.length > 0, true);
 });
 
-test('classifyEvidenceStatus differentiates supported inference and verify states', () => {
+test('classifyEvidenceStatus differentiates evidence-backed, inferred, and ungrounded states', () => {
   assert.equal(
     classifyEvidenceStatus({ claim: 'supported', sourceIds: ['R1'] }),
-    'supported'
+    'evidence_backed'
   );
   assert.equal(
     classifyEvidenceStatus({
@@ -161,7 +161,14 @@ test('classifyEvidenceStatus differentiates supported inference and verify state
       sourceIds: [],
       gapReason: '待验证关键财务数据',
     }),
-    'verify'
+    'inferred'
+  );
+  assert.equal(
+    classifyEvidenceStatus({
+      claim: 'ungrounded',
+      sourceIds: [],
+    }),
+    'ungrounded'
   );
   assert.equal(
     classifyEvidenceStatus({
@@ -169,6 +176,6 @@ test('classifyEvidenceStatus differentiates supported inference and verify state
       sourceIds: [],
       gapReason: '基于讨论推断，暂无直接证据',
     }),
-    'inference'
+    'inferred'
   );
 });

@@ -51,7 +51,14 @@ export async function readSSEEvents(response: Response): Promise<SSEEvent[]> {
     .map((chunk) => chunk.trim())
     .filter(Boolean)
     .map((chunk) => {
-      const payload = chunk.startsWith('data: ') ? chunk.slice(6) : chunk;
+      // SSE chunks may contain multiple lines like:
+      // id: 1
+      // data: {"type":"..."}
+      const payload =
+        chunk
+          .split('\n')
+          .find((line) => line.startsWith('data: '))
+          ?.slice(6) ?? chunk;
       return JSON.parse(payload) as SSEEvent;
     });
 }

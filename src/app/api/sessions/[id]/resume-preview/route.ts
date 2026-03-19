@@ -29,15 +29,18 @@ export async function POST(
   }
 
   const plan = buildResumePlan(detail);
-  await appendSessionEvent(id, {
-    type: 'resume_preview',
-    message: `resume preview from ${sourceSessionId}`,
-    metadata: {
-      sourceSessionId,
-      nextPhase: plan.snapshot.nextPhase,
-      nextRound: plan.snapshot.nextRound,
-    },
-  });
+  const previewTargetSession = await getSessionDetail(id);
+  if (previewTargetSession) {
+    await appendSessionEvent(id, {
+      type: 'resume_preview',
+      message: `resume preview from ${sourceSessionId}`,
+      metadata: {
+        sourceSessionId,
+        nextPhase: plan.snapshot.nextPhase,
+        nextRound: plan.snapshot.nextRound,
+      },
+    });
+  }
 
   return NextResponse.json({ resumeSnapshot: plan.snapshot });
 }

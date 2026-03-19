@@ -227,7 +227,7 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
       // We check for any prefix of the marker so that cross-token boundaries
       // are handled correctly (e.g. "---STRUCT" arrives before "URED---").
       const MARKER = '---STRUCTURED---';
-      let raw = msg.content + token;
+      const raw = msg.content + token;
       // Find the earliest position where a prefix of MARKER starts.
       let cutAt = -1;
       outer: for (let start = 0; start < raw.length; start++) {
