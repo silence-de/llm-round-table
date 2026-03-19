@@ -101,6 +101,35 @@ GPT-5.4 详细分析了 RIPD（Rubric-Induced Preference Drift）：自然语言
 
 ---
 
+## 5b. GPT 分析补充：代码现状与开发指引
+
+> 来源：`cross-reference-analysis-by-gpt5.4.md`，提取其中对 RT 当前实现最有价值的工程判断。
+
+**当前代码缺口（GPT 视角）**
+- `JudgeDimension` 仍以 `score` 为一等字段，缺少 `ESCALATE` 状态——当前 judge 是"分数化、弱边界"状态，需升级为分层 QA gate。
+- 当前规则偏字符串匹配，尚不足以支持复杂证据对齐与逻辑一致性检查。
+- 缺少偏差监测与人工抽样校准协议。
+
+**P0 开发优先级（GPT 视角）**
+- 将 gate 结果升级为三态：`PASS` / `REWRITE` / `ESCALATE`。
+- 重构 judge 输出结构：保留维度级别结果，增加 `actionableFixes[]`，`score` 降级为内部可选字段。
+- UI/PDF 中移除任何会被解读为"权威认证"的 judge 表达。
+
+**P1 开发优先级（GPT 视角）**
+- 加入 deterministic pre-check 层：evidence refs 是否存在、risk section 是否存在、required fields 是否完整。
+- 建立人工抽样闭环：优先复核 `REWRITE` 与 `ESCALATE`，记录 judge-human agreement。
+
+**P2 开发优先级（GPT 视���）**
+- 构建偏差扰动测试集（位置交换、冗长度扰动、虚假权威词注入）。
+- 在供应链允许时引入跨模型族 judge。
+
+**验收指标（GPT 视角）**
+- 代码测试：judge 三态输出、rewrite 最大轮次、deterministic hard gate。
+- 产品验收：用户界面不出现 judge 权威标签，judge 失败能给出维度级修复建议。
+- 运营指标：`rewrite_trigger_rate`、`escalate_rate`、`judge_human_agreement`。
+
+---
+
 ## 6. 遗留问题
 
 **问题 1：关键证据清单（golden checklist）的构建与维护机制**
