@@ -1,337 +1,430 @@
-# Round Table Red-Team Review
+# Round Table — Full Project Red Team Review
 
-> Written by Claude Sonnet 4.6 | March 2026 | Based on direct code inspection across 40+ files
-
----
-
-## Executive Summary
-
-Round Table has real engineering depth. The orchestrator, streaming architecture, research pipeline, and schema design reflect genuine thought. This is not a weekend toy. But the product promise — "trusted personal decision assistant," "evidence-backed," "calibrated," "decision dossier" — exceeds the actual implementation in ways that could damage user trust the first time a user treats the output seriously.
-
-**What is strongest:** The orchestration engine (session lifecycle, SSE streaming, resume logic, agent multiplexing) is well-structured and shows careful engineering. The data model for tracking decisions over time is more thoughtful than most comparable projects. The browser verification concept, even in its current limited form, is directionally correct.
-
-**What is misleading:** The confidence number is the most visible trust signal in the entire product. It is computed from an LLM self-assessment (an uncalibrated integer the LLM is prompted to produce) with hardcoded point deductions applied at read time. It is presented as a precise percentage with no indication that it carries a ±15-20 point uncertainty band. Users facing real decisions will anchor on the difference between 74% and 76% — that difference is pure noise.
-
-**What is most fragile:** The browser verification pipeline launches two separate headless Chromium instances per verification call, with no browser pool and no protection against internal network access (SSRF). The PDF export throws if no CJK font is available on the system. Authentication is a single optional shared secret that is not enforced per-user or per-session.
-
-**Whether the current implementation deserves the positioning claim:** Not yet. "Trusted personal decision assistant" requires trust infrastructure (auth, evidence integrity, calibration validity) and confidence semantics that are defensible to a user who stakes real decisions on the output. The current implementation is a sophisticated prototype that looks like a trusted tool but lacks the internal guarantees that would make it one.
+> **Reviewer**: Claude Opus 4.6
+> **Date**: 2026-03-19
+> **Scope**: UI/UX & 前端交互、后端交互逻辑、架构设计、持续优化方向
 
 ---
 
-## Severity Map
+## 统计总览
+
+| 维度 | P0 | P1 | P2 | 合计 |
+|------|:--:|:--:|:--:|:----:|
+| 维度 1: UI/UX & 前端交互 | 5 | 10 | 10 | 25 |
+| 维度 2: 后端交互逻辑 | 0 | 4 | 7 | 11 |
+| 维度 3: 架构设计 | 2 | 6 | 4 | 12 |
+| 维度 4: 持续优化方向 | 1 | 8 | 6 | 15 |
+| **合计** | **8** | **28** | **27** | **63** |
 
 ---
 
-## Critical
+## 维度 1: UI/UX & 前端交互
 
-### No User Authentication or Session Isolation
-- **Status:** `Verified`
-- **Why it matters:** For a product whose explicit purpose is storing sensitive personal decisions (career changes, investments, life events), having no authentication is a fundamental trust failure. Any client with network access can read, modify, or export any session by guessing or knowing a session ID. Session IDs are nanoid-generated (21 chars) — not easily guessable in practice, but the protection is through obscurity, not design.
-- **Where it exists:** All routes under `src/app/api/sessions/[id]/`. The only protection is an optional `ROUND_TABLE_ACCESS_TOKEN` header check (a shared secret, not per-user). `src/app/api/sessions/ops/route.ts` has zero authentication at all — it exposes the full operational dashboard (session counts, degraded events, provider errors) to any client.
-- **Real-world failure mode:** A user deploys Round Table and shares the URL with a co-founder "just to show it off." That co-founder can now read and export all decision sessions, including ones never shared with them. Worse: any browser tab open on the same network can `fetch('/api/sessions/ops')` and get the full operational overview.
-- **Why the builder may miss it:** It's a personal tool initially, so auth feels unnecessary. But the product positioning is explicitly about "important life decisions" — the data is sensitive by definition, and the deployment model implies at least some multi-user or shared-environment exposure.
-- **Recommended fix:** Implement session-owner binding at minimum. Store a `createdBy` identity (even a persistent browser fingerprint or self-managed user token) at session creation. Verify on every read/write. Add required auth to the `/api/sessions/ops` route.
-- **Priority:** `P0`
+### P0 — 严重问题
 
----
+#### 1.1 Watchdog 超时消息无恢复路径
+- **位置**: `src/hooks/use-discussion-stream.ts:49-52`
+- **描述**: 错误消息 "Connection interrupted. Please refresh and use resume if needed" 无法区分暂时性网络故障和真实错误，强制用户刷新页面导致 UI 状态丢失。
+- **影响**: 暂时性网络抖动即引发用户恐慌；无法判断 session 是否可恢复。
+- **建议**: 实现指数退避自动重连；先展示可关闭的警告横幅（10-20s），超时后再升级为模态弹窗并带"重新连接"按钮；调用 `/api/sessions/{id}/resume-preview` 展示可恢复的内容。
 
-### Confidence Numbers Are Precision Theater
-- **Status:** `Verified`
-- **Why it matters:** Confidence is the primary epistemic signal in the entire product. The decision dossier is built around it. Users will use it to decide how seriously to commit to a path. If it carries no real information at the claimed precision, the product's trust model is hollow at its center.
-- **Where it exists:** `src/lib/orchestrator/moderator.ts:268` — the prompt instructs the LLM: `"confidence 用 0-100 的整数"` with an example of `76`. The LLM produces an integer that "sounds reasonable." Then `src/lib/decision/utils.ts:427-455` applies penalties: -8 per unsupported claim (capped at -24), -10 for 50%+ stale sources, -6 for single-domain sources. These are applied in `buildDecisionConfidenceMeta()` at read time (not persisted as adjusted confidence). `predictedConfidence` in the `decision_summaries` table stores the raw LLM self-assessment.
-- **Real-world failure mode:** The LLM outputs `76`. User has 2 unsupported claims → -16 points → displayed as `60%`. User returns the next day and adds browser-verified source, resolving 1 claim → displayed as `68%`. Neither number has a defensible statistical basis. The user treats the change from 60→68 as meaningful signal that their new source materially improved the evidence quality. It does not — the delta was determined by a hardcoded `8` in a function with no empirical calibration.
-- **Why the builder may miss it:** The formula feels rigorous because it has moving parts. The penalties are directionally sensible (unsupported claims should lower confidence). The problem is that the absolute scale is arbitrary and the deltas are invented. It creates the *feeling* of calibrated measurement while having none of its properties.
-- **Recommended fix:** Replace numeric confidence with transparent qualitative bands: `Strong evidence` / `Mixed evidence` / `Weak evidence` / `Speculative`. Surface the underlying counts (supported claims: 4, unsupported: 2, stale sources: 1) and let users form their own judgment. If a number must be shown, clearly label it as "self-assessed" with a documented uncertainty range. Never display it to the nearest integer.
-- **Priority:** `P0`
+#### 1.2 Zustand Store 在 Resume 时未同步
+- **位置**: `src/hooks/use-discussion-stream.ts:246-254` + `src/stores/discussion-store.ts:41`
+- **描述**: `resume_snapshot` 事件设置了 `resumeSnapshot` 但未将 recovery metadata（nextPhase, nextRound）合并到活跃的 phase/round 状态。刷新页面后 snapshot 丢失（未持久化）。
+- **影响**: Resume 工作流静默失败；用户可能重复执行已完成的阶段。
+- **建议**: 收到 `resume_snapshot` 事件时立即合并 snapshot 字段到 phase/round；将 resumeSnapshot 持久化到 sessionStorage。
 
----
+#### 1.3 Error 状态在 Session 切换时未清除
+- **位置**: `src/stores/discussion-store.ts:339-374`（reset 函数）
+- **描述**: `reset()` 未显式清除 `error` 字段。旧的 error toast 在启动新 session 时仍然存在。
+- **影响**: 用户无法分辨错误属于哪个 session，认知负荷高。
+- **建议**: 在 reset 函数中添加 `error: null`；在 `startDiscussion` 中先调用 `setError(null)` 再 `store.reset()`。
 
-### Browser Verification Is Structured Scraping, Not Verification
-- **Status:** `Verified`
-- **Why it matters:** The product UI uses "Verified page," "verified facts," and "browser capture" language that implies semantic validation — that the system has checked whether a claim is supported by a page. The implementation is keyword-triggered sentence extraction from a text dump. A page with the word "benefit" anywhere in its body text generates a "Benefits" verified fact regardless of context. This is misleading to users making consequential decisions who will treat these as validated facts.
-- **Where it exists:** `src/lib/search/browser-verify.ts:180-257` — `extractVerificationFields()` uses `matchKeywordSentence()` which finds the first sentence in the page text containing any of the supplied keywords. For the `career_offer` profile, "Benefits" matches the first sentence containing `['benefits', 'insurance', 'pto', 'leave']`. The matched sentence is returned with `confidence: 'medium'` or `'high'` and stored as a verified fact. There is zero semantic validation that the sentence means what the label implies.
-- **Real-world failure mode:** User verifies a job offer page. The page has a cookie consent banner: "Accepting cookies provides benefits for your experience." The system extracts that sentence as the `Benefits` verified fact with `confidence: 'medium'`. The decision dossier now cites cookie banner text as evidence about job compensation. The user, who glanced at the "verified" badge, does not manually inspect the raw extracted text.
-- **Why the builder may miss it:** Verification works correctly on well-structured pages from major employers (LinkedIn, Glassdoor) where keywords appear in the right context. Testing against best-case pages masks failure modes on real-world pages with ads, sidebars, banners, and unstructured layouts.
-- **Recommended fix:** Rename all user-facing language to "browser capture" or "extracted signals." Remove "verified" from the UI terminology entirely. Add a mandatory manual review step where users confirm extracted fields before they enter the evidence chain. Never apply `confidence: 'high'` to regex-matched sentences — that rating implies semantic validation the system cannot provide.
-- **Priority:** `P0`
+#### 1.4 Interjection 提交无 Loading 状态
+- **位置**: `src/hooks/use-discussion-stream.ts:122-177`
+- **描述**: `sendInterjection()` 不返回 loading 状态；按钮不禁用；无成功确认。慢网络下用户可能重复提交。
+- **影响**: 关键时刻的 interjection 体验差；存在重复提交风险。
+- **建议**: 在 store 中添加 `sendingInterjection` boolean；提交期间禁用输入；本地乐观展示 + 服务端同步。
 
----
+#### 1.5 Session Resume 失败时无降级方案
+- **位置**: `src/app/api/sessions/[id]/resume-preview/route.ts:19-22`
+- **描述**: Resume 失败（404/500）返回错误但 UI 无明确提示。
+- **影响**: Follow-up 工作流静默中断；用户无法判断 resume 丢失还是系统报错。
+- **建议**: 返回描述性错误信息；在客户端展示模态弹窗："恢复上下文不可用，是否重新开始？"
 
-### PDF Export Throws on Missing CJK Font With No User-Facing Recovery
-- **Status:** `Verified`
-- **Why it matters:** The PDF decision dossier is the primary shareable deliverable — the artifact that justifies the product positioning. If export fails, the entire session's analytical value is locked behind the app UI. For a product targeting Chinese-language users (all prompts are in Chinese, all templates are in Chinese), failure to export in Chinese environments is a complete product failure.
-- **Where it exists:** `src/lib/session-artifact-files.ts:696-713` — `registerPdfFonts()` iterates through font candidates. If none exist, it throws: `'No usable PDF font file found. Set ROUND_TABLE_PDF_CJK_FONT to a valid .ttf/.otf font path.'` Font candidates include `ROUND_TABLE_PDF_CJK_FONT` env var, some Vercel-bundled paths, and system paths on macOS and Linux. On a standard cloud Linux VM without pre-installed Noto CJK fonts, all candidates fail. `src/lib/session-artifact-files.ts:18` — the Vercel og fallback is `noto-sans-v27-latin-regular.ttf` which is Latin-only and will render Chinese content as tofu (empty boxes) if it happens to resolve.
-- **Real-world failure mode:** User deploys on a cloud VM. They complete a 30-minute decision session on whether to accept a job offer. They click "Export PDF." They receive a raw `502` error. The decision dossier is gone. The session data still exists in the database but there is no structured markdown export that covers all the same fields.
-- **Why the builder may miss it:** macOS development machines always have `Arial Unicode.ttf` at `/System/Library/Fonts/Supplemental/Arial Unicode.ttf`, so development export works. The CJK test (`test/pdf-artifact-cjk.test.ts`) explicitly skips via `t.skip()` when no font is available, so CI never catches this failure.
-- **Recommended fix:** Bundle a CJK-capable font (NotoSansSC-Regular.ttf, ~5MB, OFL license) in `public/fonts/` and make it the first candidate in `PDF_FONT_CANDIDATES`. Add a pre-flight check at startup. Add a user-facing fallback: if PDF export fails, auto-offer structured markdown download. Never surface raw internal errors to users.
-- **Priority:** `P0`
+### P1 — 重要问题
 
----
+#### 1.6 SSE 事件解析静默丢弃异常
+- **位置**: `src/hooks/use-discussion-stream.ts:84-90`
+- **描述**: JSON.parse 失败被静默 catch，无任何日志。如果事件格式错误或跨边界拆分，讨论状态过期但用户无感知。
+- **影响**: 静默数据丢失；讨论可能无提示地冻结。
+- **建议**: 添加 `console.error` 日志；连续 3 次以上解析失败后设置错误状态提示用户。
 
-## High
+#### 1.7 Markdown 引号预处理脆弱
+- **位置**: `src/components/ui/markdown-content.tsx:130-178`
+- **描述**: 基于复杂正则的 CJK 引号预处理（`**"x"**` → `"**x**"`）存在边缘情况，无法处理所有嵌套场景。
+- **影响**: Markdown 渲染不一致，尤其是非英文内容。
+- **建议**: 使用更健壮的解析器（remark-parse + CJK 插件）；建立边缘用例测试语料。
 
-### Double Chromium Launch Per Verification With No Resource Guard
-- **Status:** `Verified`
-- **Why it matters:** Each browser verification call launches two separate Chromium processes: one via the Playwright SDK (`extractPlaywrightBodyText()`) for DOM text, and one via `npx -y playwright screenshot` CLI for the screenshot. There is no browser pool, no concurrency limit, no memory guard. On a server with 1-2GB RAM, simultaneous verifications can exhaust memory.
-- **Where it exists:** `src/lib/search/browser-verify.ts:415-452` — `extractPlaywrightBodyText()` dynamically imports `playwright` and calls `playwright.chromium.launch()`. Then `src/lib/search/browser-verify.ts:364-368` separately calls `execFileAsync('npx', ['-y', 'playwright', 'screenshot', ...])`. These are two independent Chromium launches. The `npx -y` also downloads the CLI if not cached — adding 5-30 seconds before the 8-second timeout even begins.
-- **Real-world failure mode:** User verifies 3 sources back-to-back. Server spawns 3 SDK instances × 2 = 6 Chromium processes. The process OOMs. The Node.js server crashes. An ongoing SSE stream from a different session is orphaned mid-discussion. The user sees a connection error and cannot tell how much was saved.
-- **Why the builder may miss it:** Browser verification tests disable Playwright entirely (`process.env.NODE_ENV === 'test'` returns null from both extraction paths). The double-launch is invisible from the function signatures.
-- **Recommended fix:** Use `page.screenshot()` from the already-open Playwright page object in `extractPlaywrightBodyText()`. This combines both operations into one browser launch. Eliminate the `npx` CLI path entirely. Add a per-server concurrency semaphore capping simultaneous browser launches at 1-2.
-- **Priority:** `P1`
+#### 1.8 自动滚动忽略用户滚动意图
+- **位置**: `src/components/discussion/discussion-feed.tsx:81-84`
+- **描述**: 每次消息变化都调用 `scrollIntoView({ behavior: 'smooth' })`，无防抖，无用户意图检测。移动端体验尤其差。
+- **影响**: 高频消息时滚动抖动；用户无法回看已有内容。
+- **建议**: 防抖 150ms；仅在用户已位于底部（100px 范围内）时自动滚动；用户上滑时显示"跳转最新"按钮。
 
----
+#### 1.9 Agent Card 流式时自动滚动频繁
+- **位置**: `src/components/discussion/agent-card.tsx:29-36`
+- **描述**: 每个 token 到达都触发卡片滚动到底部。10+ tokens/sec 时用户无法阅读中间内容。
+- **影响**: 可读性差；用户跟不上 agent 回复。
+- **建议**: 仅在已位于底部时滚动；防抖 200ms；用户上滑时暂停自动滚动。
 
-### SSRF via Browser Verification Endpoint
-- **Status:** `Verified`
-- **Why it matters:** The verification endpoint accepts any HTTPS/HTTP URL and loads it in a headless browser running on the server. An attacker (or any user in a shared deployment) can submit internal network URLs and receive whatever the server's network can access.
-- **Where it exists:** `src/lib/search/browser-verify.ts:124-135` — `normalizeVerificationUrl()` validates that the protocol is http or https, but performs no hostname validation. The URL is passed to `playwright.chromium.launch()` + `page.goto()`, which executes with the server's full network context.
-- **Real-world failure mode:** In a VPC deployment (AWS, GCP, Azure), the server can reach internal metadata endpoints (`http://169.254.169.254/latest/meta-data/`). A user submits this URL. The Playwright instance fetches it. The response (IAM credentials, project metadata) becomes `bodyText`, passes through `extractVerificationFields()`, and is stored in the SQLite database as "verified fields" on a research source.
-- **Why the builder may miss it:** The threat model is "personal use," so SSRF feels distant. But even on personal deployments, SSRF enables probing local Docker networks, Redis instances, or other services on the same host.
-- **Recommended fix:** In `normalizeVerificationUrl()`: resolve the hostname to IP, then reject private IP ranges (10.x, 172.16-31.x, 192.168.x, 127.x, ::1), metadata service addresses, and non-routable ranges. Set Playwright network restrictions to block these same ranges at the browser level.
-- **Priority:** `P1`
+#### 1.10 Evidence 链接引用断裂无降级
+- **位置**: `src/components/discussion/decision-summary-card.tsx:206-227`
+- **描述**: Evidence 引用 `sourceIds`，如果 source 被删除或查找失败，原始 sourceId 直接渲染（行 225），无降级样式。
+- **影响**: 用户点击期望有效链接却无法验证 claims。
+- **建议**: 断裂链接使用灰色/删除线 + tooltip "来源未找到"；hydration 时校验所有 evidence 引用。
 
----
+#### 1.11 Interjection 在 Feed 中缺少阶段上下文
+- **位置**: `src/stores/discussion-store.ts:33` + feed 渲染
+- **描述**: Interjection 存储了可选的 phase/round 元数据但未在 feed 中展示。用户看到混在 agent 消息中的 interjection 无法判断是哪个阶段。
+- **影响**: Interjection 看起来孤立；难以追踪其对决策的影响。
+- **建议**: 创建 `InterjectionBubble` 组件，展示 "You @ Round 2, Analysis: [content]"。
 
-### SPA and Client-Rendered Pages Silently Return Empty Body Text
-- **Status:** `Verified`
-- **Why it matters:** A significant fraction of pages users will want to verify (job listings on Greenhouse, Lever, Workday; company pages built in Next.js/React; financial product pages) are SPAs. These render content after JavaScript executes. The pipeline will silently produce empty body text for these pages but still label them as captured sources.
-- **Where it exists:** `src/lib/search/browser-verify.ts:436` — `page.goto()` uses `waitUntil: 'domcontentloaded'`. For React apps, this fires when the HTML is parsed — before hydration. `page.evaluate(() => document.body?.innerText ?? '')` returns the loader text or nothing. The fetch-based fallback at line 43-59 also returns the static HTML shell (`<div id="root"></div>`) for these apps.
-- **Real-world failure mode:** User verifies a Greenhouse job posting. `domcontentloaded` fires on the empty shell. `innerText` returns "Loading..." `extractionQuality` is set to `'low'`. But the source still appears in the evidence panel with a browser-capture badge because `sourceType === 'browser_verification'` confers the same visual treatment regardless of actual quality.
-- **Why the builder may miss it:** Testing against server-side-rendered pages (LinkedIn profiles, government sites, major newspapers) always works. SPA-heavy recruiting platforms are the actual primary use case.
-- **Recommended fix:** Change `waitUntil` to `'networkidle'` with a 15-second timeout. If `bodyText.length < 200` after `domcontentloaded`, wait for `networkidle` before extracting. Explicitly downgrade the UI presentation for `extractionQuality: 'low'` sources — show a warning instead of a success badge.
-- **Priority:** `P1`
+#### 1.12 Degraded Agent 无恢复指示
+- **位置**: `src/stores/discussion-store.ts:145-150` + `src/hooks/use-discussion-stream.ts:213-220`
+- **描述**: `agent_degraded` 事件添加到 `degradedAgents` 数组，但无反向事件移除。一旦标记为 degraded，即使恢复也不会更新。
+- **影响**: 误导性的信任信号；用户误以为 agent 仍在失败。
+- **建议**: 添加 `agent_recovered` SSE 事件类型；在 degradation 后的成功轮次中发出。
 
----
+#### 1.13 Research Panel 验证表单缺少输入校验
+- **位置**: `src/components/discussion/research-panel.tsx:162-194`
+- **描述**: URL 输入无校验（可能无效、恶意或不完整）；claimHint/verificationNote 无长度限制。
+- **影响**: 服务端收到垃圾数据；过长提交可能导致错误。
+- **建议**: 客户端 URL 校验 `try { new URL(verifyUrl) }`；设置最大长度限制。
 
-### Source Citation Labels Invalidate on Research Rerun
-- **Status:** `Verified`
-- **Why it matters:** The decision summary stores evidence claims with citation labels (`"sourceIds": ["R1", "R3"]`). These refer to sources by their rank position among selected sources. When research reruns happen, or sources are pinned/unpinned/added, ranks recalculate. R3 may now refer to a completely different source than when the decision summary was generated.
-- **Where it exists:** `src/lib/orchestrator/moderator.ts:213-227` — the summary prompt lists sources as `R${source.rank}` and instructs the LLM to cite them by these labels. The generated citation labels are stored in `decisionSummaries.content` JSON. `findResearchSourceByCitation()` resolves citations by matching current source ranks against stored labels at read time.
-- **Real-world failure mode:** User runs research (R1=Forbes, R2=Glassdoor, R3=BLS). Summary: "Compensation is competitive [R1, R3]." User adds a browser-verified source, which inserts at rank 1. Old R1→R2, old R3→R4. The evidence card now shows "Compensation is competitive" backed by the old Glassdoor (now R2) — not the Forbes article that originally supported it. BLS citation is broken (R3 not found). User does not notice.
-- **Why the builder may miss it:** In the happy path (single research run, no reruns, no manual verification), citations are stable. Breakage only manifests with reruns or source additions.
-- **Recommended fix:** Store citation-to-source-ID mappings using the persistent `source.id` UUID at summary generation time. Display R1/R2 labels as user-facing aliases, but resolve them against stable IDs in the DB.
-- **Priority:** `P1`
+#### 1.14 Action Items 状态转换未展示不允许的选项
+- **位置**: `src/components/discussion/action-items-board.tsx:139-141`
+- **描述**: `allowedStatuses` 计算了但未反映在 UI 中。不允许的转换在服务端静默失败。
+- **影响**: 用户以为转换成功但实际静默失败。
+- **建议**: 不允许的选项添加 `aria-disabled` + `opacity-50 cursor-not-allowed`。
 
----
+#### 1.15 空状态文本硬编码中文
+- **位置**: `src/components/discussion/discussion-feed.tsx:76`
+- **描述**: `'等待会议开始…'` 硬编码，无 i18n 系统。
+- **影响**: 非中文用户无法使用。
+- **建议**: 提取到 locale 文件或 context；提供英文默认值。
 
-### 3,868-Line page.tsx With Multiple Competing State Sources
-- **Status:** `Verified`
-- **Why it matters:** A component this large with overlapping state (Zustand store + local `useState` + `historyDetail` API response + live stream results) creates race conditions that cannot be systematically tested. Stale state contamination between sessions is a real risk.
-- **Where it exists:** `src/app/page.tsx` (3,868 lines). The component maintains distinct state for: active session stream data, history panel session detail, calibration panel, replay cursor, export state, follow-up carry-forward preview, research panel, verification panel, persona editor, and more. The Zustand store (`src/stores/discussion-store.ts`) manages parallel stream state.
-- **Real-world failure mode:** User is reviewing a historical session in the history panel while a new session finishes streaming. The `discussion_complete` SSE event triggers `hydrateSessionArtifactsFromSession()`, which reads `store.sessionId` and sets `store.decisionSummary`. If the user switched to a different history session between the stream completing and the fetch returning, the history view is partially overwritten with the new session's decision summary. The user sees data contamination with no indication of what happened.
-- **Why the builder may miss it:** The contamination requires specific timing (history view open, new session stream finishes, history fetch in flight). Under normal usage with one session at a time, it never occurs.
-- **Recommended fix:** Extract page.tsx into purpose-scoped components with explicit state ownership. Stream context, history context, and calibration context must never share mutable state. Add a session ID guard to the hydration effect: if `store.sessionId !== sessionId` at the end of the await, discard the result.
-- **Priority:** `P1`
+### P2 — 优化建议
 
----
+#### 1.16 复制按钮仅 hover 显示 — 移动端不友好
+- **位置**: `src/components/discussion/discussion-feed.tsx:210-219`
+- **建议**: 添加 long-press handler 或始终以低透明度显示。
 
-### Confidence Adjustments Are Computed at Read Time With No Audit Trail
-- **Status:** `Verified`
-- **Why it matters:** The user sees a single confidence number. They form an impression. They return two weeks later and see a different number with no indication that anything changed. This is epistemic drift disguised as stable data.
-- **Where it exists:** `src/lib/decision/utils.ts:394-468` — `buildDecisionConfidenceMeta()` computes adjustments fresh from current source states on every call. `src/lib/db/repository.ts:720-727` — called during `getSessionDetail()`. The `predictedConfidence` column stores only the raw LLM confidence. There is no persisted adjusted confidence, no change log.
-- **Real-world failure mode:** User sees 62% before sharing the dossier with their partner. Partner opens the same session 3 days later after the user added more sources. Partner sees 74%. Neither knows the number moved. The partner makes a comment based on 74%; the user is confused because they remember 62%. Trust in the tool erodes.
-- **Recommended fix:** Persist the adjusted confidence at write time (add `adjustedConfidence` integer column to `decision_summaries`). Call `buildDecisionConfidenceMeta()` during `upsertDecisionSummary()` and store the result. Display the stored value. When source changes make the stored value stale, show a visible indicator ("Evidence updated since last export — recalculate?").
-- **Priority:** `P1`
+#### 1.17 Phase Separator 样式难以区分
+- **位置**: `src/components/discussion/discussion-feed.tsx:149-172`
+- **建议**: 添加阶段图标；增大 font-weight 或添加 border-bottom。
 
----
+#### 1.18 Round Table SVG 不支持无障碍缩放
+- **位置**: `src/components/discussion/round-table-stage.tsx:162-191`
+- **建议**: 添加 `<desc>` 和 `<title>`；使用 CSS `transform: scale()` 响应缩放。
 
-### Calibration Compares Two Subjective Self-Assessments
-- **Status:** `Verified`
-- **Why it matters:** The calibration dashboard is presented as a mechanism for improving future decision quality. The "overconfidence gap" metric compares `predictedConfidence` (LLM self-assessment) against `outcomeConfidence` (user's retroactive integer rating). This is not a prediction vs ground truth comparison. It is comparing two uncalibrated integers generated by two different minds at two different times using no shared reference scale. The resulting charts have no statistical validity.
-- **Where it exists:** `src/lib/db/repository.ts:1151-1164` — `averageCalibrationGap = average(|predictedConfidence - outcomeConfidence|)`. `src/lib/db/repository.ts:1172` — `assessCalibrationSample()` adds a "sample too small" label but does not suppress or disable the charts for samples below 5 sessions.
-- **Real-world failure mode:** User rates an outcome as "65% confident it was right" (meaning: somewhat satisfied). LLM rated the session as "72%." Calibration dashboard shows "overconfidence gap: 7 points" and suggests the user is systematically overconfident. This conclusion is false — 7 points is well inside the noise of two opaque integer mappings by different actors. The user adjusts their decision-making process based on invalid signal.
-- **Why the builder may miss it:** The correlation between LLM confidence and outcome confidence will often be directionally right (high-confidence sessions tend to have better outcomes). This surface validity masks the measurement invalidity.
-- **Recommended fix:** Replace subjective outcome confidence with a structured outcome registry: did you take the recommended action? (yes/no/partially), are you satisfied with the outcome? (1-5 scale), did any `revisitTriggers` fire? (binary). Use binary/categorical inputs for calibration. The current `outcomeConfidence` integer should be deprecated.
-- **Priority:** `P1`
+#### 1.19 无明确的"会议结束"画面
+- **位置**: `src/hooks/use-discussion-stream.ts:234-241`
+- **建议**: 展示完成模态："讨论完成! X 轮次, Y 来源, Z 声明"。
 
----
+#### 1.20 Typing 指示器与活跃发言者状态不同步
+- **位置**: `src/components/discussion/discussion-feed.tsx:53-67`
+- **建议**: 仅对 `message.isStreaming && isActive` 的 agent 展示打字动画。
 
-## Medium
+#### 1.21 Research Panel 分组切换时无动画过渡
+- **位置**: `src/components/discussion/research-panel.tsx:79-85`
+- **建议**: 添加 Framer Motion `AnimatePresence`。
 
-### Silent Partial Failure When LLM Providers Error or Lack Keys
-- **Status:** `Verified`
-- **Why it matters:** When an LLM call fails or a key is missing, agents are silently skipped or degraded. The session completes and appears as a normal completed session, with a full decision summary, confidence score, and dossier — potentially based on a single agent's perspective.
-- **Where it exists:** `src/app/api/sessions/[id]/start/route.ts:108` — agents without API keys are silently skipped with only a code comment explaining why. `src/lib/orchestrator/orchestrator.ts:60-65` — agents are degraded after timeout threshold, continuing the session with fewer participants.
-- **Real-world failure mode:** User selects Claude, GPT-4, and DeepSeek. GPT-4 has no key in the environment. DeepSeek times out twice. Claude has a solo discussion as moderator and sole participant. Decision summary is generated with confidence score. User sees "3 agents" in the session setup but 1 actually contributed. They do not know.
-- **Recommended fix:** Surface a clear pre-flight warning before starting if requested agents cannot run. After session completion, show a "participants" summary that explicitly lists which agents contributed vs. which were skipped/degraded. Visually differentiate single-agent sessions in history.
-- **Priority:** `P1`
+#### 1.22 Loading Skeleton 数量固定为 3
+- **位置**: `src/components/discussion/research-panel.tsx:309-318`
+- **建议**: 改为随机 1-5 个或仅显示 "搜索中..." + spinner。
 
----
+#### 1.23 无 Session 超时预警
+- **位置**: `src/app/api/sessions/[id]/start/route.ts:35`
+- **建议**: 4 分 30 秒时 toast 提醒用户；允许用户请求延长或提前结束。
 
-### JSON Config Blobs in Text Columns Without Schema Versioning
-- **Status:** `Verified`
-- **Why it matters:** Every schema change to `agendaConfig`, `researchConfig`, `personas`, `modelSelections`, or `resumeSnapshot` is a silent breaking change for existing sessions. Old sessions will be read with the new code expecting new fields and will either crash or silently use wrong defaults.
-- **Where it exists:** `src/lib/db/schema.ts:16-31` — 8 JSON text columns on the sessions table. `src/lib/db/repository.ts:703` — `JSON.parse(sessionDecisionSummary.content) as DecisionSummary` — TypeScript cast with no runtime validation.
-- **Real-world failure mode:** A new required field is added to `DiscussionAgenda`. All existing sessions have `agendaConfig` without this field. `normalizeDiscussionAgenda()` uses a default value silently, changing the replay or export behavior of historical sessions.
-- **Recommended fix:** Add `schemaVersion` integer to sessions and decision_summaries. Implement versioned migration functions. Use `zod` validation on every JSON parse to detect shape mismatches at read time rather than silently defaulting.
-- **Priority:** `P1`
+#### 1.24 Moderator 消息流式指示器风格不一致
+- **位置**: `src/components/discussion/discussion-feed.tsx:237-282`
+- **建议**: 统一 moderator 和 agent 在流式期间的视觉突出度。
+
+#### 1.25 浏览器抓取证据快照不可访问
+- **位置**: `src/components/discussion/decision-summary-card.tsx:104-116`
+- **建议**: 确保 `source.snapshotPath` 已填充；在 evidence badge 中添加 `[查看快照]` 链接。
 
 ---
 
-### No Rate Limiting on Resource-Intensive Endpoints
-- **Status:** `Verified`
-- **Why it matters:** Browser verification (Chromium launch), research reruns (Tavily API), and session starts (LLM API) are all unlimited. Repeated calls incur unbounded cost and resource consumption.
-- **Where it exists:** `src/app/api/sessions/[id]/research/verify/route.ts` — no rate limiting. `src/app/api/sessions/[id]/research/route.ts` — `maxReruns` is enforced per session in config, but can be set to high values in the request body. `src/app/api/sessions/[id]/start/route.ts` — no per-IP limiting.
-- **Real-world failure mode:** A script POSTs to the verification endpoint 10 times per second, spawning 20 Chromium processes simultaneously, OOMing the server and crashing all in-flight sessions.
-- **Recommended fix:** Add in-memory token bucket rate limiting on browser verification and research rerun endpoints. Cap `maxReruns` server-side regardless of client input. Add a per-server concurrency semaphore for Playwright browser launches.
-- **Priority:** `P1`
+## 维度 2: 后端交互逻辑
+
+### P1 — 重要问题
+
+#### 2.1 Judge Gate Rewrite Loop 无进度停滞早退机制
+- **位置**: `src/lib/orchestrator/orchestrator.ts:1412-1475`
+- **描述**: Rewrite 循环条件 `while (currentJudge.gate === 'REWRITE' && rewriteCount < 2)` 即使 `newJudge.passedCount < currentJudge.passedCount`（改进停滞）也继续循环。允许在更差和相同方案之间振荡。
+- **影响**: 浪费 token 预算；最终摘要可能不如前版本。
+- **建议**: 添加 `noImprovementCount` 计数器，连续 2 次无改善即 break。
+
+#### 2.2 SSE Catch-Up Replay 缺少 Gap 检测
+- **位置**: `src/app/api/sessions/[id]/start/route.ts:331-340`
+- **描述**: 重连时重放缓冲事件，但不验证 eventId 序列是否连续。如果客户端错过事件 1-5 并以 `lastEventId=2` catch up，收到事件 3+ 但存在 gap。无告警机制。
+- **影响**: 客户端可能丢失关键 phase_change 或 agent_done 事件；前端对事件流 gap 无感知。
+- **建议**: Gap 检测后发射 `system_note` 事件通知客户端。
+
+#### 2.3 SiliconFlow 批量限制未一致执行
+- **位置**: `src/lib/orchestrator/orchestrator.ts:415-427` + `src/lib/llm/siliconflow-provider.ts:112-128`
+- **描述**: 两个独立的排队机制：orchestrator 层批处理和 SiliconFlowProvider 内部 `acquireSlot()`。可能有不同的最大并发值，导致不可预测的并发行为。
+- **影响**: 批次隔离保证失效；429 限流错误可能无法正确传播。
+- **建议**: 移除 SiliconFlowProvider 内部排队，让 orchestrator 批处理成为唯一并发控制。
+
+#### 2.4 Provider 429/503 错误无自动重试
+- **位置**: `src/lib/llm/deepseek-provider.ts:13`, `siliconflow-provider.ts:16`, `moonshot-provider.ts:13`
+- **描述**: 所有 provider SDK 使用 `maxRetries: 1` 无指数退避。虽然 `failure-classifier.ts` 识别 429/503 为 TRANSIENT 且可重试，但 orchestrator 从未调用 `classifyError()` 或实现重试。
+- **影响**: SiliconFlow 的 429 限流直接中止整个讨论而非 backoff 恢复；已实现的 failure classifier 成为死代码。
+- **建议**: 用指数退避包装 provider 调用；使用已有的 `classifyError()` 区分可重试和不可重试错误。
+
+### P2 — 优化建议
+
+#### 2.5 Agent Degradation 阈值跨阶段不重置
+- **位置**: `src/lib/orchestrator/orchestrator.ts:68-73, 497-518`
+- **描述**: `agentTimeoutCount` map 每次超时递增但跨阶段不重置。一次 INITIAL_RESPONSES 阶段超时的 agent 在后续阶段仍被标记为 degraded。
+- **建议**: 在阶段切换时 `this.agentTimeoutCount.clear()`。
+
+#### 2.6 Session Stop 请求非幂等
+- **位置**: `src/app/api/sessions/[id]/stop/route.ts:5-22`
+- **描述**: Stop route 接受 POST 无幂等保护。并发 stop 请求不验证 session 状态是否实际改变。
+- **建议**: 添加 stop request ID 和幂等检查。
+
+#### 2.7 Resume Plan 丢失 Ledger 上下文
+- **位置**: `src/app/api/sessions/[id]/start/route.ts:183-185` vs `src/lib/orchestrator/resume.ts:214-226`
+- **描述**: Resume 逻辑构建 `resumePlan` 但从未调用 `enrichResumePlanWithLedger()`，导致 ledger checkpoint 和 `needsExternalInput` 标志丢失。
+- **建议**: 获取并应用 ledger checkpoint 到 resumePlan。
+
+#### 2.8 L0/L1 Pre-Check 失败的 Rewrite 指令过于泛化
+- **位置**: `src/lib/orchestrator/orchestrator.ts:1337-1361`, `src/lib/decision/judge.ts:278-297`
+- **描述**: L0/L1 check 失败是硬性 FAIL 维度，但生成的 rewrite 指令是通用的。例如 L1 citation 可解析性失败时，rewrite 指令不说明如何具体修复。
+- **建议**: 让 L0/L1 rewrite 指令包含可操作信息："仅使用可用引用标签（R1-R5），无效引用需删除"。
+
+#### 2.9 Stream Multiplexer 不区分错误类型
+- **位置**: `src/lib/orchestrator/stream-multiplexer.ts:128-140`
+- **描述**: Promise rejections 作为 `provider_error` 发射，不区分终端错误（401 auth）和暂时性错误（网络超时）。
+- **建议**: 在 stream chunk 中保留错误分类信息。
+
+#### 2.10 Ledger Checkpoint 写入 Fire-and-Forget 无错误跟踪
+- **位置**: `src/lib/orchestrator/orchestrator.ts:1564-1579`
+- **描述**: 每个阶段用 `void shadowWriteLedgerCheckpoint()` 写入，静默吞掉错误。DB 不可用时 checkpoint 丢失。
+- **建议**: 跟踪并报告持续 checkpoint 失败；连续 3 次失败后升级为 session DEGRADED 状态。
+
+#### 2.11 SiliconFlow 批量大小默认过低
+- **位置**: `src/lib/orchestrator/orchestrator.ts:415-424`
+- **描述**: 当 `ROUND_TABLE_SILICONFLOW_BATCH_SIZE` 和 `SILICONFLOW_MAX_CONCURRENCY` 未定义时，默认为 1，导致顺序执行可并行的批次。
+- **建议**: 使用合理默认值 3。
 
 ---
 
-### Interjection Control Types Are Advisory Only — LLM Can Ignore Them
-- **Status:** `Verified`
-- **Why it matters:** The product advertises "force convergence" and "add constraint" as explicit user controls over the discussion. Programmatically, they are text appended to the LLM prompt. There is no code that enforces convergence by skipping the debate continuation check.
-- **Where it exists:** `src/lib/orchestrator/orchestrator.ts` — `consumeInterjections()` formats interjection text and includes it in the next LLM prompt. The `shouldConverge` decision at the end of each analysis phase is based on LLM-generated JSON output, not the user's `force_converge` interjection.
-- **Real-world failure mode:** User sends `force_converge` with 5 minutes before a meeting. The LLM, influenced by the prior debate context, generates another round of disagreements. The orchestrator interprets `shouldConverge: false` and continues the debate. The user's explicit control had no effect.
-- **Recommended fix:** For `force_converge`: set a flag that skips the `shouldConverge` LLM check and programmatically transitions to the summary phase. This is a trivial code change that makes the control actually deterministic.
-- **Priority:** `P2`
+## 维度 3: 架构设计
+
+### P0 — 严重问题
+
+#### 3.1 Route Handler 超时 vs 编排持续时间
+- **位置**: `src/app/api/sessions/[id]/start/route.ts:35`
+- **描述**: Route 超时为 300 秒（5 分钟），但 orchestrator 阶段可能需要 6000+ 秒（5 agents × 4 phases × 300s timeout）。Session 在编排中途被强制终止，留下损坏状态。
+- **影响**: Session 在摘要生成或 judge 评估期间中止；决策摘要不完整或未保存。
+- **建议**: 增加 maxDuration 到 1200-1800 秒（20-30 分钟）；添加优雅降级——在每个阶段超时边界前做 checkpoint；考虑按阶段拆分编排为独立 API 调用。
+
+#### 3.2 Decision Memory 表未在迁移中创建
+- **位置**: `src/lib/db/client.ts` + `src/lib/db/schema.ts:244-269`
+- **描述**: `session_reflections` 和 `lessons` 表在 schema.ts 中定义但未在 client.ts 的 `sqlite.exec()` 块中初始化。现有部署不会创建这些表。
+- **影响**: 所有 Decision Memory（Topic 6）功能在生产环境中静默失败；`upsertSessionReflection()` 和 `upsertLesson()` 崩溃并报 "no such table" 错误。
+- **建议**: 在初始 `sqlite.exec()` 块中添加 CREATE TABLE 语句；实现迁移辅助函数自动创建缺失的表。
+
+### P1 — 重要问题
+
+#### 3.3 SQLite 并发无 WAL 或连接池
+- **位置**: `src/lib/db/client.ts:3-19`
+- **描述**: 单一共享 `better-sqlite3` Database 实例，无 WAL 模式或连接池。并发 session 在数据库级别序列化所有写操作，无 `SQLITE_BUSY` 超时或错误处理。
+- **影响**: 5+ 并发 session 时出现可观察的持久化延迟；`SQLITE_BUSY` 错误导致静默失败。
+- **建议**: 启用 WAL 模式 `sqlite.pragma('journal_mode = WAL')`；设置 busy timeout `sqlite.pragma('busy_timeout = 5000')`。
+
+#### 3.4 SSE Event Buffer: 内存泄漏且无持久化
+- **位置**: `src/lib/sse/event-buffer.ts`
+- **描述**: 进程内 Map-based 环形缓冲（200 事件/session，30min TTL）无持久化。进程崩溃丢失所有缓冲事件。无全局内存限制，跨 session 无限制累积。
+- **影响**: 进程崩溃丢失所有事件；多并发 session 可能耗尽堆内存。
+- **建议**: 添加数据库备份 fallback；实现全局内存预算（如总 SSE 缓冲最大 10MB）；使用创建时间而非 `lastAccessAt` 做 TTL 过期。
+
+#### 3.5 Orchestrator 作为单一 Async Generator 缺乏错误恢复
+- **位置**: `src/lib/orchestrator/orchestrator.ts:82-223`
+- **描述**: DiscussionOrchestrator 是单一 `async *run()` generator 顺序编排所有阶段。任何未处理的错误终止整个 generator，损坏 session 状态。无逐阶段错误边界或恢复机制。
+- **影响**: 分析/辩论中的暂时性 DB 错误导致整个 session 失败；必须从头重启编排。
+- **建议**: 重构为显式阶段边界，每个阶段有独立的错误处理和重试逻辑；成功阶段后做 checkpoint。
+
+#### 3.6 Lesson 生命周期永不晋级为 Active
+- **位置**: `src/lib/decision/reflection.ts` + `src/lib/db/repository.ts:3000+`
+- **描述**: Session reflections（T6-1）异步生成，与编排解耦。候选 lessons 创建但永不自动晋级。晋级逻辑 `canPromoteLesson` 存在但在正常流程中从未被调用。
+- **影响**: Session 完成时不保证 reflection 持久化；lessons 永远停留在 "candidate" 状态，永不注入 follow-up session。
+- **建议**: 让 reflection 生成在编排结束前**阻塞**；在 reflection 生成结束时自动晋级满足阈值的 lessons。
+
+#### 3.7 多表更新无事务语义
+- **位置**: `src/lib/db/repository.ts`（全局）
+- **描述**: Session 状态跨多个表（sessions、messages、minutes、decisionSummaries 等）。Orchestrator 调用独立的 insert/update 无事务包裹。`appendMessage()` 和 `updateSessionStatus('completed')` 之间崩溃留下部分写入状态。
+- **影响**: 跨表一致性违反；resume 逻辑在部分写入的 session 上失败。
+- **建议**: 用 Drizzle 事务 API 或 better-sqlite3 事务包裹关键状态变更。
+
+#### 3.8 Task Ledger vs Judge Gate 职责边界不清
+- **位置**: `src/lib/orchestrator/task-ledger.ts` vs `src/lib/decision/judge.ts`
+- **描述**: TaskLedger 跟踪决策进度（claims、risks、coverage），JudgeGate 评估摘要质量（L0/L1 checks、dimensions）。无显式同步：ledger 在编排期间更新，但 judge 评估使用实时 ledger。Rewrite 指令不更新 ledger，造成分歧。
+- **影响**: Ledger 不完整时 judge 评估不可靠；risk disclosure 维度可能在 ledger 有未覆盖的高风险项时仍通过。
+- **建议**: 在 judge 评估前显式"冻结"TaskLedger；传递冻结快照给 judge evaluator。
+
+### P2 — 优化建议
+
+#### 3.9 Void Fire-and-Forget Checkpoint 写入
+- **位置**: `src/lib/orchestrator/orchestrator.ts:568, 628, 636, 680, 771, 1186, 1288`
+- **描述**: `void shadowWriteLedgerCheckpoint()` 静默吞掉错误。
+- **建议**: 改为 `await` 加错误处理；连续 3 次失败升级为 DEGRADED。
+
+#### 3.10 DecisionSummary 类型不完整
+- **位置**: `src/lib/decision/types.ts:114-130`
+- **描述**: 可选 `redLines`、未验证的 `confidence` 范围（0-100）。Judge checks 假设字段存在。
+- **建议**: 使用 branded types 和 zod 校验；required 化关键字段。
+
+#### 3.11 SSE Event 类型缺少 Discriminated Union
+- **位置**: `src/lib/sse/types.ts`
+- **描述**: SSEEvent 是扁平接口加可选字段，无按类型区分。客户端代码必须手动检查 `event.type` 后访问类型特定字段。
+- **建议**: 使用 discriminated unions 启用类型窄化。
+
+#### 3.12 超时配置未校验
+- **位置**: `src/lib/orchestrator/orchestrator.ts:374-407`
+- **描述**: 超时值按 agent tier 和 phase 硬编码，不验证所有超时之和是否小于 route maxDuration（300s）。
+- **建议**: 初始化时校验；超时总和接近 route maxDuration 时发出警告。
 
 ---
 
-### Browser-Verified Sources Are Never Marked Stale
-- **Status:** `Verified`
-- **Why it matters:** Browser-verified sources receive `stale: false` hardcoded regardless of publication date. An outdated page verified by the user bypasses the stale penalty that would apply to the same content found via automatic research.
-- **Where it exists:** `src/lib/search/browser-verify.ts:100-101` — `score: 0.95, stale: false` hardcoded. No call to the staleness checker for browser-verified sources.
-- **Real-world failure mode:** User verifies a salary data page published in 2023. It gets `stale: false, score: 0.95`. The stale penalty in confidence calculation never applies. The decision dossier appears more evidence-backed than warranted for this time-sensitive decision.
-- **Recommended fix:** Extract publication date from the verified page and run it through the existing `isStale()` function from `src/lib/search/research.ts`. Apply staleness logic to browser-verified sources using the same decision-type thresholds.
-- **Priority:** `P2`
+## 维度 4: 持续优化方向
+
+### P0 — 严重问题
+
+#### 4.1 Fire-and-Forget DB 写入无错误处理
+- **位置**: `src/lib/orchestrator/orchestrator.ts:821, 928`
+- **描述**: 关键数据持久化（usage、ledger checkpoints）使用 `void` 无错误处理或重试逻辑。
+- **影响**: 静默数据丢失；无法观测写入失败；usage 指标不可靠。
+- **建议**: 实现指数退避重试。
+
+### P1 — 重要问题
+
+#### 4.2 Store 每 Token 创建新 Map
+- **位置**: `src/stores/discussion-store.ts:202, 223, 248`
+- **描述**: `appendAgentToken()` 每 token 创建整个 `agentMessages` Map 的浅拷贝。500-token 回复 = 500 次 Map 分配。
+- **影响**: GC 压力、内存抖动，慢设备上流式期间有可感知的延迟。
+- **建议**: 使用 immer 或重构为批量更新；启用 shallow 比较。
+
+#### 4.3 Token 估算使用每次编译的正则且 CJK 比率不准
+- **位置**: `src/lib/orchestrator/orchestrator.ts:350-360`
+- **描述**: 正则模式每次调用编译；CJK 比率 1.5 tokens/char（实际应为 0.5-0.7）；无多语言支持。
+- **影响**: 每 session 累计 20-40ms；CJK token 估算膨胀 2-3x。
+- **建议**: 使用 `js-tiktoken` 库或缓存正则模式。
+
+#### 4.4 无分布式 Tracing
+- **位置**: 整个 `src/lib/orchestrator/orchestrator.ts` 和 LLM providers
+- **描述**: 无 request ID 跨调用传播；无 trace span 用于阶段计时；无法关联跨异步操作的日志。
+- **影响**: 无法诊断慢的辩论轮次；无法检测级联超时；无法追踪 agent degradation 的根因。
+- **建议**: 集成 OpenTelemetry。
+
+#### 4.5 核心 Orchestrator 逻辑测试覆盖不足
+- **位置**: `test/orchestrator.test.ts`（1 个主测试 vs 1200 行代码）
+- **未覆盖**: Agent 超时/降级处理（lines 853-880）；辩论轮次进展和 ledger 更新（lines 1078-1202）；收敛决策逻辑（lines 931-1055）；带重试的摘要生成（lines 1300-1435）。
+- **建议**: 为辩论轮次、agent 降级、ledger checkpoints 和收敛决策添加专门测试。
+
+#### 4.6 Decision Reflection (T6) 完全未测试
+- **位置**: `src/lib/decision/reflection.ts`, `src/lib/decision/follow-up-context.ts`
+- **未覆盖**: Lesson 晋级阈值（`MIN_PATTERN_COUNT = 3`）；Forecast Brier score 计算；Lesson 过期逻辑；Follow-up context 过滤。
+- **建议**: 为 reflection.ts 所有函数和 follow-up context 构建添加测试套件。
+
+#### 4.7 LLM Provider 流式错误处理未测试
+- **位置**: `src/lib/llm/openai-provider.ts`, `src/lib/orchestrator/stream-multiplexer.ts`
+- **未覆盖**: 流式期间超时；部分响应后错误；限流（HTTP 429）；流中断连接重置。
+- **建议**: 为每个超时/错误场景添加错误注入测试。
+
+#### 4.8 结构化输出持久化前无校验
+- **位置**: `src/lib/orchestrator/orchestrator.ts:906-916`
+- **描述**: 无论校验警告如何都存储 artifacts；不拒绝无效 claims（空文本、错误 `claimType`、冲突的 `citationLabels`/`gapReason`）。
+- **影响**: 无效 claims 污染决策分析。
+- **建议**: 校验结构化回复并拒绝/标记无效 artifacts。
+
+#### 4.9 Follow-Up Context Build Path 未接入
+- **位置**: `src/lib/decision/follow-up-context.ts`（`buildFollowUpContext()` 和 `renderFollowUpContextPrompt()`）
+- **描述**: T6 函数完整实现但在代码库中**从未被调用**。Follow-up session 不会注入历史 lessons。
+- **影响**: T6 决策记忆功能是死代码。
+- **建议**: 在 follow-up session 初始化中接入。
+
+### P2 — 优化建议
+
+#### 4.10 硬编码中文 Prompt 阻碍 i18n
+- **位置**: `src/lib/orchestrator/moderator.ts`（8 个 prompt 构建器）、`src/lib/decision/follow-up-context.ts`、`src/lib/decision/evaluator.ts`、`src/lib/decision/templates.ts`
+- **描述**: 所有系统 prompt 硬编码中文，无法支持英语、日语等。
+- **建议**: 重构为 locale-keyed 模板系统。
+
+#### 4.11 无延迟直方图
+- **位置**: `src/lib/orchestrator/orchestrator.ts`
+- **描述**: 阶段持续时间仅在完成时报告；无 time-to-first-token（TTFT）跟踪。
+- **建议**: 跟踪每 agent 的 TTFT 并报告百分位数（p50, p99）。
+
+#### 4.12 结构化回复标记检测效率低
+- **位置**: `src/stores/discussion-store.ts:232-240`
+- **描述**: 循环式子串匹配 `---STRUCTURED---` 标记；如果模型在文本中输出该标记会被错误截断。与 orchestrator 侧（lines 865-869）重复实现。
+- **建议**: 使用 `indexOf()` 替代；移除 store 侧重复逻辑。
+
+#### 4.13 数据库事务完整性未测试
+- **位置**: `src/lib/db/repository.ts`（600+ 行）
+- **未覆盖**: 同一 session 并发写入；部分失败回滚；外键约束违反。
+- **建议**: 添加并发和约束违反测试。
+
+#### 4.14 Agent 可用性无缓存失效
+- **位置**: `src/lib/agents/registry.ts`
+- **描述**: 每个 session 加载 agent 定义；API key 撤销在服务器重启前不生效。
+- **建议**: 缓存 agent 可用性并设 60 秒 TTL。
+
+#### 4.15 无 Session 操作限流
+- **位置**: `src/app/api/sessions/[id]/interjections/route.ts`
+- **描述**: Interjection POST 无限流；客户端可每秒发送 1000 请求。
+- **建议**: 实现 session 级限流（如 10 interjections/min per session）。
+
+#### 4.16 失败 Provider 无熔断器
+- **位置**: `src/lib/llm/provider-registry.ts`
+- **描述**: 如果 OpenAI API 宕机，每个 agent 请求都失败；无指数退避；无 fallback provider。
+- **建议**: 实现 circuit breaker 模式 + provider fallback 链。
 
 ---
 
-### No Foreign Key Constraints in Schema
-- **Status:** `Verified`
-- **Why it matters:** Without FK constraints, orphaned data accumulates silently. Claim-source links can reference deleted sources. Calibration queries can include orphaned decision summaries. Data integrity — core to a tool tracking long-term decision chains — is not enforced at the database level.
-- **Where it exists:** `src/lib/db/schema.ts` — no `.references()` clauses anywhere in the 175-line schema. SQLite supports FK enforcement via `PRAGMA foreign_keys = ON` but it is not enabled.
-- **Recommended fix:** Add FK constraints to all child tables. Enable `PRAGMA foreign_keys = ON` at database initialization. Add `onDelete: 'cascade'` to child relationships.
-- **Priority:** `P2`
+## 修复优先级建议
 
----
+### 立即修复（P0，阻断生产部署）
 
-## Low
+| # | 问题 | 预估工时 |
+|---|------|---------|
+| 3.1 | Route handler 超时 vs 编排持续时间 | 2h |
+| 3.2 | Decision Memory 表未创建 | 1h |
+| 1.1 | Watchdog 超时消息无恢复路径 | 4h |
+| 1.3 | Error 状态未跨 session 清除 | 0.5h |
+| 4.1 | Fire-and-forget DB 写入无错误处理 | 4h |
 
-### `npx -y playwright screenshot` as the Screenshot Backend
-- **Status:** `Verified`
-- **Why it matters:** The screenshot path uses `execFileAsync('npx', ['-y', 'playwright', 'screenshot', ...])` with an 8-second total timeout. `npx -y` downloads the package if not cached. In CI, restricted networks, or air-gapped environments, this silently returns null. The timeout budget is consumed by download before the actual page load.
-- **Where it exists:** `src/lib/search/browser-verify.ts:364-368`
-- **Recommended fix:** Use `page.screenshot()` from the already-open Playwright SDK page in `extractPlaywrightBodyText()`. Eliminate the `npx` CLI path.
-- **Priority:** `P2`
+### 短期修复（P1，下一个迭代）
 
----
+| 类别 | 关键问题 | 预估工时 |
+|------|---------|---------|
+| 可靠性 | SQLite WAL + busy timeout (#3.3) | 0.5h |
+| 可靠性 | Provider 429/503 自动重试 (#2.4) | 3h |
+| 性能 | Store 每 token Map 分配 (#4.2) | 2h |
+| 数据完整性 | 多表更新事务化 (#3.7) | 4h |
+| 测试 | Orchestrator 核心路径测试 (#4.5) | 8h |
+| 功能 | T6 follow-up context 接入 (#4.9) | 4h |
 
-### `resumeSnapshot` Is a Full Session State Blob in the Sessions Table
-- **Status:** `Verified`
-- **Why it matters:** `src/lib/db/schema.ts:20` — `resumeSnapshot: text('resume_snapshot')` stores the complete resume state JSON in the sessions table row. For sessions with many messages, this is hundreds of kilobytes. Every sessions table query transfers this blob unnecessarily.
-- **Where it exists:** `src/lib/db/schema.ts:20`
-- **Recommended fix:** Move `resumeSnapshot` to a separate `session_resume_snapshots` table, joined only when resume is needed.
-- **Priority:** `P2`
+### 中期规划（P2，持续改进）
 
----
-
-### Moderator Locked to Claude With No Fallback
-- **Status:** `Verified`
-- **Why it matters:** Decision summary, evidence mapping, confidence score, and recommendations are generated exclusively by the moderator. The default moderator is Claude. If the Anthropic API is unavailable, the session completes with transcript but no decision output.
-- **Where it exists:** `src/app/api/sessions/[id]/start/route.ts:65` — `moderatorAgentId = 'claude'`. No fallback moderator logic.
-- **Recommended fix:** Allow moderator selection from any configured provider. Add a summary-phase fallback (e.g., use GPT-4 if Claude fails at the decision summary step specifically).
-- **Priority:** `P2`
-
----
-
-## Systemic Patterns
-
-Three repeated engineering habits drive the majority of findings above:
-
-**1. Labels that outrun semantics.** The product uses "verified," "evidence-backed," "calibrated," and "confidence" in UI copy. The underlying implementations are structurally correct but semantically weaker than these labels imply: keyword extraction ≠ verification, LLM self-assessment ≠ calibration, hardcoded point deductions ≠ evidence-backed confidence adjustment. This label-vs-implementation gap is the root cause of every trust-model finding in this report.
-
-**2. Silent success masking actual failure.** Browser verification silently falls back to plain HTML fetch when Playwright fails. Agents are silently skipped when API keys are missing. PDF export only fails visibly when no font is found. Source citations silently break when research reruns. The system is engineered to avoid crashing loudly. The tradeoff is that failures look like successes to the user.
-
-**3. Single-source-of-truth violations.** The confidence number exists simultaneously in: the raw LLM output in the decision summary JSON blob, the `predictedConfidence` integer column (raw LLM value), the computed `adjustedConfidence` in `confidenceMeta` (computed at read time), and whatever the UI renders. Source citation labels live in the summary JSON as `R1/R2` strings and are resolved dynamically against current source ranks — ranks that change. These multiple representations guarantee eventual inconsistency.
-
----
-
-## What I Think The Product Really Is Today
-
-Round Table is a well-engineered **LLM multi-agent discussion recorder with structured output**. It prompts multiple LLMs to discuss a user-supplied question, records the transcript, generates a structured summary, and saves it to SQLite.
-
-The features layered on top — browser verification, confidence scoring, calibration, action item tracking, follow-up sessions — are directionally correct as a product vision but are currently prototype implementations. They look complete in the UI but lack the semantic depth their labels imply.
-
-The product is not yet a trusted decision assistant. It is a conversation recorder with structured output and a confidence theater layer. That is a useful tool. But it should not be positioned or used as if the confidence numbers, evidence claims, or verification badges carry the epistemic weight that the UI implies they do.
-
----
-
-## What Is Most Likely To Break First In Real User Usage
-
-1. **PDF export fails on any non-macOS/non-standard-Linux deployment.** The font lookup misses. The error is technical. Recovery requires reading deployment documentation that does not yet exist.
-
-2. **Browser verification returns empty or cookie-banner text on 40%+ of real-world URLs** (SPAs, modern recruiting platforms, dynamic pages). Users will not notice because the extracted fields look plausible.
-
-3. **The user starts a session with agents that silently fail** (wrong API keys configured, one provider down). The session completes based on 1 agent. The user makes a decision based on a false sense of multi-perspective analysis.
-
-4. **The confidence number moves between session creation and the user's next visit** (sources added, calculation rerun at read time). Trust in the data erodes.
-
-5. **After 10+ sessions, history and calibration views slow down** as queries run N sub-queries per session without pagination or caching. This will not be noticed in development with 3 test sessions.
-
----
-
-## Top 5 Fixes Before Wider Release
-
-Ordered by leverage: fixes that close the largest gap between what the product claims and what it delivers.
-
-**1. Rename "verified" to "captured" everywhere in the UI.**
-"Verified page" → "Captured page." "Verified facts" → "Extracted signals." "Browser verification" → "Browser capture." Add a one-line disclaimer on every extracted field: "Not semantically validated — manual review required." This is a UI copy change that costs hours and closes the most damaging trust gap.
-
-**2. Replace confidence percentage with evidence band labels.**
-Replace `76%` with `Mixed evidence (4 supported / 2 unsupported claims)`. Store the integer internally for calibration tracking. Display the counts and band, not the number. This is a prompts + UI change that eliminates the precision theater problem.
-
-**3. Bundle a CJK font in `public/fonts/` as the first font candidate.**
-NotoSansSC-Regular.ttf (~5MB, OFL license) committed to the repo. Make it the first entry in `PDF_FONT_CANDIDATES`. Add a structured markdown fallback if PDF generation still fails. This makes the primary deliverable reliable on any deployment.
-
-**4. Add pre-flight agent availability warning and post-session participant summary.**
-Before starting: show which requested agents will actually run. After completion: show "3 requested, 2 participated (DeepSeek timed out)." This closes the silent failure gap where users do not know they got a 1-agent session.
-
-**5. Persist adjusted confidence at write time.**
-Compute `buildDecisionConfidenceMeta()` inside `upsertDecisionSummary()` and persist the adjusted value. Display the stored value. Show a "recalculate" indicator when sources have changed since last persistence. This makes confidence a stable data point rather than a dynamic calculation.
-
----
-
-## What To De-Scope Immediately If Focus Is The Goal
-
-**Calibration dashboard.** The gap metric is comparing two subjective self-assessments with no shared reference scale. Until outcome tracking is restructured around binary/categorical ground truth, calibration charts are analytical theater. De-scope the dashboard; keep the outcome logging fields. This removes a significant surface area of false rigor.
-
-**Interjection control types** (`force_converge`, `add_constraint`, `ask_comparison`). These are labels on free-text prompts with no programmatic enforcement. Users who send `force_converge` and see the debate continue will lose trust in the control system. Either implement programmatic enforcement for at least `force_converge`, or collapse all interjection types to a single "add context" with no control semantics.
-
-**Multi-model per-agent selection UI.** Letting users choose between Opus/Sonnet/Haiku per agent adds cognitive overhead to a flow that is already heavy. Most users cannot meaningfully evaluate which model is appropriate for which agent role. Simplify to "standard" / "thorough" tiers or just use the best available model automatically.
-
-**The ops dashboard route** (`/api/sessions/ops`). This is a debugging surface exposing operational internals. It belongs behind admin authentication. It is not a user-facing feature and should not be accessible without auth headers.
-
----
-
-## P0 / P1 / P2 Action Table
-
-| Issue | Severity | Confidence | Owner Area |
-|---|---|---|---|
-| No user authentication / session isolation | P0 | Verified | Backend / Infra |
-| Confidence numbers are precision theater | P0 | Verified | Prompts / Product |
-| Browser "verification" mislabeled — is keyword text extraction | P0 | Verified | Product / Frontend / Prompts |
-| PDF export throws on missing CJK font | P0 | Verified | Backend / Infra |
-| Double Chromium per verification, no resource guard | P1 | Verified | Backend |
-| SSRF via browser verification URL | P1 | Verified | Backend |
-| SPA pages silently return empty body text | P1 | Verified | Backend |
-| Citation labels (R1/R2) invalidate on research rerun | P1 | Verified | Backend / Data |
-| 3,868-line page.tsx with multiple state sources | P1 | Verified | Frontend |
-| Confidence adjustments computed at read time, no audit trail | P1 | Verified | Backend / Data |
-| Calibration compares two subjective self-assessments | P1 | Verified | Product / Data |
-| Silent partial failure when LLM providers error or lack keys | P1 | Verified | Backend / Product |
-| JSON config blobs without schema versioning | P1 | Verified | Data / Backend |
-| No rate limiting on resource-intensive endpoints | P1 | Verified | Backend / Infra |
-| Interjection control types are advisory only | P2 | Verified | Backend / Product |
-| Browser-verified sources never marked stale | P2 | Verified | Backend |
-| No FK constraints in schema | P2 | Verified | Data |
-| `npx -y playwright screenshot` as screenshot backend | P2 | Verified | Backend |
-| `resumeSnapshot` blob in sessions table | P2 | Verified | Data |
-| Moderator locked to Claude with no fallback | P2 | Inferred | Backend / Infra |
-| Calibration dashboard active with samples below reliable threshold | P2 | Verified | Product / Frontend |
-| Ops dashboard accessible without authentication | P2 | Verified | Backend |
-
----
-
-*End of Red-Team Review*
+- 类型安全: SSE Discriminated Union (#3.11)、DecisionSummary branded types (#3.10)
+- 可观测性: OpenTelemetry 集成 (#4.4)、延迟直方图 (#4.11)
+- i18n: Prompt 模板系统 (#4.10)、UI 文本抽取 (#1.15)
+- 韧性: Circuit breaker (#4.16)、限流 (#4.15)
