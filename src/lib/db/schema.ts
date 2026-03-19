@@ -238,3 +238,32 @@ export const summaryVersions = sqliteTable('summary_versions', {
   rewriteTriggered: integer('rewrite_triggered').notNull().default(0),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 });
+
+// ── Topic 6: Decision Memory Tables ───────────────────────────────
+
+export const sessionReflections = sqliteTable('session_reflections', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull().unique(),
+  generatedAt: integer('generated_at', { mode: 'timestamp_ms' }).notNull(),
+  decisionSummary: text('decision_summary').notNull().default(''),
+  assumptionsJson: text('assumptions_json').notNull().default('[]'),
+  evidenceGapsJson: text('evidence_gaps_json').notNull().default('[]'),
+  forecastItemsJson: text('forecast_items_json').notNull().default('[]'),
+  lessonsCandidateJson: text('lessons_candidate_json').notNull().default('[]'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
+export const lessons = sqliteTable('lessons', {
+  id: text('id').primaryKey(),
+  rule: text('rule').notNull(),
+  applicabilityConditions: text('applicability_conditions').notNull().default(''),
+  evidenceBasisJson: text('evidence_basis_json').notNull().default('[]'),
+  patternCount: integer('pattern_count').notNull().default(1),
+  reviewAfterSessions: integer('review_after_sessions').notNull().default(5),
+  autoFlagIfContradicted: integer('auto_flag_if_contradicted').notNull().default(1),
+  conflictMarker: text('conflict_marker'),
+  status: text('status').notNull().default('candidate'), // candidate | active | expired | contradicted
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+});

@@ -13,7 +13,11 @@ import type {
   DecisionStatus,
   DecisionSummary,
   DiscussionAgenda,
+  ForecastEntry,
+  Lesson,
+  SessionEndReflection,
 } from '../decision/types';
+import { recordForecastOutcome, canPromoteLesson, isLessonExpired } from '../decision/reflection';
 import {
   buildDecisionConfidenceMeta,
   normalizeActionItemStatus,
@@ -52,11 +56,13 @@ import {
   interjections,
   judgeEvaluations,
   ledgerValidationMetrics,
+  lessons,
   messages,
   minutes,
   researchRuns,
   researchSources,
   sessionEvents,
+  sessionReflections,
   sessions,
   summaryVersions,
   taskLedgerCheckpoints,
@@ -2981,4 +2987,172 @@ export async function getPhaseReliabilityMetrics(
     totalPhaseStarts: phases.reduce((sum, p) => sum + p.started, 0),
     totalPhaseFailures: phases.reduce((sum, p) => sum + p.failed, 0),
   };
+}
+
+// ── Session Reflections (T6-1) ─────────────────────────────────────
+
+export async function upsertSessionReflection(
+  reflection: SessionEndReflection
+): Promise<void> {
+  const now = new Date();
+  const existing = await db
+    .select({ id: sessionReflections.id })
+    .from(sessionReflections)
+    .where(eq(sessionReflections.sessionId, reflection.sessionId))
+    .limit(1);
+
+  const payload = {
+    generatedAt: new Date(reflection.generatedAt),
+    decisionSummary: reflection.decisionSummary,
+    assumptionsJson: JSON.stringify(reflection.assumptionsWithStatus),
+    evidenceGapsJson: JSON.stringify(reflection.evidenceGaps),
+    forecastItemsJson: JSON.stringify(reflection.forecastItems),
+    lessonsCandidateJson: JSON.stringify(reflection.lessonsCandidate),
+    updatedAt: now,
+  };
+
+  if (existing.length > 0) {
+    await db
+      .update(sessionReflections)
+      .set(payload)
+      .where(eq(sessionReflections.sessionId, reflection.sessionId));
+    return;
+  }
+
+  await db.insert(sessionReflections).values({
+    id: nanoid(),
+    sessionId: reflection.sessionId,
+    ...payload,
+    createdAt: now,
+  });
+}
+
+export async function getSessionReflection(
+  sessionId: string
+): Promise<SessionEndReflection | null> {
+  const [row] = await db
+    .select()
+    .from(sessionReflections)
+    .where(eq(sessionReflections.sessionId, sessionId))
+    .limit(1);
+
+  if (!row) return null;
+
+  return {
+    sessionId: row.sessionId,
+    generatedAt: new Date(row.generatedAt).toISOString(),
+    decisionSummary: row.decisionSummary,
+    assumptionsWithStatus: parseJsonArray(row.assumptionsJson),
+    evidenceGaps: parseJsonArray(row.evidenceGapsJson),
+    forecastItems: parseJsonArray(row.forecastItemsJson),
+    lessonsCandidate: parseJsonArray(row.lessonsCandidateJson),
+  };
+}
+
+export async function updateForecastOutcome(
+  sessionId: string,
+  forecastId: string,
+  actualOutcome: boolean
+): Promise<void> {
+  const reflection = await getSessionReflection(sessionId);
+  if (!reflection) return;
+
+  const updated = reflection.forecastItems.map((f: ForecastEntry) =>
+    f.id === forecastId ? recordForecastOutcome(f, actualOutcome) : f
+  );
+
+  await upsertSessionReflection({ ...reflection, forecastItems: updated });
+}
+
+// ── Lessons (T6-3) ────────────────────────────────────────────────
+
+export async function upsertLesson(lesson: Lesson): Promise<void> {
+  const now = new Date();
+  const existing = await db
+    .select({ id: lessons.id })
+    .from(lessons)
+    .where(eq(lessons.id, lesson.id))
+    .limit(1);
+
+  const payload = {
+    rule: lesson.rule,
+    applicabilityConditions: lesson.applicabilityConditions,
+    evidenceBasisJson: JSON.stringify(lesson.evidenceBasis),
+    patternCount: lesson.patternCount,
+    reviewAfterSessions: lesson.expiryPolicy.reviewAfterSessions,
+    autoFlagIfContradicted: lesson.expiryPolicy.autoFlagIfContradicted ? 1 : 0,
+    conflictMarker: lesson.conflictMarker ?? null,
+    status: lesson.status,
+    updatedAt: now,
+  };
+
+  if (existing.length > 0) {
+    await db.update(lessons).set(payload).where(eq(lessons.id, lesson.id));
+    return;
+  }
+
+  await db.insert(lessons).values({
+    id: lesson.id,
+    ...payload,
+    createdAt: now,
+  });
+}
+
+export async function listLessons(filter?: {
+  status?: Lesson['status'];
+}): Promise<Lesson[]> {
+  const rows = filter?.status
+    ? await db
+        .select()
+        .from(lessons)
+        .where(eq(lessons.status, filter.status))
+        .orderBy(desc(lessons.patternCount))
+    : await db.select().from(lessons).orderBy(desc(lessons.patternCount));
+
+  return rows.map((row) => ({
+    id: row.id,
+    rule: row.rule,
+    applicabilityConditions: row.applicabilityConditions,
+    evidenceBasis: parseJsonArray(row.evidenceBasisJson),
+    patternCount: row.patternCount,
+    expiryPolicy: {
+      reviewAfterSessions: row.reviewAfterSessions,
+      autoFlagIfContradicted: (row.autoFlagIfContradicted ?? 1) === 1,
+    },
+    conflictMarker: row.conflictMarker ?? undefined,
+    status: row.status as Lesson['status'],
+    createdAt: new Date(normalizeDateLike(row.createdAt)).toISOString(),
+    updatedAt: new Date(normalizeDateLike(row.updatedAt)).toISOString(),
+  }));
+}
+
+/**
+ * Promote candidate lessons that meet the threshold, expire stale ones.
+ * sessionsSinceReference: map of lessonId → sessions since last referenced.
+ */
+export async function reconcileLessonStatuses(
+  sessionsSinceReference: Map<string, number>
+): Promise<void> {
+  const allLessons = await listLessons();
+  const now = new Date();
+
+  for (const lesson of allLessons) {
+    let newStatus = lesson.status;
+
+    if (lesson.status === 'candidate' && canPromoteLesson(lesson)) {
+      newStatus = 'active';
+    }
+
+    const sessionCount = sessionsSinceReference.get(lesson.id) ?? 0;
+    if (lesson.status === 'active' && isLessonExpired(lesson, sessionCount)) {
+      newStatus = 'expired';
+    }
+
+    if (newStatus !== lesson.status) {
+      await db
+        .update(lessons)
+        .set({ status: newStatus, updatedAt: now })
+        .where(eq(lessons.id, lesson.id));
+    }
+  }
 }

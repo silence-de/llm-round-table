@@ -198,3 +198,62 @@ export interface TrustValidationResult {
   violations: TrustViolation[];
   score: number;  // 0-100, 用于内部评估，不对用户展示
 }
+
+// ── Topic 6: Decision Memory Types ────────────────────────────────
+
+export interface AssumptionEntry {
+  text: string;
+  status: 'confirmed' | 'refuted' | 'open';
+  howToFalsify: string;
+}
+
+export interface GapEntry {
+  topic: string;
+  gapReason: string;
+  nextAction: string;
+}
+
+export interface ForecastEntry {
+  id: string;
+  claim: string;
+  /** 0–1 probability */
+  probability: number;
+  deadline: string; // ISO date string
+  measurableOutcome: string;
+  /** Set when outcome is recorded */
+  actualOutcome?: 'true' | 'false' | null;
+  /** Brier score for binary forecasts: (outcome - probability)^2 */
+  brierScore?: number | null;
+  resolvedAt?: string | null;
+}
+
+export interface LessonCandidate {
+  text: string;
+  sourceSessionId: string;
+}
+
+export interface SessionEndReflection {
+  sessionId: string;
+  generatedAt: string;
+  decisionSummary: string;
+  assumptionsWithStatus: AssumptionEntry[];
+  evidenceGaps: GapEntry[];
+  forecastItems: ForecastEntry[];
+  lessonsCandidate: LessonCandidate[];
+}
+
+export interface Lesson {
+  id: string;
+  rule: string;
+  applicabilityConditions: string;
+  evidenceBasis: string[]; // session_id list
+  patternCount: number;
+  expiryPolicy: {
+    reviewAfterSessions: number;
+    autoFlagIfContradicted: boolean;
+  };
+  conflictMarker?: string;
+  status: 'candidate' | 'active' | 'expired' | 'contradicted';
+  createdAt: string;
+  updatedAt: string;
+}
