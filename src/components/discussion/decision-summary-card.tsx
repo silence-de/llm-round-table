@@ -67,21 +67,8 @@ export function DecisionSummaryCard({
           <span>{title}</span>
           <div className="flex items-center gap-2">
             {researchEvaluation && (
-              <>
-                <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
-                  research {researchEvaluation.overallConfidence}%
-                </span>
-                <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
-                  {describeEvidenceStrength(researchEvaluation.overallConfidence)}
-                </span>
-              </>
-            )}
-            <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
-              confidence raw {resolvedConfidenceMeta.rawConfidence}%
-            </span>
-            {resolvedConfidenceMeta.totalPenalty > 0 && (
               <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
-                confidence adjusted {resolvedConfidenceMeta.adjustedConfidence}% (-{resolvedConfidenceMeta.totalPenalty}pt)
+                {describeEvidenceStrength(researchEvaluation.overallConfidence)}
               </span>
             )}
           </div>
@@ -95,24 +82,23 @@ export function DecisionSummaryCard({
         )}
         <div className="rounded-xl border rt-border-soft p-2 text-[11px] rt-text-dim">
           <p className="font-semibold rt-text-strong">
-            Confidence explanation
+            Evidence coverage
           </p>
           <p className="mt-1">
-            Model output started at {resolvedConfidenceMeta.rawConfidence}% and is shown as{' '}
-            {resolvedConfidenceMeta.adjustedConfidence}% after evidence coverage checks.
+            {resolvedConfidenceMeta.evidenceBackedClaims} 条结论有来源支撑，
+            {resolvedConfidenceMeta.unsupportedClaims} 条缺少可引用证据。
+            {resolvedConfidenceMeta.citedSources > 0
+              ? ` 引用了 ${resolvedConfidenceMeta.citedSources} 个来源，跨 ${resolvedConfidenceMeta.citedDomains} 个域名。`
+              : ' ���无可引用来源。'}
           </p>
-          {resolvedConfidenceMeta.adjustments.length > 0 ? (
+          {resolvedConfidenceMeta.adjustments.length > 0 && (
             <ul className="mt-1 space-y-1 pl-4">
               {resolvedConfidenceMeta.adjustments.map((item) => (
                 <li key={item.kind} className="list-disc">
-                  {item.label}: -{item.delta}pt. {item.reason}
+                  {item.label}: {item.reason}
                 </li>
               ))}
             </ul>
-          ) : (
-            <p className="mt-1">
-              No automatic evidence penalty was applied to this decision card.
-            </p>
           )}
         </div>
         {browserVerificationCount > 0 && (

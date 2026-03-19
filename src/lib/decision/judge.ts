@@ -1,72 +1,149 @@
 import type { DecisionSummary, DecisionBrief } from './types';
 import type { TaskLedger } from '../orchestrator/types';
 
+// ── Gate types ────────────────────────────────────────────────────────────────
+
+export type JudgeGate = 'PASS' | 'REWRITE' | 'ESCALATE';
+
 export interface JudgeDimension {
   name: string;
-  passed: boolean;
-  score: number;   // 0-100
-  reason: string;
+  result: 'PASS' | 'FAIL' | 'WARN' | 'ABSTAIN';
+  issueCode?: string;
+  evidencePointers?: string[];
+  actionableFixes?: string[];
+  /** @internal not exposed to UI or API responses */
+  _score?: number;
 }
 
 export interface JudgeEvaluationResult {
+  gate: JudgeGate;
   dimensions: JudgeDimension[];
-  overallPassed: boolean;
+  rewriteInstructions?: string[];   // only when gate === 'REWRITE'
+  escalateReason?: string;          // only when gate === 'ESCALATE'
   passedCount: number;
   totalDimensions: number;
   sessionId: string;
   summaryVersion: number;
   evaluatedAt: number;
+  /** @deprecated kept for backward-compat with existing DB writes; do not use in UI */
+  overallPassed: boolean;
 }
 
+// ── L0: structural field checks (<100ms, no LLM) ─────────────────────────────
+
+export interface PreCheckResult {
+  passed: boolean;
+  layer: 'L0' | 'L1';
+  issues: string[];
+}
+
+export function runL0Checks(summary: DecisionSummary): PreCheckResult {
+  const issues: string[] = [];
+
+  if (!summary.summary?.trim()) issues.push('summary 字段为空');
+  if (!summary.recommendedOption?.trim()) issues.push('recommendedOption 字段为空');
+  if (!summary.why || summary.why.length === 0) issues.push('why 字段为空数组');
+  if (!summary.risks || summary.risks.length === 0) issues.push('risks 字段为空���组');
+  if (!summary.nextActions || summary.nextActions.length === 0) issues.push('nextActions 字段为空数组');
+  if (!summary.evidence || summary.evidence.length === 0) issues.push('evidence 字段为空数组');
+  if (typeof summary.confidence !== 'number') issues.push('confidence 字段缺失或非数字');
+
+  return { passed: issues.length === 0, layer: 'L0', issues };
+}
+
+export function runL1Checks(
+  summary: DecisionSummary,
+  knownSourceIds: Set<string>
+): PreCheckResult {
+  const issues: string[] = [];
+
+  // Check evidence sourceIds resolve against known sources
+  if (summary.evidence) {
+    for (const ev of summary.evidence) {
+      if (ev.sourceIds && ev.sourceIds.length > 0) {
+        for (const sid of ev.sourceIds) {
+          if (!knownSourceIds.has(sid)) {
+            issues.push(`evidence sourceId "${sid}" 在 research sources 中不存在`);
+          }
+        }
+      }
+    }
+  }
+
+  // risks must be non-empty (already checked in L0, but L1 checks content quality)
+  if (summary.risks && summary.risks.every((r) => !r?.trim())) {
+    issues.push('risks 数组中所有条目均为空字符串');
+  }
+
+  return { passed: issues.length === 0, layer: 'L1', issues };
+}
+
+// ── Dimension evaluators ──────────────────────────────────────────────────────
+
 /**
- * 维度1：Brief 约束遵守度
- * 检查 summary 是否覆盖了 brief 的 nonNegotiables 和 constraints
+ * Hard dimension: brief constraint adherence
+ * FAIL blocks PASS gate.
  */
 export function evaluateBriefConstraintAdherence(
   summary: DecisionSummary,
-  brief: DecisionBrief,
+  _brief: DecisionBrief,
   ledger: TaskLedger
 ): JudgeDimension {
   const nonNegotiables = ledger.nonNegotiables;
   if (nonNegotiables.length === 0) {
-    return { name: 'brief_constraint_adherence', passed: true, score: 100, reason: '无不可妥协项，自动通过' };
+    return { name: 'brief_constraint_adherence', result: 'PASS', _score: 100 };
   }
-  // 检查 summary.redLines 是否覆盖了 nonNegotiables
   const redLines = summary.redLines ?? [];
   const covered = nonNegotiables.filter((nn) =>
     redLines.some((rl) => rl.includes(nn.slice(0, 10)))
   ).length;
   const score = Math.round((covered / nonNegotiables.length) * 100);
+  if (score >= 60) {
+    return { name: 'brief_constraint_adherence', result: 'PASS', _score: score };
+  }
   return {
     name: 'brief_constraint_adherence',
-    passed: score >= 60,
-    score,
-    reason: `${covered}/${nonNegotiables.length} 不可妥协项在 redLines 中有对应`,
+    result: 'FAIL',
+    issueCode: 'missing_constraint_coverage',
+    evidencePointers: [`covered ${covered}/${nonNegotiables.length} nonNegotiables`],
+    actionableFixes: ['在 redLines 中补充对应不可妥协项的约束条件'],
+    _score: score,
   };
 }
 
 /**
- * 维度2：Evidence 覆盖率
- * 检查 summary.evidence 中有 sourceIds 的比例
+ * Hard dimension: evidence coverage
+ * FAIL blocks PASS gate.
  */
 export function evaluateEvidenceCoverage(summary: DecisionSummary): JudgeDimension {
   const evidence = summary.evidence ?? [];
   if (evidence.length === 0) {
-    return { name: 'evidence_coverage', passed: false, score: 0, reason: '无 evidence 条目' };
+    return {
+      name: 'evidence_coverage',
+      result: 'FAIL',
+      issueCode: 'no_evidence',
+      actionableFixes: ['添加至少一条有 sourceIds 的 evidence 条目'],
+      _score: 0,
+    };
   }
   const withSource = evidence.filter((e) => e.sourceIds && e.sourceIds.length > 0).length;
   const score = Math.round((withSource / evidence.length) * 100);
+  if (score >= 50) {
+    return { name: 'evidence_coverage', result: 'PASS', _score: score };
+  }
   return {
     name: 'evidence_coverage',
-    passed: score >= 50,
-    score,
-    reason: `${withSource}/${evidence.length} 条 evidence 有 sourceIds`,
+    result: 'FAIL',
+    issueCode: 'insufficient_evidence_coverage',
+    evidencePointers: [`${withSource}/${evidence.length} 条 evidence 有 sourceIds`],
+    actionableFixes: ['为无来源的 evidence 条目补充 sourceIds 或改为 gapReason'],
+    _score: score,
   };
 }
 
 /**
- * 维度3：风险披露完整性
- * 检查 summary.risks 是否非空，且 ledger.riskRegister 中的 high severity 风险有对应
+ * Hard dimension: risk disclosure
+ * FAIL blocks PASS gate.
  */
 export function evaluateRiskDisclosure(
   summary: DecisionSummary,
@@ -74,28 +151,40 @@ export function evaluateRiskDisclosure(
 ): JudgeDimension {
   const risks = summary.risks ?? [];
   if (risks.length === 0) {
-    return { name: 'risk_disclosure', passed: false, score: 0, reason: 'summary.risks 为空' };
+    return {
+      name: 'risk_disclosure',
+      result: 'FAIL',
+      issueCode: 'missing_risk_disclosure',
+      actionableFixes: ['在 risks 字段中补充至少一条风险披露'],
+      _score: 0,
+    };
   }
   const highRisks = ledger.riskRegister.filter((r) => r.severity === 'high');
   if (highRisks.length === 0) {
-    return { name: 'risk_disclosure', passed: true, score: 80, reason: '无 high severity 风险，risks 非空即通过' };
+    return { name: 'risk_disclosure', result: 'PASS', _score: 80 };
   }
   const covered = highRisks.filter((hr) =>
     risks.some((r) => r.includes(hr.description.slice(0, 15)))
   ).length;
   const score = Math.round((covered / highRisks.length) * 100);
+  if (score >= 50) {
+    return { name: 'risk_disclosure', result: 'PASS', _score: score };
+  }
   return {
     name: 'risk_disclosure',
-    passed: score >= 50,
-    score,
-    reason: `${covered}/${highRisks.length} 高风险项在 summary.risks 中有对应`,
+    result: 'FAIL',
+    issueCode: 'missing_risk_disclosure',
+    evidencePointers: [`${covered}/${highRisks.length} 高风险项在 summary.risks ���有对应`],
+    actionableFixes: highRisks
+      .filter((hr) => !risks.some((r) => r.includes(hr.description.slice(0, 15))))
+      .map((hr) => `补充风险披露：${hr.description}`),
+    _score: score,
   };
 }
 
 /**
- * 维度4：内部一致性
- * 检查 summary.recommendedOption 与 summary.why 是否非空，
- * 且 summary.alternativesRejected 非空（有对比分析）
+ * Soft dimension: internal consistency
+ * WARN does not block PASS gate.
  */
 export function evaluateInternalConsistency(summary: DecisionSummary): JudgeDimension {
   const checks = [
@@ -106,23 +195,71 @@ export function evaluateInternalConsistency(summary: DecisionSummary): JudgeDime
   ];
   const passed = checks.filter(Boolean).length;
   const score = Math.round((passed / checks.length) * 100);
+  if (score >= 75) {
+    return { name: 'internal_consistency', result: 'PASS', _score: score };
+  }
   return {
     name: 'internal_consistency',
-    passed: score >= 75,
-    score,
-    reason: `${passed}/${checks.length} 一致性检查通过（recommendation/why/alternatives/nextActions）`,
+    result: 'WARN',
+    issueCode: 'incomplete_structure',
+    evidencePointers: [`${passed}/${checks.length} 一致性检查通过`],
+    actionableFixes: [
+      !summary.recommendedOption?.trim() ? '补充 recommendedOption' : null,
+      (summary.why?.length ?? 0) === 0 ? '补充 why 列表' : null,
+      (summary.alternativesRejected?.length ?? 0) === 0 ? '补充 alternativesRejected' : null,
+      (summary.nextActions?.length ?? 0) === 0 ? '补充 nextActions' : null,
+    ].filter((x): x is string => x !== null),
+    _score: score,
   };
 }
 
-/**
- * 综合评审
- */
+// ── Gate determination ────────────────────────────────────────────────────────
+
+const HARD_DIMENSIONS = new Set([
+  'brief_constraint_adherence',
+  'evidence_coverage',
+  'risk_disclosure',
+]);
+
+function determineGate(
+  dimensions: JudgeDimension[],
+  rewriteCount: number,
+  maxRewrites: number
+): { gate: JudgeGate; rewriteInstructions?: string[]; escalateReason?: string } {
+  const hasAbstain = dimensions.some((d) => d.result === 'ABSTAIN');
+  const hardFails = dimensions.filter(
+    (d) => HARD_DIMENSIONS.has(d.name) && d.result === 'FAIL'
+  );
+
+  if (hasAbstain) {
+    return { gate: 'ESCALATE', escalateReason: '存在 ABSTAIN 维度，无法自动判定' };
+  }
+
+  if (hardFails.length === 0) {
+    return { gate: 'PASS' };
+  }
+
+  if (rewriteCount >= maxRewrites) {
+    return {
+      gate: 'ESCALATE',
+      escalateReason: `已达最大重写次数 (${maxRewrites})，仍有 ${hardFails.length} 个硬性维度未通过`,
+    };
+  }
+
+  const rewriteInstructions = hardFails.flatMap((d) => d.actionableFixes ?? []);
+  return { gate: 'REWRITE', rewriteInstructions };
+}
+
+// ── Main entry point ───────────────���──────────────────────────────────────────
+
 export function evaluateSummary(
   sessionId: string,
   summary: DecisionSummary,
   brief: DecisionBrief,
   ledger: TaskLedger,
-  summaryVersion = 1
+  summaryVersion = 1,
+  rewriteCount = 0,
+  maxRewrites = 2
 ): JudgeEvaluationResult {
   const dimensions = [
     evaluateBriefConstraintAdherence(summary, brief, ledger),
@@ -130,14 +267,24 @@ export function evaluateSummary(
     evaluateRiskDisclosure(summary, ledger),
     evaluateInternalConsistency(summary),
   ];
-  const passedCount = dimensions.filter((d) => d.passed).length;
-  return {
+
+  const passedCount = dimensions.filter((d) => d.result === 'PASS').length;
+  const { gate, rewriteInstructions, escalateReason } = determineGate(
     dimensions,
-    overallPassed: passedCount >= 3,  // 4 维度中至少 3 个通过
+    rewriteCount,
+    maxRewrites
+  );
+
+  return {
+    gate,
+    dimensions,
+    rewriteInstructions,
+    escalateReason,
     passedCount,
     totalDimensions: dimensions.length,
     sessionId,
     summaryVersion,
     evaluatedAt: Date.now(),
+    overallPassed: gate === 'PASS',
   };
 }

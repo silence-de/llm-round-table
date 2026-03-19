@@ -217,7 +217,15 @@ export const judgeEvaluations = sqliteTable('judge_evaluations', {
   passedCount: integer('passed_count').notNull().default(0),
   totalDimensions: integer('total_dimensions').notNull().default(4),
   overallPassed: integer('overall_passed').notNull().default(0),
+  gate: text('gate').notNull().default('PASS'),           // 'PASS' | 'REWRITE' | 'ESCALATE'
+  rewriteInstructionsJson: text('rewrite_instructions_json').notNull().default('[]'),
+  escalateReason: text('escalate_reason').notNull().default(''),
   dimensionsJson: text('dimensions_json').notNull().default('[]'),
+  // ops calibration fields (T3-4)
+  humanReviewResult: text('human_review_result'),         // 'PASS' | 'FAIL' | null
+  humanReviewerId: text('human_reviewer_id'),
+  reviewedAt: integer('reviewed_at', { mode: 'timestamp_ms' }),
+  agreement: integer('agreement'),                        // 1 = agree, 0 = disagree, null = not reviewed
   evaluatedAt: integer('evaluated_at', { mode: 'timestamp_ms' }).notNull(),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 });

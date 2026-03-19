@@ -2783,6 +2783,9 @@ export async function recordJudgeEvaluation(input: {
   passedCount: number;
   totalDimensions: number;
   overallPassed: boolean;
+  gate: string;
+  rewriteInstructionsJson: string;
+  escalateReason: string;
   dimensionsJson: string;
   evaluatedAt: number;
 }): Promise<void> {
@@ -2794,10 +2797,45 @@ export async function recordJudgeEvaluation(input: {
     passedCount: input.passedCount,
     totalDimensions: input.totalDimensions,
     overallPassed: input.overallPassed ? 1 : 0,
+    gate: input.gate,
+    rewriteInstructionsJson: input.rewriteInstructionsJson,
+    escalateReason: input.escalateReason,
     dimensionsJson: input.dimensionsJson,
     evaluatedAt: new Date(input.evaluatedAt),
     createdAt: new Date(),
   });
+}
+
+export async function recordJudgeHumanReview(input: {
+  judgeEvaluationId: string;
+  humanReviewResult: 'PASS' | 'FAIL';
+  humanReviewerId: string;
+  agreement: boolean;
+}): Promise<void> {
+  await db
+    .update(judgeEvaluations)
+    .set({
+      humanReviewResult: input.humanReviewResult,
+      humanReviewerId: input.humanReviewerId,
+      reviewedAt: new Date(),
+      agreement: input.agreement ? 1 : 0,
+    })
+    .where(eq(judgeEvaluations.id, input.judgeEvaluationId));
+}
+
+export async function listJudgeEvaluationsForCalibration(sessionId?: string) {
+  const rows = await db
+    .select()
+    .from(judgeEvaluations)
+    .where(sessionId ? eq(judgeEvaluations.sessionId, sessionId) : undefined)
+    .orderBy(desc(judgeEvaluations.createdAt));
+  return rows.map((r) => ({
+    ...r,
+    rewriteInstructions: JSON.parse(r.rewriteInstructionsJson ?? '[]') as string[],
+    dimensions: JSON.parse(r.dimensionsJson ?? '[]'),
+    overallPassed: r.overallPassed === 1,
+    agreement: r.agreement === null ? null : r.agreement === 1,
+  }));
 }
 
 export async function upsertSummaryVersion(input: {

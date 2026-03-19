@@ -29,6 +29,8 @@ import { conductResearch } from '../search/research';
 import type { ResearchRunStatus, ResearchSource } from '../search/types';
 import { formatControlInstruction } from '../decision/utils';
 import { buildEvaluatorPrompt, parseEvaluation } from '../decision/evaluator';
+import { runL0Checks, runL1Checks, evaluateSummary as judgeEvaluateSummary } from '../decision/judge';
+import { recordJudgeEvaluation, upsertSummaryVersion } from '../db/repository';
 import { attachCitationLabels } from '../search/utils';
 import { upsertAgentReplyArtifact, upsertLedgerCheckpoint } from '../db/repository';
 
@@ -1301,59 +1303,177 @@ export class DiscussionOrchestrator {
         outputTokens: result.usage?.outputTokens ?? this.estimateTokens(result.content),
       });
 
-      // --- Evaluator Gate ---
+      // --- Judge Gate (L0 → L1 → LLM judge → rewrite loop) ---
       let finalContent = result.content;
+      let summaryVersion = 1;
       try {
-        const evalPrompt = buildEvaluatorPrompt(
-          this.config.brief,
-          this.config.agenda,
-          parseDecisionSummaryContent(result.content, minutes, this.researchSources, this.config.brief)
-        );
-        const evalResult = await provider.chat({
-          model: modelId,
-          messages: [{ role: 'user', content: evalPrompt }],
-          temperature: 0.1,
-          maxTokens: 600,
-          timeoutMs,
-        });
-        const evaluation = parseEvaluation(evalResult.content);
+        const parsedSummary = parseDecisionSummaryContent(result.content, minutes, this.researchSources, this.config.brief);
 
-        // Persist evaluation as session event
+        // L0: structural field checks (no LLM)
+        const l0 = runL0Checks(parsedSummary);
+        if (!l0.passed) {
+          await this.persistSessionEvent({
+            type: 'summary_evaluation',
+            phase: DiscussionPhase.SUMMARY,
+            message: `L0 pre-check failed: ${l0.issues.join('; ')}`,
+            metadata: { gate: 'REWRITE', layer: 'L0', issues: l0.issues },
+          });
+        }
+
+        // L1: citation resolvability checks (no LLM)
+        const knownSourceIds = new Set(this.researchSources.map((s) => s.id));
+        const l1 = runL1Checks(parsedSummary, knownSourceIds);
+        if (!l1.passed) {
+          await this.persistSessionEvent({
+            type: 'summary_evaluation',
+            phase: DiscussionPhase.SUMMARY,
+            message: `L1 pre-check failed: ${l1.issues.join('; ')}`,
+            metadata: { gate: 'REWRITE', layer: 'L1', issues: l1.issues },
+          });
+        }
+
+        // LLM judge evaluation
+        const judgeResult = judgeEvaluateSummary(
+          this.config.sessionId,
+          parsedSummary,
+          this.config.brief,
+          this.taskLedger,
+          summaryVersion,
+          0,
+          2
+        );
+
         await this.persistSessionEvent({
           type: 'summary_evaluation',
           phase: DiscussionPhase.SUMMARY,
-          message: evaluation.overallNote,
+          message: `Judge gate: ${judgeResult.gate}`,
           metadata: {
-            pass: evaluation.pass,
-            checks: evaluation.checks,
+            gate: judgeResult.gate,
+            passedCount: judgeResult.passedCount,
+            totalDimensions: judgeResult.totalDimensions,
+            escalateReason: judgeResult.escalateReason,
           },
         });
 
-        // If failed, retry once with feedback
-        if (!evaluation.pass) {
-          const failedChecks = evaluation.checks
-            .filter((c) => !c.pass)
-            .map((c) => `- ${c.name}: ${c.reason}`)
-            .join('\n');
-          const retryFeedback = `以下评审项未通过，请修正后重新生成决策摘要：\n${failedChecks}`;
-          const retryPromptWithFeedback = prompt + `\n\n【评审反馈，必须修正】\n${retryFeedback}`;
-          const retryResult = await provider.chat({
+        // Persist judge evaluation to DB
+        try {
+          await recordJudgeEvaluation({
+            sessionId: this.config.sessionId,
+            summaryVersion,
+            passedCount: judgeResult.passedCount,
+            totalDimensions: judgeResult.totalDimensions,
+            overallPassed: judgeResult.gate === 'PASS',
+            gate: judgeResult.gate,
+            rewriteInstructionsJson: JSON.stringify(judgeResult.rewriteInstructions ?? []),
+            escalateReason: judgeResult.escalateReason ?? '',
+            dimensionsJson: JSON.stringify(judgeResult.dimensions),
+            evaluatedAt: judgeResult.evaluatedAt,
+          });
+          await upsertSummaryVersion({
+            sessionId: this.config.sessionId,
+            version: summaryVersion,
+            summaryJson: JSON.stringify(parsedSummary),
+            rewriteTriggered: false,
+          });
+        } catch {
+          // persistence failure is non-fatal
+        }
+
+        // Rewrite loop — max 2 rounds, counter is source of truth
+        if (judgeResult.gate === 'REWRITE') {
+          let rewriteCount = 0;
+          let currentContent = result.content;
+          let currentJudge = judgeResult;
+
+          while (currentJudge.gate === 'REWRITE' && rewriteCount < 2) {
+            rewriteCount++;
+            summaryVersion++;
+            const instructions = currentJudge.rewriteInstructions ?? [];
+            const rewriteFeedback = instructions.map((i) => `- ${i}`).join('\n');
+            const retryPrompt = prompt + `\n\n【Judge 修复指令（仅修复以下问题，不得扩写或改变结论立场）】\n${rewriteFeedback}`;
+            try {
+              const retryResult = await provider.chat({
+                model: modelId,
+                messages: [{ role: 'user', content: retryPrompt }],
+                temperature: 0.2,
+                maxTokens: 1800,
+                timeoutMs,
+              });
+              await this.persistUsage({
+                inputTokens: this.estimateTokens(retryPrompt),
+                outputTokens: this.estimateTokens(retryResult.content),
+              });
+              const rewrittenSummary = parseDecisionSummaryContent(retryResult.content, minutes, this.researchSources, this.config.brief);
+              const newJudge = judgeEvaluateSummary(
+                this.config.sessionId,
+                rewrittenSummary,
+                this.config.brief,
+                this.taskLedger,
+                summaryVersion,
+                rewriteCount,
+                2
+              );
+              try {
+                await recordJudgeEvaluation({
+                  sessionId: this.config.sessionId,
+                  summaryVersion,
+                  passedCount: newJudge.passedCount,
+                  totalDimensions: newJudge.totalDimensions,
+                  overallPassed: newJudge.gate === 'PASS',
+                  gate: newJudge.gate,
+                  rewriteInstructionsJson: JSON.stringify(newJudge.rewriteInstructions ?? []),
+                  escalateReason: newJudge.escalateReason ?? '',
+                  dimensionsJson: JSON.stringify(newJudge.dimensions),
+                  evaluatedAt: newJudge.evaluatedAt,
+                });
+                await upsertSummaryVersion({
+                  sessionId: this.config.sessionId,
+                  version: summaryVersion,
+                  summaryJson: JSON.stringify(rewrittenSummary),
+                  rewriteTriggered: true,
+                });
+              } catch {
+                // persistence failure is non-fatal
+              }
+              if (newJudge.passedCount >= currentJudge.passedCount) {
+                currentContent = retryResult.content;
+                currentJudge = newJudge;
+              }
+            } catch {
+              break;
+            }
+          }
+          finalContent = currentContent;
+        }
+
+        // Also run legacy LLM evaluator for backward-compat session event (non-blocking)
+        try {
+          const evalPrompt = buildEvaluatorPrompt(
+            this.config.brief,
+            this.config.agenda,
+            parseDecisionSummaryContent(finalContent, minutes, this.researchSources, this.config.brief)
+          );
+          const evalResult = await provider.chat({
             model: modelId,
-            messages: [{ role: 'user', content: retryPromptWithFeedback }],
-            temperature: 0.2,
-            maxTokens: 1800,
+            messages: [{ role: 'user', content: evalPrompt }],
+            temperature: 0.1,
+            maxTokens: 600,
             timeoutMs,
           });
-          await this.persistUsage({
-            inputTokens: this.estimateTokens(retryPromptWithFeedback),
-            outputTokens: this.estimateTokens(retryResult.content),
+          const evaluation = parseEvaluation(evalResult.content);
+          await this.persistSessionEvent({
+            type: 'summary_evaluation',
+            phase: DiscussionPhase.SUMMARY,
+            message: evaluation.overallNote,
+            metadata: { pass: evaluation.pass, checks: evaluation.checks, source: 'legacy_evaluator' },
           });
-          finalContent = retryResult.content;
+        } catch {
+          // legacy evaluator failure is non-fatal
         }
       } catch {
-        // Evaluator failure is non-fatal; continue with original content
+        // Judge gate failure is non-fatal; continue with original content
       }
-      // --- End Evaluator Gate ---
+      // --- End Judge Gate ---
 
       await this.config.onDecisionSummaryPersist(
         parseDecisionSummaryContent(

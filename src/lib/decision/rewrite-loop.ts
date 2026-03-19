@@ -12,52 +12,62 @@ export interface RewriteLoopResult {
 
 type SummaryRewriter = (
   summary: DecisionSummary,
-  failedDimensions: string[]
+  rewriteInstructions: string[]
 ) => Promise<DecisionSummary>;
 
+const MAX_REWRITES = 2;
+
 /**
- * 最多 2 轮重写循环
- * 如果 Judge 通过则直接返回；否则触发 rewriter，最多重写 2 次
- * 失败时返回通过维度最多的版本
+ * Rewrite loop — hard state-machine counter, max 2 rewrites.
+ *
+ * Rules (per plan T3-3):
+ * - Only surgical fixes: fill missing evidence, fix citation mapping,
+ *   remove unsupported claims, add risk disclosure.
+ * - Counter is non-LLM controlled; LLM cannot bypass it.
+ * - After MAX_REWRITES with remaining FAIL → gate becomes ESCALATE automatically
+ *   (handled inside evaluateSummary via rewriteCount param).
  */
 export async function runRewriteLoop(
   sessionId: string,
   initialSummary: DecisionSummary,
   brief: DecisionBrief,
   ledger: TaskLedger,
-  rewriter: SummaryRewriter,
-  maxAttempts = 2
+  rewriter: SummaryRewriter
 ): Promise<RewriteLoopResult> {
+  // Attempt 1 — evaluate initial summary (rewriteCount=0)
   let bestSummary = initialSummary;
-  let bestEvaluation = evaluateSummary(sessionId, initialSummary, brief, ledger, 1);
+  let bestEvaluation = evaluateSummary(sessionId, initialSummary, brief, ledger, 1, 0, MAX_REWRITES);
 
-  if (bestEvaluation.overallPassed) {
-    return {
-      finalSummary: bestSummary,
-      finalEvaluation: bestEvaluation,
-      attempts: 1,
-      rewriteTriggered: false,
-    };
+  if (bestEvaluation.gate === 'PASS') {
+    return { finalSummary: bestSummary, finalEvaluation: bestEvaluation, attempts: 1, rewriteTriggered: false };
   }
 
-  for (let attempt = 2; attempt <= maxAttempts + 1; attempt++) {
-    const failedDimensions = bestEvaluation.dimensions
-      .filter((d) => !d.passed)
-      .map((d) => d.name);
+  // Rewrite rounds — counter is the source of truth, not LLM output
+  for (let rewriteCount = 1; rewriteCount <= MAX_REWRITES; rewriteCount++) {
+    if (bestEvaluation.gate === 'ESCALATE') break;
 
+    const instructions = bestEvaluation.rewriteInstructions ?? [];
     try {
-      const rewritten = await rewriter(bestSummary, failedDimensions);
-      const evaluation = evaluateSummary(sessionId, rewritten, brief, ledger, attempt);
+      const rewritten = await rewriter(bestSummary, instructions);
+      const evaluation = evaluateSummary(
+        sessionId,
+        rewritten,
+        brief,
+        ledger,
+        rewriteCount + 1,
+        rewriteCount,
+        MAX_REWRITES
+      );
 
-      // 保留通过维度最多的版本
+      // Keep version with most PASS dimensions
       if (evaluation.passedCount >= bestEvaluation.passedCount) {
         bestSummary = rewritten;
         bestEvaluation = evaluation;
       }
 
-      if (bestEvaluation.overallPassed) break;
+      if (bestEvaluation.gate === 'PASS') break;
     } catch {
-      // rewriter 失败时保留当前最佳版本
+      // rewriter failure — keep best so far, let gate stand
       break;
     }
   }
@@ -65,7 +75,7 @@ export async function runRewriteLoop(
   return {
     finalSummary: bestSummary,
     finalEvaluation: bestEvaluation,
-    attempts: Math.min(maxAttempts + 1, 3),
+    attempts: Math.min(MAX_REWRITES + 1, 3),
     rewriteTriggered: true,
   };
 }
