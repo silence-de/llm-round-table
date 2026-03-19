@@ -796,6 +796,11 @@ export class DiscussionOrchestrator {
     }
 
     const contentCollectors = new Map<string, string>();
+    // Track agents whose stream has passed the ---STRUCTURED--- marker.
+    // Tokens after the marker are suppressed from the SSE stream so the UI
+    // never displays the raw JSON block.
+    const structuredCutoff = new Map<string, boolean>();
+    const STRUCTURED_MARKER = '---STRUCTURED---';
 
     const agentStreams = participants.map((agent) => {
       const provider = getProvider(agent.definition.provider);
@@ -849,9 +854,29 @@ export class DiscussionOrchestrator {
       }
       if (event.type === 'agent_token' && event.agentId && event.content) {
         const current = contentCollectors.get(event.agentId) ?? '';
-        contentCollectors.set(event.agentId, current + event.content);
+        const updated = current + event.content;
+        contentCollectors.set(event.agentId, updated);
+
+        // Suppress tokens at and after the ---STRUCTURED--- marker so the raw
+        // JSON block is never forwarded to the frontend.
+        if (structuredCutoff.get(event.agentId)) {
+          continue;
+        }
+        const markerPos = updated.indexOf(STRUCTURED_MARKER);
+        if (markerPos !== -1) {
+          structuredCutoff.set(event.agentId, true);
+          // Yield only the portion of this token that precedes the marker.
+          const preMarkerContent = updated.slice(current.length, markerPos);
+          if (preMarkerContent) {
+            yield { ...event, content: preMarkerContent };
+          }
+          // The marker itself and everything after is suppressed.
+        } else {
+          yield event;
+        }
+      } else {
+        yield event;
       }
-      yield event;
     }
 
     for (const agent of participants) {

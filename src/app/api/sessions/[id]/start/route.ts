@@ -368,7 +368,11 @@ export async function POST(
           content: error instanceof Error ? error.message : String(error),
           timestamp: Date.now(),
         });
-        controller.enqueue(encoder.encode(errorEvent));
+        try {
+          controller.enqueue(encoder.encode(errorEvent));
+        } catch {
+          // Controller may already be closed (e.g. client disconnected); ignore.
+        }
       } finally {
         clearInterval(heartbeat);
         req.signal.removeEventListener('abort', onAbort);

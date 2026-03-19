@@ -77,9 +77,12 @@ export function useDiscussionStream() {
           buffer = parts.pop() || '';
 
           for (const part of parts) {
-            if (!part.startsWith('data: ')) continue;
+            // SSE parts may be multi-line (e.g. "id: 1\ndata: {...}").
+            // Find the data: line rather than requiring the part to start with it.
+            const dataLine = part.split('\n').find((line) => line.startsWith('data: '));
+            if (!dataLine) continue;
             try {
-              const event: SSEEvent = JSON.parse(part.slice(6));
+              const event: SSEEvent = JSON.parse(dataLine.slice(6));
               lastEventAt = Date.now();
               handleEvent(event);
             } catch {

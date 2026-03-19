@@ -223,7 +223,23 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
     const messages = new Map(get().agentMessages);
     const msg = messages.get(agentId);
     if (msg) {
-      messages.set(agentId, { ...msg, content: msg.content + token });
+      // Strip the ---STRUCTURED--- block and everything after it.
+      // We check for any prefix of the marker so that cross-token boundaries
+      // are handled correctly (e.g. "---STRUCT" arrives before "URED---").
+      const MARKER = '---STRUCTURED---';
+      let raw = msg.content + token;
+      // Find the earliest position where a prefix of MARKER starts.
+      let cutAt = -1;
+      outer: for (let start = 0; start < raw.length; start++) {
+        for (let len = Math.min(MARKER.length, raw.length - start); len >= 3; len--) {
+          if (MARKER.startsWith(raw.slice(start, start + len))) {
+            cutAt = start;
+            break outer;
+          }
+        }
+      }
+      const content = cutAt === -1 ? raw : raw.slice(0, cutAt);
+      messages.set(agentId, { ...msg, content });
       set({ agentMessages: messages });
     }
   },
