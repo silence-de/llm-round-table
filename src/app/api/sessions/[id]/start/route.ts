@@ -29,6 +29,7 @@ import { buildResumePlan } from '@/lib/orchestrator/resume';
 import type { ResearchConfig } from '@/lib/search/types';
 import { normalizeResearchConfig } from '@/lib/search/utils';
 import { encodeSSE } from '@/lib/sse/types';
+import { pushToBuffer, getEventsSince } from '@/lib/sse/event-buffer';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300; // 5 minutes max
@@ -328,7 +329,8 @@ export async function POST(
           );
         }
         for await (const event of orchestrator.run()) {
-          controller.enqueue(encoder.encode(encodeSSE(event)));
+          const eventId = pushToBuffer(id, event);
+          controller.enqueue(encoder.encode(encodeSSE({ ...event, eventId })));
         }
         const stopped = await isSessionStopRequested(id);
         await updateSessionStatus(id, stopped ? 'stopped' : 'completed');

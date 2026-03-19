@@ -2721,6 +2721,20 @@ export async function upsertLedgerCheckpoint(input: {
   ledgerVersion: number;
   ledgerJson: string;
 }): Promise<void> {
+  // T5-2: idempotency — same session+phase+ledgerVersion is a no-op
+  const existing = await db
+    .select({ id: taskLedgerCheckpoints.id })
+    .from(taskLedgerCheckpoints)
+    .where(
+      and(
+        eq(taskLedgerCheckpoints.sessionId, input.sessionId),
+        eq(taskLedgerCheckpoints.phase, input.phase),
+        eq(taskLedgerCheckpoints.ledgerVersion, input.ledgerVersion)
+      )
+    )
+    .limit(1);
+  if (existing.length > 0) return;
+
   const id = nanoid();
   await db.insert(taskLedgerCheckpoints).values({
     id,
@@ -2844,6 +2858,19 @@ export async function upsertSummaryVersion(input: {
   summaryJson: string;
   rewriteTriggered: boolean;
 }): Promise<void> {
+  // T5-2: idempotency — same session+version is a no-op
+  const existing = await db
+    .select({ id: summaryVersions.id })
+    .from(summaryVersions)
+    .where(
+      and(
+        eq(summaryVersions.sessionId, input.sessionId),
+        eq(summaryVersions.version, input.version)
+      )
+    )
+    .limit(1);
+  if (existing.length > 0) return;
+
   const id = nanoid();
   await db.insert(summaryVersions).values({
     id,
@@ -2861,4 +2888,97 @@ export async function listSummaryVersions(sessionId: string) {
     .from(summaryVersions)
     .where(eq(summaryVersions.sessionId, sessionId))
     .orderBy(asc(summaryVersions.version));
+}
+
+// ── Phase Reliability Metrics (T5-5) ──────────────────────────────
+
+export async function getPhaseReliabilityMetrics(
+  window: '1d' | '7d' | '30d' = '7d'
+) {
+  const windowMs =
+    window === '1d' ? 86_400_000 : window === '7d' ? 604_800_000 : 2_592_000_000;
+  const since = new Date(Date.now() - windowMs);
+
+  const rows = await db
+    .select()
+    .from(sessionEvents)
+    .where(
+      and(
+        inArray(sessionEvents.type, [
+          'phase_started',
+          'phase_completed',
+          'phase_failed',
+        ]),
+        // createdAt >= since
+      )
+    )
+    .orderBy(asc(sessionEvents.createdAt));
+
+  // Filter by window in JS (Drizzle SQLite doesn't support date comparison directly)
+  const filtered = rows.filter((row) => {
+    const ts = normalizeDateLike(row.createdAt);
+    return Number(ts) >= since.getTime();
+  });
+
+  type PhaseBucket = {
+    started: number;
+    completed: number;
+    failed: number;
+    totalDurationMs: number;
+    completedWithDuration: number;
+  };
+
+  const byPhase = new Map<string, PhaseBucket>();
+  // Track start times per session+phase for duration calculation
+  const startTimes = new Map<string, number>();
+
+  for (const row of filtered) {
+    const phase = row.phase ?? 'unknown';
+    const bucket = byPhase.get(phase) ?? {
+      started: 0,
+      completed: 0,
+      failed: 0,
+      totalDurationMs: 0,
+      completedWithDuration: 0,
+    };
+
+    const key = `${row.sessionId}::${phase}`;
+    const ts = Number(normalizeDateLike(row.createdAt));
+
+    if (row.type === 'phase_started') {
+      bucket.started += 1;
+      startTimes.set(key, ts);
+    } else if (row.type === 'phase_completed') {
+      bucket.completed += 1;
+      const startTs = startTimes.get(key);
+      if (startTs) {
+        bucket.totalDurationMs += ts - startTs;
+        bucket.completedWithDuration += 1;
+      }
+    } else if (row.type === 'phase_failed') {
+      bucket.failed += 1;
+    }
+
+    byPhase.set(phase, bucket);
+  }
+
+  const phases = Array.from(byPhase.entries()).map(([phase, bucket]) => ({
+    phase,
+    started: bucket.started,
+    completed: bucket.completed,
+    failed: bucket.failed,
+    successRate: toPercent(bucket.completed, Math.max(1, bucket.started)),
+    averageDurationMs:
+      bucket.completedWithDuration > 0
+        ? Math.round(bucket.totalDurationMs / bucket.completedWithDuration)
+        : null,
+  }));
+
+  return {
+    window,
+    since: since.toISOString(),
+    phases,
+    totalPhaseStarts: phases.reduce((sum, p) => sum + p.started, 0),
+    totalPhaseFailures: phases.reduce((sum, p) => sum + p.failed, 0),
+  };
 }

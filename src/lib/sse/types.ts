@@ -26,8 +26,15 @@ export interface SSEEvent {
   round?: number;
   meta?: Record<string, unknown>;
   timestamp: number;
+  /** T5-1: monotonically increasing per-session event ID for catch-up replay */
+  eventId?: number;
+  /** T5-3: marks events replayed during reconnect catch-up */
+  replayed?: boolean;
 }
 
 export function encodeSSE(event: SSEEvent): string {
-  return `data: ${JSON.stringify(event)}\n\n`;
+  // Emit SSE `id:` field when eventId is present — enables browser Last-Event-ID
+  const idLine = event.eventId != null ? `id: ${event.eventId}\n` : '';
+  return `${idLine}data: ${JSON.stringify(event)}\n\n`;
 }
+
