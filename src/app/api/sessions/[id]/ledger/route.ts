@@ -4,9 +4,9 @@ import { deserializeLedger } from '@/lib/orchestrator/task-ledger';
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const sessionId = params.id;
+  const { id: sessionId } = await params;
   const checkpoint = await getLatestLedgerCheckpoint(sessionId);
   if (!checkpoint) {
     return NextResponse.json({ ledger: null, checkpoints: [] });

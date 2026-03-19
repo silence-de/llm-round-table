@@ -299,6 +299,16 @@ export async function POST(
   };
   req.signal.addEventListener('abort', onAbort);
 
+  // T5-3: Catch-up replay on reconnect.
+  // Browser EventSource sends Last-Event-ID header automatically after disconnect.
+  // We replay any buffered events the client missed before starting the live stream.
+  const lastEventIdRaw =
+    req.headers.get('Last-Event-ID') ??
+    new URL(req.url).searchParams.get('lastEventId') ??
+    null;
+  const catchUpFromEventId =
+    lastEventIdRaw !== null ? Math.max(0, parseInt(lastEventIdRaw, 10) || 0) : null;
+
   const stream = new ReadableStream({
     async start(controller) {
       const heartbeat = setInterval(() => {
@@ -317,6 +327,18 @@ export async function POST(
       }, 15_000);
 
       try {
+        // Replay missed events before handing off to live stream
+        if (catchUpFromEventId !== null) {
+          const missed = getEventsSince(id, catchUpFromEventId);
+          for (const buffered of missed) {
+            controller.enqueue(
+              encoder.encode(
+                encodeSSE({ ...buffered.event, eventId: buffered.eventId, replayed: true })
+              )
+            );
+          }
+        }
+
         if (resumeSnapshot) {
           controller.enqueue(
             encoder.encode(

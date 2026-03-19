@@ -53,25 +53,31 @@ export function runL0Checks(summary: DecisionSummary): PreCheckResult {
 
 export function runL1Checks(
   summary: DecisionSummary,
-  knownSourceIds: Set<string>
+  /**
+   * Set of known citation labels (e.g. "R1", "R2") — NOT raw DB source IDs.
+   * Build this from `researchSources.map(getResearchSourceCitationLabel)`.
+   * Using raw IDs here would cause false positives since summaries always
+   * reference sources by citation label, never by internal DB id.
+   */
+  knownCitationLabels: Set<string>
 ): PreCheckResult {
   const issues: string[] = [];
 
-  // Check evidence sourceIds resolve against known sources
+  // Check evidence sourceIds resolve against known citation labels
   if (summary.evidence) {
     for (const ev of summary.evidence) {
       if (ev.sourceIds && ev.sourceIds.length > 0) {
-        for (const sid of ev.sourceIds) {
-          if (!knownSourceIds.has(sid)) {
-            issues.push(`evidence sourceId "${sid}" 在 research sources 中不存在`);
+        for (const label of ev.sourceIds) {
+          if (!knownCitationLabels.has(label.trim())) {
+            issues.push(`evidence sourceId "${label}" 无对应 citation label（已知：${[...knownCitationLabels].join(', ')}）`);
           }
         }
       }
     }
   }
 
-  // risks must be non-empty (already checked in L0, but L1 checks content quality)
-  if (summary.risks && summary.risks.every((r) => !r?.trim())) {
+  // risks content quality (L0 already caught empty array)
+  if (summary.risks && summary.risks.length > 0 && summary.risks.every((r) => !r?.trim())) {
     issues.push('risks 数组中所有条目均为空字符串');
   }
 
@@ -221,14 +227,15 @@ const HARD_DIMENSIONS = new Set([
   'risk_disclosure',
 ]);
 
-function determineGate(
+function determineGateWithSet(
   dimensions: JudgeDimension[],
+  hardDimensions: Set<string>,
   rewriteCount: number,
   maxRewrites: number
 ): { gate: JudgeGate; rewriteInstructions?: string[]; escalateReason?: string } {
   const hasAbstain = dimensions.some((d) => d.result === 'ABSTAIN');
   const hardFails = dimensions.filter(
-    (d) => HARD_DIMENSIONS.has(d.name) && d.result === 'FAIL'
+    (d) => hardDimensions.has(d.name) && d.result === 'FAIL'
   );
 
   if (hasAbstain) {
@@ -250,7 +257,7 @@ function determineGate(
   return { gate: 'REWRITE', rewriteInstructions };
 }
 
-// ── Main entry point ───────────────���──────────────────────────────────────────
+// ── Main entry point ──────────────────────────────────────────────────────────
 
 export function evaluateSummary(
   sessionId: string,
@@ -259,18 +266,55 @@ export function evaluateSummary(
   ledger: TaskLedger,
   summaryVersion = 1,
   rewriteCount = 0,
-  maxRewrites = 2
+  maxRewrites = 2,
+  /**
+   * Pre-check results from L0/L1 (pass these in so they drive the gate,
+   * not just get logged as session events).
+   */
+  preChecks?: { l0?: PreCheckResult; l1?: PreCheckResult }
 ): JudgeEvaluationResult {
-  const dimensions = [
+  const dimensions: JudgeDimension[] = [];
+
+  // Inject L0 failures as a hard FAIL dimension before LLM dimensions
+  if (preChecks?.l0 && !preChecks.l0.passed) {
+    dimensions.push({
+      name: 'structural_completeness',
+      result: 'FAIL',
+      issueCode: 'l0_structural_fail',
+      evidencePointers: preChecks.l0.issues,
+      actionableFixes: preChecks.l0.issues.map((issue) => `修复：${issue}`),
+    });
+  }
+
+  // Inject L1 failures as a hard FAIL dimension
+  if (preChecks?.l1 && !preChecks.l1.passed) {
+    dimensions.push({
+      name: 'citation_resolvability',
+      result: 'FAIL',
+      issueCode: 'l1_citation_fail',
+      evidencePointers: preChecks.l1.issues,
+      actionableFixes: preChecks.l1.issues.map((issue) => `修复：${issue}`),
+    });
+  }
+
+  // LLM-based dimensions
+  dimensions.push(
     evaluateBriefConstraintAdherence(summary, brief, ledger),
     evaluateEvidenceCoverage(summary),
     evaluateRiskDisclosure(summary, ledger),
-    evaluateInternalConsistency(summary),
-  ];
+    evaluateInternalConsistency(summary)
+  );
+
+  const EFFECTIVE_HARD_DIMENSIONS = new Set([
+    ...HARD_DIMENSIONS,
+    'structural_completeness',
+    'citation_resolvability',
+  ]);
 
   const passedCount = dimensions.filter((d) => d.result === 'PASS').length;
-  const { gate, rewriteInstructions, escalateReason } = determineGate(
+  const { gate, rewriteInstructions, escalateReason } = determineGateWithSet(
     dimensions,
+    EFFECTIVE_HARD_DIMENSIONS,
     rewriteCount,
     maxRewrites
   );

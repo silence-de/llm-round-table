@@ -1320,9 +1320,12 @@ export class DiscussionOrchestrator {
           });
         }
 
-        // L1: citation resolvability checks (no LLM)
-        const knownSourceIds = new Set(this.researchSources.map((s) => s.id));
-        const l1 = runL1Checks(parsedSummary, knownSourceIds);
+        // L1: citation resolvability — compare against citation labels (R1, R2…),
+        // NOT raw DB source IDs. Summaries always reference sources by label.
+        const knownCitationLabels = new Set(
+          this.researchSources.map((s) => s.citationLabel ?? `R${s.rank}`)
+        );
+        const l1 = runL1Checks(parsedSummary, knownCitationLabels);
         if (!l1.passed) {
           await this.persistSessionEvent({
             type: 'summary_evaluation',
@@ -1332,7 +1335,7 @@ export class DiscussionOrchestrator {
           });
         }
 
-        // LLM judge evaluation
+        // LLM judge evaluation — L0/L1 results feed into gate as hard FAIL dimensions
         const judgeResult = judgeEvaluateSummary(
           this.config.sessionId,
           parsedSummary,
@@ -1340,7 +1343,8 @@ export class DiscussionOrchestrator {
           this.taskLedger,
           summaryVersion,
           0,
-          2
+          2,
+          { l0, l1 }
         );
 
         await this.persistSessionEvent({

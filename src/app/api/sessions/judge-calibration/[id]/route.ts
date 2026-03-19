@@ -3,8 +3,9 @@ import { recordJudgeHumanReview } from '@/lib/db/repository';
 
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
   const body = await req.json() as {
     humanReviewResult: 'PASS' | 'FAIL';
     humanReviewerId: string;
@@ -16,7 +17,7 @@ export async function POST(
   }
 
   await recordJudgeHumanReview({
-    judgeEvaluationId: params.id,
+    judgeEvaluationId: id,
     humanReviewResult: body.humanReviewResult,
     humanReviewerId: body.humanReviewerId,
     agreement: body.agreement ?? false,
