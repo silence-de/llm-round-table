@@ -1,4 +1,4 @@
-import type { DecisionBrief, DecisionSummary, TrustValidationResult, TrustViolation } from './types';
+import type { DecisionBrief, DecisionSummary, DecisionSummaryEvidence, TrustValidationResult, TrustViolation, ClaimType, VerificationStatus } from './types';
 
 export function validateDecisionSummary(
   summary: DecisionSummary,
@@ -140,4 +140,53 @@ export function validateDecisionSummary(
     violations,
     score,
   };
+}
+
+// ── T4-1: Claim Gate ──────────────────────────────────────────────────────────
+
+export interface ClaimGateResult {
+  passed: boolean;
+  blocked: DecisionSummaryEvidence[];
+  enriched: DecisionSummaryEvidence[];
+}
+
+/**
+ * Classifies and gates each evidence item.
+ * - requires_evidence + no sourceIds → blocked (must become gap_only)
+ * - gap_only → allowed only in gap section, not recommendation body
+ * - allowed_without_evidence → passes through
+ *
+ * Also enriches each item with verificationStatus based on current state.
+ */
+export function runClaimGate(evidence: DecisionSummaryEvidence[]): ClaimGateResult {
+  const blocked: DecisionSummaryEvidence[] = [];
+  const enriched: DecisionSummaryEvidence[] = [];
+
+  for (const ev of evidence) {
+    const claimType: ClaimType = ev.claimType ?? inferClaimType(ev);
+    const verificationStatus: VerificationStatus = inferVerificationStatus(ev);
+    const enrichedEv: DecisionSummaryEvidence = { ...ev, claimType, verificationStatus };
+
+    if (claimType === 'requires_evidence' && (!ev.sourceIds || ev.sourceIds.length === 0)) {
+      blocked.push(enrichedEv);
+    } else {
+      enriched.push(enrichedEv);
+    }
+  }
+
+  return { passed: blocked.length === 0, blocked, enriched };
+}
+
+function inferClaimType(ev: DecisionSummaryEvidence): ClaimType {
+  if (ev.sourceIds && ev.sourceIds.length > 0) return 'requires_evidence';
+  if (ev.gapReason) return 'gap_only';
+  return 'requires_evidence';
+}
+
+function inferVerificationStatus(ev: DecisionSummaryEvidence): VerificationStatus {
+  if (ev.verificationStatus) return ev.verificationStatus;
+  if (!ev.sourceIds || ev.sourceIds.length === 0) {
+    return ev.gapReason ? 'inferred' : 'ungrounded';
+  }
+  return 'extracted'; // has sourceIds but not independently verified
 }

@@ -160,14 +160,16 @@ export function DecisionSummaryCard({
         ) : null}
         <div className="space-y-1">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
-            Trust Signals
+            来源覆盖情况
           </p>
           <div className="flex flex-wrap gap-1">
-            <SignalChip label={`backed ${trustSignals.backedClaims}`} />
-            <SignalChip label={`unsupported ${trustSignals.unsupportedClaims}`} />
-            <SignalChip label={`sources ${trustSignals.citedSources}`} />
-            <SignalChip label={`domains ${trustSignals.citedDomains}`} />
-            <SignalChip label={`stale ${trustSignals.staleSources}`} />
+            <SignalChip label={`有来源支撑 ${trustSignals.backedClaims}`} />
+            <SignalChip label={`来源不足 ${trustSignals.unsupportedClaims}`} />
+            <SignalChip label={`引用来源 ${trustSignals.citedSources}`} />
+            <SignalChip label={`跨域 ${trustSignals.citedDomains}`} />
+            {trustSignals.staleSources > 0 && (
+              <SignalChip label={`过时来源 ${trustSignals.staleSources}`} />
+            )}
           </div>
           {trustSignals.warnings.length > 0 && (
             <ul className="space-y-1 pl-4 text-[11px] rt-text-dim">
@@ -197,15 +199,7 @@ export function DecisionSummaryCard({
                 >
                   <div className="flex items-start justify-between gap-2">
                     <p className="text-sm rt-text-strong">{evidence.claim}</p>
-                    <SignalChip
-                      label={
-                        classifyEvidenceStatus(evidence) === 'supported'
-                          ? 'supported'
-                          : classifyEvidenceStatus(evidence) === 'verify'
-                            ? 'verify'
-                            : 'inference'
-                      }
-                    />
+                    <EvidenceStatusChip status={classifyEvidenceStatus(evidence)} />
                   </div>
                   {evidence.sourceIds.length > 0 ? (
                     <div className="mt-1 flex flex-wrap gap-1">
@@ -288,6 +282,39 @@ function ListSection({ heading, items }: { heading: string; items: string[] }) {
         <p className="text-sm rt-text-dim">None</p>
       )}
     </div>
+  );
+}
+
+function EvidenceStatusChip({ status }: { status: string }) {
+  const styles: Record<string, string> = {
+    evidence_backed: 'border-emerald-500/40 text-emerald-300',
+    extracted: 'border-slate-500/40 text-slate-400',
+    captured: 'border-slate-500/40 text-slate-400',
+    inferred: 'border-amber-500/40 text-amber-300',
+    ungrounded: 'border-red-500/40 text-red-300',
+  };
+  const labels: Record<string, string> = {
+    evidence_backed: '来源支撑',
+    extracted: '已提取',
+    captured: '已捕获',
+    inferred: '推断',
+    ungrounded: '无来源',
+  };
+  const tooltips: Record<string, string> = {
+    evidence_backed: '有可引用来源支撑',
+    extracted: '已从来源提取，未独立验证',
+    captured: '已捕获页面，待人工复核',
+    inferred: '推断性结论，基于现有数据',
+    ungrounded: '无来源支撑',
+  };
+  const cls = styles[status] ?? 'border-slate-500/40 text-slate-400';
+  return (
+    <span
+      title={tooltips[status] ?? status}
+      className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] ${cls}`}
+    >
+      {labels[status] ?? status}
+    </span>
   );
 }
 

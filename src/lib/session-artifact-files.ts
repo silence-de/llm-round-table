@@ -504,16 +504,16 @@ function buildClaimMap(detail: SessionArtifactDetailLike): CardItem[] {
       .join(' | ');
     return {
       label:
-        status === 'supported'
+        status === 'evidence_backed'
           ? 'Supported'
-          : status === 'verify'
+          : status === 'inferred' || status === 'captured' || status === 'extracted'
             ? 'Verify'
             : 'Inference',
       text: refs || item.gapReason || 'Manual verification required.',
       tone:
-        status === 'supported'
+        status === 'evidence_backed'
           ? 'default'
-          : status === 'verify'
+          : status === 'inferred' || status === 'captured' || status === 'extracted'
             ? 'accent'
             : 'warning',
     };

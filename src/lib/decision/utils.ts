@@ -305,13 +305,15 @@ function ensureDecisionDossierMinimums(
 
 export function classifyEvidenceStatus(
   evidence: DecisionSummaryEvidence
-): 'supported' | 'inference' | 'verify' {
-  if (evidence.sourceIds.length > 0) return 'supported';
+): 'evidence_backed' | 'extracted' | 'captured' | 'inferred' | 'ungrounded' {
+  // Use explicit verificationStatus if present
+  if (evidence.verificationStatus) return evidence.verificationStatus;
+  if (evidence.sourceIds.length > 0) return 'extracted';
   const reason = evidence.gapReason?.toLowerCase() ?? '';
   if (/待验证|验证|核验|确认|check|verify|unknown|missing|unclear/.test(reason)) {
-    return 'verify';
+    return 'inferred';
   }
-  return 'inference';
+  return 'ungrounded';
 }
 
 function normalizeDecisionType(value?: string): DecisionType {

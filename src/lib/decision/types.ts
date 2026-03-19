@@ -55,11 +55,41 @@ export interface DiscussionAgenda {
   requestRecommendation: boolean;
 }
 
+// T4-1: claim classification
+export type ClaimType = 'allowed_without_evidence' | 'requires_evidence' | 'gap_only';
+
+// T4-1: verification status — reflects what actually happened, not what we wish
+export type VerificationStatus =
+  | 'captured'        // page fetched, signals extracted, manual review still required
+  | 'extracted'       // claim extracted from source text, not independently verified
+  | 'evidence_backed' // claim has ≥1 resolved sourceId
+  | 'inferred'        // logical inference from evidence, no direct citation
+  | 'ungrounded';     // no source support at all
+
+// T4-3: structured gap reason
+export type GapReasonCode =
+  | 'search_failed'
+  | 'source_inaccessible'
+  | 'insufficient_evidence'
+  | 'conflicting_sources'
+  | 'out_of_scope';
+
+export interface GapReasonEntry {
+  topic: string;
+  reason: GapReasonCode;
+  searchScope?: string;
+  accessStatus?: string;
+  nextAction?: string;
+}
+
 export interface DecisionSummaryEvidence {
   claim: string;
   sourceIds: string[];
   gapReason?: string;
   unresolvedSourceIndices?: number[];
+  // T4-1 enrichment fields (optional, populated by runClaimGate)
+  claimType?: ClaimType;
+  verificationStatus?: VerificationStatus;
 }
 
 export interface DecisionConfidenceAdjustment {
