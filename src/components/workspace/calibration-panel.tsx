@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { Activity } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CalibrationDashboard } from '@/components/discussion/calibration-dashboard';
@@ -36,65 +37,41 @@ export function CalibrationPanel({
 }: CalibrationPanelProps) {
   return (
     <div className="space-y-3">
-      <div className="rounded-xl border rt-surface p-2.5">
-        <div className="mb-2 flex items-center gap-2">
-          <Activity className="h-3.5 w-3.5 rt-text-muted" />
-          <p className="rt-eyebrow">Decision Quality</p>
+      <div className="rounded-xl border border-white/8 bg-neutral-900 p-3">
+        <div className="mb-3 flex items-center gap-2">
+          <Activity className="h-3.5 w-3.5 text-neutral-500" />
+          <p className="text-xs font-medium text-neutral-400">Decision quality</p>
         </div>
         <div className="grid grid-cols-3 gap-2">
-          <div>
-            <span className="rt-eyebrow pl-0.5">Window</span>
-            <Select value={calibrationWindow} onValueChange={(value) => onChangeWindow(value as CalibrationDashboardData['window'])}>
-              <SelectTrigger className="rt-input h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="30d" className="text-xs">30d</SelectItem>
-                <SelectItem value="90d" className="text-xs">90d</SelectItem>
-                <SelectItem value="180d" className="text-xs">180d</SelectItem>
-                <SelectItem value="all" className="text-xs">All</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <span className="rt-eyebrow pl-0.5">Decision Type</span>
-            <Select value={calibrationDecisionTypeFilter} onValueChange={(value) => onChangeDecisionTypeFilter(value ?? 'all')}>
-              <SelectTrigger className="rt-input h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all" className="text-xs">All types</SelectItem>
-                {calibrationDecisionTypeOptions.map((decisionType) => (
-                  <SelectItem key={decisionType} value={decisionType} className="text-xs">
-                    {decisionType}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <span className="rt-eyebrow pl-0.5">Template</span>
-            <Select value={calibrationTemplateFilter} onValueChange={(value) => onChangeTemplateFilter(value ?? 'all')}>
-              <SelectTrigger className="rt-input h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all" className="text-xs">All templates</SelectItem>
-                {historyTemplateOptions.map((templateId) => (
-                  <SelectItem key={templateId} value={templateId} className="text-xs">
-                    {templateLabelFor(templateId)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <FilterColumn label="Window" value={calibrationWindow} onValueChange={(value) => onChangeWindow(value as CalibrationDashboardData['window'])}>
+            <SelectItem value="30d" className="text-xs">30d</SelectItem>
+            <SelectItem value="90d" className="text-xs">90d</SelectItem>
+            <SelectItem value="180d" className="text-xs">180d</SelectItem>
+            <SelectItem value="all" className="text-xs">All</SelectItem>
+          </FilterColumn>
+          <FilterColumn label="Decision type" value={calibrationDecisionTypeFilter} onValueChange={(value) => onChangeDecisionTypeFilter(value ?? 'all')}>
+            <SelectItem value="all" className="text-xs">All types</SelectItem>
+            {calibrationDecisionTypeOptions.map((decisionType) => (
+              <SelectItem key={decisionType} value={decisionType} className="text-xs">
+                {decisionType}
+              </SelectItem>
+            ))}
+          </FilterColumn>
+          <FilterColumn label="Template" value={calibrationTemplateFilter} onValueChange={(value) => onChangeTemplateFilter(value ?? 'all')}>
+            <SelectItem value="all" className="text-xs">All templates</SelectItem>
+            {historyTemplateOptions.map((templateId) => (
+              <SelectItem key={templateId} value={templateId} className="text-xs">
+                {templateLabelFor(templateId)}
+              </SelectItem>
+            ))}
+          </FilterColumn>
         </div>
       </div>
 
       {historyDetail?.calibrationContext.reviewedSessions ? (
-        <div className="rounded-xl border rt-surface p-2.5">
-          <p className="rt-eyebrow">Current Session Baseline</p>
-          <div className="mt-2 space-y-1 text-xs rt-text-muted">
+        <div className="rounded-xl border border-white/8 bg-neutral-900 p-3">
+          <p className="text-xs font-medium text-neutral-400">Current session baseline</p>
+          <div className="mt-2 space-y-1 text-xs text-neutral-500">
             <p>
               This session uses advisory context only. Historical review suggests a{' '}
               {historyDetail.calibrationContext.penalty}pt caution buffer across{' '}
@@ -110,13 +87,37 @@ export function CalibrationPanel({
       ) : null}
 
       {calibrationLoading ? (
-        <p className="text-sm rt-text-muted">Loading calibration…</p>
+        <p className="text-sm text-neutral-400">Loading calibration…</p>
       ) : (
         <CalibrationDashboard
           data={calibrationData}
           templateLabelFor={templateLabelFor}
         />
       )}
+    </div>
+  );
+}
+
+function FilterColumn({
+  label,
+  value,
+  onValueChange,
+  children,
+}: {
+  label: string;
+  value: string;
+  onValueChange: (value: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-medium text-neutral-500">{label}</span>
+      <Select value={value} onValueChange={onValueChange}>
+        <SelectTrigger className="h-8 border-white/8 bg-neutral-800 text-xs text-neutral-200">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>{children}</SelectContent>
+      </Select>
     </div>
   );
 }

@@ -1,10 +1,14 @@
 'use client';
 
+import { useMemo, useState } from 'react';
+import { Accordion } from '@base-ui/react';
+import { ChevronDown } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { DecisionConfidenceMeta, DecisionSummary } from '@/lib/decision/types';
 import { buildDecisionConfidenceMeta, classifyEvidenceStatus } from '@/lib/decision/utils';
 import type { ResearchEvaluation, ResearchSource } from '@/lib/search/types';
 import { findResearchSourceByCitation, getResearchSourceCitationLabel } from '@/lib/search/utils';
+import { cn } from '@/lib/utils';
 
 interface RiskRegisterItem {
   riskId: string;
@@ -24,7 +28,7 @@ interface DecisionSummaryCardProps {
 }
 
 export function DecisionSummaryCard({
-  title = 'Decision Summary',
+  title = 'Decision summary',
   decisionSummary,
   researchSources = [],
   researchEvaluation = null,
@@ -60,276 +64,360 @@ export function DecisionSummaryCard({
         (source.verifiedFields?.length ?? 0) === 0)
   ).length;
 
+  const overviewPoints = [
+    `${resolvedConfidenceMeta.evidenceBackedClaims} conclusion${resolvedConfidenceMeta.evidenceBackedClaims === 1 ? ' is' : 's are'} backed by sources.`,
+    `${resolvedConfidenceMeta.unsupportedClaims} conclusion${resolvedConfidenceMeta.unsupportedClaims === 1 ? '' : 's'} still lack explicit source support.`,
+    resolvedConfidenceMeta.citedSources > 0
+      ? `${resolvedConfidenceMeta.citedSources} cited source${resolvedConfidenceMeta.citedSources === 1 ? '' : 's'} across ${resolvedConfidenceMeta.citedDomains} domain${resolvedConfidenceMeta.citedDomains === 1 ? '' : 's'}.`
+      : 'No citable sources are mapped yet.',
+  ];
+
+  const researchNotes = [
+    isResearchMissing
+      ? 'External evidence is missing for this run, so treat the recommendation as a draft pending manual review.'
+      : null,
+    browserVerificationCount > 0
+      ? `Captured pages: ${browserVerificationCount}. Manual review is still recommended for ${manualReviewRequiredCount} page${manualReviewRequiredCount === 1 ? '' : 's'}.`
+      : null,
+    ...resolvedConfidenceMeta.adjustments.map((item) => `${item.label}: ${item.reason}`),
+    ...trustSignals.warnings,
+  ].filter((item): item is string => Boolean(item));
+
+  const sectionValues = useMemo(
+    () => [
+      'summary',
+      'recommended-option',
+      ...(decisionSummary.why.length > 0 ? ['why'] : []),
+      ...(decisionSummary.risks.length > 0 || (riskRegister?.length ?? 0) > 0 ? ['risks'] : []),
+      ...(decisionSummary.openQuestions.length > 0 ? ['open-questions'] : []),
+      ...(decisionSummary.nextActions.length > 0 ? ['next-actions'] : []),
+      ...(decisionSummary.alternativesRejected.length > 0 ? ['alternatives-rejected'] : []),
+      ...(decisionSummary.redLines.length > 0 ? ['red-lines'] : []),
+      ...(decisionSummary.revisitTriggers.length > 0 ? ['revisit-triggers'] : []),
+      ...(researchEvaluation?.gaps.length ? ['research-gaps'] : []),
+      ...(decisionSummary.evidence.length > 0 ? ['evidence'] : []),
+      ...(researchNotes.length > 0 ? ['research-notes'] : []),
+    ],
+    [decisionSummary, researchEvaluation?.gaps.length, researchNotes.length, riskRegister]
+  );
+
   return (
-    <Card className="rt-surface-minutes">
-      <CardHeader className="px-3 pb-1.5 pt-3">
-        <CardTitle className="flex items-center justify-between gap-3 text-sm rt-text-strong">
-          <span>{title}</span>
-          <div className="flex items-center gap-2">
-            {researchEvaluation && (
-              <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
-                {describeEvidenceStrength(researchEvaluation.overallConfidence)}
-              </span>
-            )}
+    <Card className="rt-surface-minutes rounded-2xl border shadow-none">
+      <CardHeader className="gap-3 border-b border-[color:var(--color-border)] px-4 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <p className="text-xs font-medium rt-text-muted">Decision context</p>
+            <CardTitle className="text-base font-semibold rt-text-strong">{title}</CardTitle>
           </div>
-        </CardTitle>
+          {researchEvaluation && (
+            <StatusPill label={describeEvidenceStrength(researchEvaluation.overallConfidence)} />
+          )}
+        </div>
+        <p className="max-w-2xl text-sm leading-6 rt-text-muted">
+          {decisionSummary.summary || 'No summary has been captured yet.'}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <StatusPill label={`${trustSignals.backedClaims} backed`} />
+          <StatusPill label={`${trustSignals.citedSources} sources`} />
+        </div>
       </CardHeader>
-      <CardContent className="space-y-3 px-3 pb-3">
-        {isResearchMissing && (
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/8 p-2 text-[11px] text-amber-100">
-            本次结论缺少可用外部证据（research skipped/failed 或无选中来源），建议仅作为模型推理草案并人工复核。
+
+      <CardContent className="space-y-4 px-4 py-4">
+        <div className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-4">
+          <p className="text-sm font-medium rt-text-strong">Evidence coverage</p>
+          <div className="mt-2 space-y-2">
+            {overviewPoints.map((point) => (
+              <p key={point} className="text-sm leading-6 rt-text-muted">
+                {point}
+              </p>
+            ))}
           </div>
-        )}
-        <div className="rounded-xl border rt-border-soft p-2 text-[11px] rt-text-dim">
-          <p className="font-semibold rt-text-strong">
-            Evidence coverage
-          </p>
-          <p className="mt-1">
-            {resolvedConfidenceMeta.evidenceBackedClaims} 条结论有来源支撑，
-            {resolvedConfidenceMeta.unsupportedClaims} 条缺少可引用证据。
-            {resolvedConfidenceMeta.citedSources > 0
-              ? ` 引用了 ${resolvedConfidenceMeta.citedSources} 个来源，跨 ${resolvedConfidenceMeta.citedDomains} 个域名。`
-              : ' ���无可引用来源。'}
-          </p>
-          {resolvedConfidenceMeta.adjustments.length > 0 && (
-            <ul className="mt-1 space-y-1 pl-4">
-              {resolvedConfidenceMeta.adjustments.map((item) => (
-                <li key={item.kind} className="list-disc">
-                  {item.label}: {item.reason}
-                </li>
-              ))}
-            </ul>
-          )}
         </div>
-        {browserVerificationCount > 0 && (
-          <div className="rounded-xl border rt-border-soft p-2 text-[11px] rt-text-dim">
-            <p className="font-semibold rt-text-strong">Browser capture</p>
-            <p className="mt-1">
-              Browser capture means the page was fetched and signals may have been extracted from
-              page text via keyword-sentence matching. It does not mean every claim is semantically
-              verified.
-            </p>
-            <p className="mt-1">
-              Captured pages: {browserVerificationCount}. Manual review still required for{' '}
-              {manualReviewRequiredCount} page(s).
-            </p>
-          </div>
-        )}
-        <Section heading="Summary" body={decisionSummary.summary} />
-        <Section heading="Recommended Option" body={decisionSummary.recommendedOption} />
-        <ListSection heading="Why" items={decisionSummary.why} />
-        <ListSection heading="Risks" items={decisionSummary.risks} />
-        {riskRegister && riskRegister.length > 0 && (
-          <div className="space-y-1">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
-              结构化风险
-            </p>
-            <div className="space-y-1">
-              {riskRegister.map((item) => (
-                <div key={item.riskId} className="flex items-start gap-2 text-sm rt-text-strong">
-                  <span
-                    className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                      item.severity === 'high'
-                        ? 'bg-red-500/20 text-red-300'
-                        : item.severity === 'medium'
-                          ? 'bg-amber-500/20 text-amber-300'
-                          : 'bg-emerald-500/20 text-emerald-300'
-                    }`}
-                  >
-                    {item.severity}
-                  </span>
-                  <span>{item.description}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        <ListSection heading="Open Questions" items={decisionSummary.openQuestions} />
-        <ListSection heading="Next Actions" items={decisionSummary.nextActions} />
-        <ListSection
-          heading="Alternatives Rejected"
-          items={decisionSummary.alternativesRejected}
-        />
-        <ListSection heading="Red Lines" items={decisionSummary.redLines} />
-        <ListSection
-          heading="Revisit Triggers"
-          items={decisionSummary.revisitTriggers}
-        />
-        {researchEvaluation?.gaps.length ? (
-          <ListSection heading="Research Gaps" items={researchEvaluation.gaps} />
-        ) : null}
-        <div className="space-y-1">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
-            来源覆盖情况
-          </p>
-          <div className="flex flex-wrap gap-1">
-            <SignalChip label={`有来源支撑 ${trustSignals.backedClaims}`} />
-            <SignalChip label={`来源不足 ${trustSignals.unsupportedClaims}`} />
-            <SignalChip label={`引用来源 ${trustSignals.citedSources}`} />
-            <SignalChip label={`跨域 ${trustSignals.citedDomains}`} />
-            {trustSignals.staleSources > 0 && (
-              <SignalChip label={`过时来源 ${trustSignals.staleSources}`} />
-            )}
-          </div>
-          {trustSignals.warnings.length > 0 && (
-            <ul className="space-y-1 pl-4 text-[11px] rt-text-dim">
-              {trustSignals.warnings.map((warning, index) => (
-                <li key={`trust-warning-${index}`} className="list-disc">
-                  {warning}
-                </li>
-              ))}
-            </ul>
+
+        <Accordion.Root
+          defaultValue={['summary', 'recommended-option']}
+          className="divide-y divide-[color:var(--color-border)]"
+        >
+          {sectionValues.includes('summary') && (
+            <AccordionSection value="summary" title="Summary">
+              <SectionBody body={decisionSummary.summary} />
+            </AccordionSection>
           )}
-        </div>
-        {decisionSummary.evidence.some((item) => item.sourceIds.length === 0) ? (
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/8 p-2 text-[11px] text-amber-100">
-            部分结论仍是无证据推断，请在执行前补充验证。
-          </div>
-        ) : null}
-        {decisionSummary.evidence.length > 0 && (
-          <div className="space-y-1">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
-              Evidence
-            </p>
-            <div className="space-y-1.5">
-              {decisionSummary.evidence.map((evidence, index) => (
-                <div
-                  key={`${evidence.claim}-${index}`}
-                  className="rounded-xl border rt-border-soft p-2"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="text-sm rt-text-strong">{evidence.claim}</p>
-                    <EvidenceStatusChip status={classifyEvidenceStatus(evidence)} />
-                  </div>
-                  {evidence.sourceIds.length > 0 ? (
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {evidence.sourceIds.map((sourceId) => {
-                        const source = findResearchSourceByCitation(sourceId, researchSources);
-                        return source ? (
-                          <a
-                            key={`${evidence.claim}-${sourceId}`}
-                            href={source.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim hover:underline"
-                          >
-                            {getResearchSourceCitationLabel(source)}
-                            {source.sourceType === 'browser_verification' ? ' captured' : ''}: {' '}
-                            {source.domain || source.title}
-                          </a>
-                        ) : (
-                          <span
-                            key={`${evidence.claim}-${sourceId}`}
-                            className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim"
-                          >
-                            {sourceId}
-                          </span>
-                        );
-                      })}
+
+          {sectionValues.includes('recommended-option') && (
+            <AccordionSection value="recommended-option" title="Recommended option">
+              <SectionBody body={decisionSummary.recommendedOption} emptyLabel="No recommendation yet." />
+            </AccordionSection>
+          )}
+
+          {sectionValues.includes('why') && (
+            <AccordionSection value="why" title="Why this path">
+              <ListSection items={decisionSummary.why} emptyLabel="No rationale recorded." />
+            </AccordionSection>
+          )}
+
+          {sectionValues.includes('risks') && (
+            <AccordionSection value="risks" title="Risks and constraints">
+              <div className="space-y-4">
+                <ListSection items={decisionSummary.risks} emptyLabel="No risks recorded." />
+                {riskRegister && riskRegister.length > 0 ? (
+                  <div className="space-y-3 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-4">
+                    <p className="text-sm font-medium rt-text-strong">Structured risk register</p>
+                    <div className="space-y-3">
+                      {riskRegister.map((item) => (
+                        <div key={item.riskId} className="space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <StatusPill label={describeSeverity(item.severity)} />
+                          </div>
+                          <p className="text-sm leading-6 rt-text-muted">{item.description}</p>
+                        </div>
+                      ))}
                     </div>
-                  ) : (
-                    <p className="mt-1 text-[11px] rt-text-dim">
-                      {evidence.gapReason || 'No explicit source mapping'}
-                    </p>
-                  )}
-                  {evidence.gapReason && evidence.sourceIds.length > 0 ? (
-                    <p className="mt-1 text-[11px] rt-text-dim">
-                      Gap note: {evidence.gapReason}
-                    </p>
-                  ) : null}
-                  {evidence.unresolvedSourceIndices?.length ? (
-                    <p className="mt-1 text-[11px] rt-text-dim">
-                      Legacy refs unresolved: {evidence.unresolvedSourceIndices.join(', ')}
-                    </p>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+                  </div>
+                ) : null}
+              </div>
+            </AccordionSection>
+          )}
+
+          {sectionValues.includes('open-questions') && (
+            <AccordionSection value="open-questions" title="Open questions">
+              <ListSection items={decisionSummary.openQuestions} emptyLabel="No open questions recorded." />
+            </AccordionSection>
+          )}
+
+          {sectionValues.includes('next-actions') && (
+            <AccordionSection value="next-actions" title="Next actions">
+              <ListSection items={decisionSummary.nextActions} emptyLabel="No next actions recorded." />
+            </AccordionSection>
+          )}
+
+          {sectionValues.includes('alternatives-rejected') && (
+            <AccordionSection value="alternatives-rejected" title="Alternatives rejected">
+              <ListSection
+                items={decisionSummary.alternativesRejected}
+                emptyLabel="No rejected alternatives recorded."
+              />
+            </AccordionSection>
+          )}
+
+          {sectionValues.includes('red-lines') && (
+            <AccordionSection value="red-lines" title="Red lines">
+              <ListSection items={decisionSummary.redLines} emptyLabel="No red lines recorded." />
+            </AccordionSection>
+          )}
+
+          {sectionValues.includes('revisit-triggers') && (
+            <AccordionSection value="revisit-triggers" title="Revisit triggers">
+              <ListSection
+                items={decisionSummary.revisitTriggers}
+                emptyLabel="No revisit triggers recorded."
+              />
+            </AccordionSection>
+          )}
+
+          {sectionValues.includes('research-gaps') && researchEvaluation?.gaps.length ? (
+            <AccordionSection value="research-gaps" title="Research gaps">
+              <ListSection items={researchEvaluation.gaps} emptyLabel="No research gaps recorded." />
+            </AccordionSection>
+          ) : null}
+
+          {sectionValues.includes('evidence') && (
+            <AccordionSection value="evidence" title="Evidence">
+              <div className="space-y-4">
+                {decisionSummary.evidence.map((evidence, index) => (
+                  <EvidenceRow
+                    key={`${evidence.claim}-${index}`}
+                    evidence={evidence}
+                    researchSources={researchSources}
+                  />
+                ))}
+              </div>
+            </AccordionSection>
+          )}
+
+          {sectionValues.includes('research-notes') && (
+            <AccordionSection value="research-notes" title="Research notes">
+              <ListSection items={researchNotes} emptyLabel="No research notes recorded." />
+            </AccordionSection>
+          )}
+        </Accordion.Root>
+
         {footer}
       </CardContent>
     </Card>
   );
 }
 
-function Section({ heading, body }: { heading: string; body: string }) {
+function AccordionSection({
+  value,
+  title,
+  children,
+}: {
+  value: string;
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="space-y-1">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
-        {heading}
-      </p>
-      <p className="text-sm leading-relaxed rt-text-strong">{body || 'None'}</p>
-    </div>
+    <Accordion.Item value={value} className="py-1">
+      <Accordion.Header>
+        <Accordion.Trigger className="flex w-full items-center justify-between gap-3 py-3 text-left text-sm font-medium rt-text-strong transition-colors duration-150 ease-out hover:rt-text-muted">
+          <span>{title}</span>
+          <ChevronDown className="h-4 w-4 shrink-0 rt-text-dim transition-transform duration-150 ease-out data-[panel-open]:rotate-180" />
+        </Accordion.Trigger>
+      </Accordion.Header>
+      <Accordion.Panel className="pb-4">
+        {children}
+      </Accordion.Panel>
+    </Accordion.Item>
   );
 }
 
-function ListSection({ heading, items }: { heading: string; items: string[] }) {
+function SectionBody({ body, emptyLabel = 'None.' }: { body: string; emptyLabel?: string }) {
+  return <p className="text-sm leading-6 rt-text-muted">{body || emptyLabel}</p>;
+}
+
+function ListSection({ items, emptyLabel }: { items: string[]; emptyLabel: string }) {
+  if (items.length === 0) {
+    return <p className="text-sm leading-6 rt-text-dim">{emptyLabel}</p>;
+  }
+
   return (
-    <div className="space-y-1">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
-        {heading}
-      </p>
-      {items.length > 0 ? (
-        <ul className="space-y-1 pl-4 text-sm rt-text-strong">
-          {items.map((item, index) => (
-            <li key={`${heading}-${index}`} className="list-disc">
-              {item}
-            </li>
-          ))}
-        </ul>
+    <ul className="space-y-3 pl-5 text-sm leading-6 rt-text-muted marker:rt-text-dim list-disc">
+      {items.map((item, index) => (
+        <li key={`${item}-${index}`}>{item}</li>
+      ))}
+    </ul>
+  );
+}
+
+function EvidenceRow({
+  evidence,
+  researchSources,
+}: {
+  evidence: DecisionSummary['evidence'][number];
+  researchSources: ResearchSource[];
+}) {
+  const [showAllSources, setShowAllSources] = useState(false);
+  const visibleSourceIds = showAllSources ? evidence.sourceIds : evidence.sourceIds.slice(0, 2);
+
+  return (
+    <div className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="min-w-0 flex-1 text-sm font-medium leading-6 rt-text-strong">{evidence.claim}</p>
+        <EvidenceStatusPill status={classifyEvidenceStatus(evidence)} />
+      </div>
+
+      {evidence.sourceIds.length > 0 ? (
+        <div className="mt-3 space-y-3">
+          <div className="flex flex-wrap gap-2">
+            {visibleSourceIds.map((sourceId) => {
+              const source = findResearchSourceByCitation(sourceId, researchSources);
+              return source ? (
+                <a
+                  key={`${evidence.claim}-${sourceId}`}
+                  href={source.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex max-w-full rounded-lg border border-[color:var(--color-border)] px-2 py-1 text-xs font-medium rt-text-muted transition-colors duration-150 ease-out hover:rt-text-strong"
+                >
+                  <span className="truncate">
+                    {getResearchSourceCitationLabel(source)} · {source.domain || source.title}
+                  </span>
+                </a>
+              ) : (
+                <span
+                  key={`${evidence.claim}-${sourceId}`}
+                  className="inline-flex rounded-lg border border-[color:var(--color-border)] px-2 py-1 text-xs font-medium rt-text-muted"
+                >
+                  {sourceId}
+                </span>
+              );
+            })}
+          </div>
+          {evidence.sourceIds.length > 2 && (
+            <button
+              type="button"
+              className="text-xs font-medium rt-text-dim transition-colors duration-150 ease-out hover:rt-text-strong"
+              onClick={() => setShowAllSources((value) => !value)}
+            >
+              {showAllSources
+                ? 'Show fewer sources'
+                : `+${evidence.sourceIds.length - 2} more source${evidence.sourceIds.length - 2 === 1 ? '' : 's'}`}
+            </button>
+          )}
+        </div>
       ) : (
-        <p className="text-sm rt-text-dim">None</p>
+        <p className="mt-3 text-sm leading-6 rt-text-dim">
+          {evidence.gapReason || 'No explicit source mapping yet.'}
+        </p>
       )}
+
+      {evidence.gapReason && evidence.sourceIds.length > 0 ? (
+        <p className="mt-3 text-sm leading-6 rt-text-dim">Gap note: {evidence.gapReason}</p>
+      ) : null}
+      {evidence.unresolvedSourceIndices?.length ? (
+        <p className="mt-2 text-sm leading-6 rt-text-dim">
+          Legacy refs unresolved: {evidence.unresolvedSourceIndices.join(', ')}
+        </p>
+      ) : null}
     </div>
   );
 }
 
-function EvidenceStatusChip({ status }: { status: string }) {
+function EvidenceStatusPill({ status }: { status: string }) {
   const styles: Record<string, string> = {
-    evidence_backed: 'border-emerald-500/40 text-emerald-300',
-    extracted: 'border-slate-500/40 text-slate-400',
-    captured: 'border-slate-500/40 text-slate-400',
-    inferred: 'border-amber-500/40 text-amber-300',
-    ungrounded: 'border-red-500/40 text-red-300',
+    evidence_backed: 'border-[color:var(--color-border)] bg-[color:var(--color-card)] rt-text-strong',
+    extracted: 'border-[color:var(--color-border)] bg-[color:var(--color-card)] rt-text-muted',
+    captured: 'border-[color:var(--color-border)] bg-[color:var(--color-card)] rt-text-muted',
+    inferred: 'border-[color:var(--color-border)] bg-[color:var(--color-warning-subtle)] rt-text-strong',
+    ungrounded: 'border-[color:var(--color-border)] bg-[color:var(--color-destructive-subtle)] rt-text-strong',
   };
   const labels: Record<string, string> = {
-    evidence_backed: '来源支撑',
-    extracted: '已提取',
-    captured: '已捕获',
-    inferred: '推断',
-    ungrounded: '无来源',
+    evidence_backed: 'Backed',
+    extracted: 'Extracted',
+    captured: 'Captured',
+    inferred: 'Inferred',
+    ungrounded: 'Unmapped',
   };
   const tooltips: Record<string, string> = {
-    evidence_backed: '有可引用来源支撑',
-    extracted: '已从来源提取，未独立验证',
-    captured: '已捕获页面，待人工复核',
-    inferred: '推断性结论，基于现有数据',
-    ungrounded: '无来源支撑',
+    evidence_backed: 'Supported by citable sources',
+    extracted: 'Extracted from a source without independent verification',
+    captured: 'Captured page requires manual review',
+    inferred: 'Inference based on available material',
+    ungrounded: 'No supporting source is mapped',
   };
-  const cls = styles[status] ?? 'border-slate-500/40 text-slate-400';
+
   return (
     <span
       title={tooltips[status] ?? status}
-      className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] ${cls}`}
+      className={cn(
+        'shrink-0 rounded-lg border px-2 py-1 text-xs font-medium',
+        styles[status] ?? 'border-[color:var(--color-border)] bg-[color:var(--color-card)] rt-text-muted'
+      )}
     >
       {labels[status] ?? status}
     </span>
   );
 }
 
-function SignalChip({ label }: { label: string }) {
+function StatusPill({ label }: { label: string }) {
   return (
-    <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
+    <span className="inline-flex rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-card)] px-2 py-1 text-xs font-medium rt-text-muted">
       {label}
     </span>
   );
 }
 
 function describeEvidenceStrength(confidence: number) {
-  if (confidence >= 70) return 'evidence solid';
-  if (confidence >= 45) return 'evidence mixed';
-  return 'evidence thin';
+  if (confidence >= 70) return 'Evidence solid';
+  if (confidence >= 45) return 'Evidence mixed';
+  return 'Evidence thin';
+}
+
+function describeSeverity(severity: RiskRegisterItem['severity']) {
+  if (severity === 'high') return 'High severity';
+  if (severity === 'medium') return 'Medium severity';
+  return 'Low severity';
 }
 
 function summarizeTrustSignals(
@@ -355,16 +443,16 @@ function summarizeTrustSignals(
 
   const warnings: string[] = [];
   if (unsupportedClaims > 0) {
-    warnings.push(`${unsupportedClaims} 条结论仍缺少可引用证据。`);
+    warnings.push(`${unsupportedClaims} conclusion${unsupportedClaims === 1 ? '' : 's'} still lack citable evidence.`);
   }
   if (staleSources.length > 0) {
-    warnings.push(`${staleSources.length} 个引用来源已过时。`);
+    warnings.push(`${staleSources.length} cited source${staleSources.length === 1 ? '' : 's'} may be stale.`);
   }
   if (uniqueCitedSources.size >= 2 && uniqueDomains.size <= 1) {
-    warnings.push('引用来源过于集中，跨域证据不足。');
+    warnings.push('The evidence base is concentrated in too few domains.');
   }
   if ((researchEvaluation?.overallConfidence ?? 100) < 45) {
-    warnings.push('Research posture 偏弱，建议人工复核关键结论。');
+    warnings.push('Research confidence is thin, so key claims should be manually reviewed.');
   }
 
   return {

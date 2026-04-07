@@ -1,7 +1,6 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronDown, ExternalLink, Globe, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -17,9 +16,11 @@ import {
 import type { ResearchRunDetail, ResearchSource } from '@/lib/search/types';
 import { getResearchSourceCitationLabel } from '@/lib/search/utils';
 import {
+  getVerificationProfile,
   VERIFICATION_PROFILES,
 } from '@/lib/search/verification-profiles';
 import type { ResearchStatus } from '@/stores/discussion-store';
+import { cn } from '@/lib/utils';
 
 interface ResearchPanelProps {
   sessionId?: string | null;
@@ -77,83 +78,88 @@ export function ResearchPanel({
     [visibleSources]
   );
   const groupedSources = useMemo(
-    () =>
-      groupSourcesByCategory(
-        visibleSources.length > 0 ? visibleSources : sources
-      ),
-    [sources, visibleSources]
+    () => groupSourcesByCategory(visibleSources),
+    [visibleSources]
   );
+  const selectedStatus = researchRun?.status ?? status;
+  const selectedProfile = getVerificationProfile(verificationProfileId);
 
   if (status === 'idle' && !researchRun) return null;
 
   return (
-    <Card className="rt-panel">
-      <CardHeader
-        className="cursor-pointer pb-2"
-        onClick={() => setExpanded((value) => !value)}
-      >
-        <CardTitle className="flex items-center justify-between text-base rt-text-strong">
-          <div className="flex items-center gap-2">
-            <Globe className="h-4 w-4 rt-text-muted" />
-            <span>Research Intelligence</span>
-            <StatusChip
-              status={researchRun?.status ?? status}
-              sourceCount={selectedSources.length}
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            {onRerun && (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="h-7 gap-1 px-2 text-[11px]"
-                disabled={busy || status === 'running'}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onRerun();
-                }}
-              >
-                <RotateCcw className="h-3 w-3" />
-                {busy ? 'Refreshing…' : 'Rerun'}
-              </Button>
-            )}
+    <Card className="rt-panel rounded-2xl border shadow-none">
+      <CardHeader className="gap-3 px-4 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-start justify-between gap-3 text-left"
+            onClick={() => setExpanded((value) => !value)}
+            aria-expanded={expanded}
+          >
+            <div className="min-w-0 space-y-1">
+              <p className="text-xs font-medium rt-text-muted">Research context</p>
+              <CardTitle className="flex items-center gap-2 text-base font-semibold rt-text-strong">
+                <Globe className="h-4 w-4 shrink-0 rt-text-muted" />
+                <span>Research</span>
+              </CardTitle>
+              <p className="text-sm leading-6 rt-text-muted">
+                {describeResearchState(selectedStatus, selectedSources.length, visibleSources.length)}
+              </p>
+            </div>
             <ChevronDown
-              className={`h-4 w-4 rt-text-muted transition-transform duration-200 ${
+              className={cn(
+                'mt-1 h-4 w-4 shrink-0 rt-text-dim transition-transform duration-150 ease-out',
                 expanded ? 'rotate-180' : ''
-              }`}
+              )}
             />
-          </div>
-        </CardTitle>
+          </button>
+
+          {onRerun && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 gap-1 px-3 text-xs"
+              disabled={busy || status === 'running'}
+              onClick={(event) => {
+                event.stopPropagation();
+                onRerun();
+              }}
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              {busy ? 'Refreshing…' : 'Rerun'}
+            </Button>
+          )}
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <StatusPill label={formatStatusLabel(selectedStatus)} />
+          <StatusPill label={`${selectedSources.length} selected`} />
+        </div>
       </CardHeader>
 
-      <AnimatePresence initial={false}>
-        {expanded && (
-          <motion.div
-            key="content"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            style={{ overflow: 'hidden' }}
-          >
-            <CardContent className="space-y-3 pt-0">
+      {expanded && (
+        <CardContent className="space-y-4 border-t border-[color:var(--color-border)] px-4 py-4">
           {onVerifyUrl && (
-            <div className="rounded-xl border rt-border-soft p-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
-                Browser Capture
-              </p>
-              <div className="mt-2 grid gap-2 md:grid-cols-[170px_minmax(0,1fr)]">
+            <div className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-4">
+              <div className="space-y-1">
+                <p className="text-sm font-medium rt-text-strong">Capture a page</p>
+                <p className="text-sm leading-6 rt-text-muted">
+                  Add a browser-captured page when a specific URL is central to the decision and needs direct review.
+                </p>
+              </div>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-[200px_minmax(0,1fr)]">
                 <Select
                   value={verificationProfileId}
                   onValueChange={(value) => setVerificationProfileId(value ?? '')}
                 >
-                  <SelectTrigger className="rt-input h-9 text-xs">
+                  <SelectTrigger className="rt-input h-10 rounded-xl text-sm">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {VERIFICATION_PROFILES.map((profile) => (
-                      <SelectItem key={profile.id} value={profile.id} className="text-xs">
+                      <SelectItem key={profile.id} value={profile.id} className="text-sm">
                         {profile.label}
                       </SelectItem>
                     ))}
@@ -163,20 +169,21 @@ export function ResearchPanel({
                   value={verifyUrl}
                   onChange={(event) => setVerifyUrl(event.target.value)}
                   placeholder="Paste a URL to capture"
-                  className="rt-input h-9 text-xs"
+                  className="rt-input h-10 rounded-xl text-sm"
                 />
               </div>
-              <div className="mt-2 grid gap-2 md:grid-cols-2">
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
                 <Input
                   value={claimHint}
                   onChange={(event) => setClaimHint(event.target.value)}
                   placeholder="Optional claim to validate"
-                  className="rt-input h-9 text-xs"
+                  className="rt-input h-10 rounded-xl text-sm"
                 />
                 <Button
                   type="button"
                   size="sm"
-                  className="h-9 text-xs md:justify-self-end md:px-5"
+                  className="h-10 text-sm md:justify-self-end md:px-5"
                   disabled={busy || !verifyUrl.trim()}
                   onClick={() => {
                     onVerifyUrl({
@@ -190,441 +197,391 @@ export function ResearchPanel({
                     setVerificationNote('');
                   }}
                 >
-                  Capture
+                  Capture page
                 </Button>
               </div>
+
               <Textarea
                 value={verificationNote}
                 onChange={(event) => setVerificationNote(event.target.value)}
-                placeholder="Optional note for why this page matters"
-                className="rt-input mt-2 min-h-[64px] text-xs"
+                placeholder="Optional note about why this page matters"
+                className="rt-input mt-4 min-h-[88px] rounded-xl text-sm"
               />
-              <p className="mt-2 text-[11px] rt-text-dim">
-                Captured-page workflow: attach a snapshot, extract profile-specific facts when
-                possible, and surface what still needs manual review.
+
+              <p className="mt-4 text-sm leading-6 rt-text-muted">
+                The captured-page workflow stores a snapshot, extracts profile-specific facts when possible, and marks what still needs manual review.
               </p>
-              {verificationProfileId && (
-                <div className="mt-2 rounded-lg border rt-border-soft p-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
-                    Extraction targets
-                  </p>
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {lookupProfile(verificationProfileId)?.extractionTargets.map((item) => (
-                      <span
-                        key={`${verificationProfileId}-${item}`}
-                        className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim"
-                      >
-                        {item}
-                      </span>
-                    ))}
-                  </div>
+
+              {selectedProfile && (
+                <div className="mt-4 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-muted-bg)] p-4">
+                  <p className="text-sm font-medium rt-text-strong">Extraction targets</p>
+                  <ChipOverflowRow items={selectedProfile.extractionTargets} className="mt-3" />
                 </div>
               )}
             </div>
           )}
+
           {researchRun?.summary && (
-            <div className="rounded-xl border rt-border-soft p-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
-                Research Summary
-              </p>
-              <p className="mt-1 whitespace-pre-line text-sm leading-relaxed rt-text-strong">
+            <ContextBlock title="Research summary">
+              <p className="whitespace-pre-line text-sm leading-6 rt-text-muted">
                 {researchRun.summary}
               </p>
-            </div>
+            </ContextBlock>
           )}
 
           {researchRun?.queryPlan.length ? (
-            <div className="rounded-xl border rt-border-soft p-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
-                Query Plan
-              </p>
-              <ul className="mt-2 space-y-1 pl-4 text-sm rt-text-strong">
-                {researchRun.queryPlan.map((query, index) => (
-                  <li key={`${query}-${index}`} className="list-disc">
-                    {query}
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <ContextBlock title="Query plan">
+              <ListBlock items={researchRun.queryPlan} />
+            </ContextBlock>
           ) : null}
 
           {researchRun?.evaluation && (
-            <div className="rounded-xl border rt-border-soft p-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
-                Quality Signals
-              </p>
-              <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+            <ContextBlock title="Quality assessment">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <Metric label="Coverage" value={researchRun.evaluation.coverageScore} />
                 <Metric label="Recency" value={researchRun.evaluation.recencyScore} />
                 <Metric label="Diversity" value={researchRun.evaluation.diversityScore} />
-                <Metric
-                  label="Confidence"
-                  value={researchRun.evaluation.overallConfidence}
-                />
+                <Metric label="Confidence" value={researchRun.evaluation.overallConfidence} />
               </div>
-              {researchRun.evaluation.gaps.length > 0 && (
-                <div className="mt-2 space-y-1">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
-                    Gaps
-                  </p>
-                  {researchRun.evaluation.gaps.map((gap, index) => (
-                    <p key={`${gap}-${index}`} className="text-xs rt-text-dim">
-                      - {gap}
-                    </p>
-                  ))}
-                </div>
-              )}
-              {researchRun.evaluation.staleFlags.length > 0 && (
-                <div className="mt-2 space-y-1">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
-                    Staleness Flags
-                  </p>
-                  <div className="flex flex-wrap gap-1">
-                    {researchRun.evaluation.staleFlags.map((flag) => (
-                      <span
-                        key={`stale-${flag}`}
-                        className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim"
-                      >
-                        {flag}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <p className="mt-2 text-[11px] rt-text-dim">
+
+              <p className="mt-4 text-sm leading-6 rt-text-muted">
                 {researchRun.evaluation.overallConfidence >= 70
-                  ? 'Evidence posture: solid enough to support a decision.'
+                  ? 'Evidence posture is solid enough to support a decision.'
                   : researchRun.evaluation.overallConfidence >= 45
-                    ? 'Evidence posture: mixed, worth a manual review.'
-                    : 'Evidence posture: thin, treat conclusions cautiously.'}
+                    ? 'Evidence posture is mixed and worth a manual review.'
+                    : 'Evidence posture is thin, so conclusions should be treated cautiously.'}
               </p>
-            </div>
+
+              {researchRun.evaluation.gaps.length > 0 ? (
+                <div className="mt-4 space-y-2">
+                  <p className="text-sm font-medium rt-text-strong">Gaps</p>
+                  <ListBlock items={researchRun.evaluation.gaps} />
+                </div>
+              ) : null}
+
+              {researchRun.evaluation.staleFlags.length > 0 ? (
+                <div className="mt-4 space-y-2">
+                  <p className="text-sm font-medium rt-text-strong">Staleness flags</p>
+                  <ChipOverflowRow items={researchRun.evaluation.staleFlags} />
+                </div>
+              ) : null}
+            </ContextBlock>
           )}
 
           {status === 'running' && (
-            <div className="space-y-2">
-              <p className="text-sm rt-text-muted">
-                Searching the web for evidence-backed sources…
+            <div className="space-y-3">
+              <p className="text-sm leading-6 rt-text-muted">
+                Searching for evidence-backed sources.
               </p>
               {[1, 2, 3].map((index) => (
-                <div
-                  key={index}
-                  className="rt-surface rounded-xl border p-3"
-                >
-                  <div className="mb-2 h-3 w-3/4 rounded rt-shimmer" />
-                  <div className="h-2.5 w-full rounded rt-shimmer" />
-                  <div className="mt-1 h-2.5 w-5/6 rounded rt-shimmer" />
+                <div key={index} className="rt-surface rounded-xl border p-4 shadow-none">
+                  <div className="mb-3 h-3 w-3/4 rounded rt-shimmer" />
+                  <div className="h-3 w-full rounded rt-shimmer" />
+                  <div className="mt-2 h-3 w-5/6 rounded rt-shimmer" />
                 </div>
               ))}
             </div>
           )}
 
           {(status === 'skipped' || status === 'failed') && visibleSources.length === 0 && (
-            <p className="text-sm rt-text-muted">
-              {status === 'failed'
-                ? 'Research failed. The discussion still completed, but evidence quality is limited.'
-                : 'Research was skipped for this session.'}
-            </p>
+            <ContextBlock title="Status note">
+              <p className="text-sm leading-6 rt-text-muted">
+                {status === 'failed'
+                  ? 'Research failed. The discussion still completed, but the evidence base is limited.'
+                  : 'Research was skipped for this session.'}
+              </p>
+            </ContextBlock>
           )}
 
           {status !== 'running' && visibleSources.length === 0 && status === 'completed' && (
-            <p className="text-sm rt-text-muted">No relevant results found.</p>
+            <ContextBlock title="Status note">
+              <p className="text-sm leading-6 rt-text-muted">No relevant results were found.</p>
+            </ContextBlock>
           )}
 
           {visibleSources.length > 0 && (
-            <div className="space-y-2.5">
-              <div className="rounded-xl border rt-border-soft p-3 text-xs rt-text-dim">
-                {selectedSources.length} selected / {visibleSources.length} total
-              </div>
+            <div className="space-y-6">
               {groupedSources.map(([category, categorySources]) => (
-                <div key={category} className="space-y-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
-                    {category}
-                  </p>
-                  {categorySources.map((source) => (
-                    <div
-                      key={source.id}
-                      className={`rt-surface rounded-xl border p-3 ${
-                        source.selected ? '' : 'opacity-55'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[10px] uppercase tracking-[0.18em] rt-text-dim">
-                            {getResearchSourceCitationLabel(source)} · {source.domain || 'unknown'}
-                          </p>
-                          <a
-                            href={source.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="mt-1 line-clamp-1 block text-sm font-semibold rt-text-strong hover:underline"
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            {source.title}
-                          </a>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          {onToggleSourceSelection && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 px-2 text-[11px]"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onToggleSourceSelection(source.id, !source.selected);
-                              }}
-                            >
-                              {source.selected ? 'Exclude' : 'Include'}
-                            </Button>
-                          )}
-                          {onPatchSource && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 px-2 text-[11px]"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onPatchSource(source.id, { pinned: !source.pinned });
-                              }}
-                            >
-                          {source.pinned ? 'Unpin' : 'Pin'}
-                            </Button>
-                          )}
-                          {source.snapshotPath && sessionId && (
-                            <a
-                              href={`/api/sessions/${sessionId}/research/sources/${source.id}/snapshot`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="shrink-0 rt-text-muted hover:rt-text-strong"
-                              onClick={(event) => event.stopPropagation()}
-                              title="Browser-captured — manual review recommended"
-                            >
-                              <Globe className="h-3.5 w-3.5" />
-                            </a>
-                          )}
-                          <a
-                            href={source.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="shrink-0 rt-text-muted hover:rt-text-strong"
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            <ExternalLink className="h-3.5 w-3.5" />
-                          </a>
-                        </div>
-                      </div>
+                <section key={category} className="space-y-3">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium rt-text-strong">{category}</p>
+                    <p className="text-sm leading-6 rt-text-muted">
+                      {categorySources.length} source{categorySources.length === 1 ? '' : 's'} in this group.
+                    </p>
+                  </div>
 
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {source.sourceType === 'browser_verification' && (
-                          <span className="rounded-full border border-[color-mix(in_srgb,var(--rt-live-state)_35%,transparent)] px-2 py-0.5 text-[10px] font-semibold rt-text-strong">
-                            captured page
-                          </span>
-                        )}
-                        <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
-                          {source.selected ? 'selected' : 'excluded'}
-                        </span>
-                        {source.pinned && (
-                          <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
-                            pinned
-                          </span>
-                        )}
-                        <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
-                          rank {source.rank}
-                        </span>
-                        {source.publishedDate && (
-                          <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
-                            {source.publishedDate.slice(0, 10)}
-                          </span>
-                        )}
-                        {source.capturedAt && (
-                          <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
-                            captured {formatCapturedAt(source.capturedAt)}
-                          </span>
-                        )}
-                        {source.captureStatus && (
-                          <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
-                            {source.captureStatus === 'screenshot'
-                              ? 'live screenshot'
-                              : 'snapshot fallback'}
-                          </span>
-                        )}
-                        {source.verificationProfile && (
-                          <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
-                            {lookupProfile(source.verificationProfile)?.label ??
-                              source.verificationProfile}
-                          </span>
-                        )}
-                        {source.extractionMethod && (
-                          <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
-                            {source.extractionMethod === 'playwright_dom'
-                              ? 'DOM extract'
-                              : 'HTML fallback'}
-                          </span>
-                        )}
-                        {source.extractionQuality && (
-                          <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
-                            extraction {source.extractionQuality}
-                          </span>
-                        )}
-                        {source.stale && (
-                          <span className="rounded-full border border-amber-500/30 px-2 py-0.5 text-[10px] text-amber-100">
-                            stale
-                          </span>
-                        )}
-                        <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
-                          score {source.score.toFixed(2)}
-                        </span>
-                        {source.qualityFlags.map((flag) => (
-                          <span
-                            key={`${source.id}-${flag}`}
-                            className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim"
-                          >
-                            {flag}
-                          </span>
-                        ))}
-                      </div>
-                      {onPatchSource && (
-                        <div className="mt-1.5 flex gap-1">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="h-6 px-2 text-[10px]"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onPatchSource(source.id, {
-                                rank: Math.max(1, source.rank - 1),
-                              });
-                            }}
-                          >
-                            ↑ rank
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="h-6 px-2 text-[10px]"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onPatchSource(source.id, { rank: source.rank + 1 });
-                            }}
-                          >
-                            ↓ rank
-                          </Button>
-                        </div>
-                      )}
-
-                      <p className="mt-1.5 line-clamp-3 text-xs leading-relaxed rt-text-muted">
-                        {source.snippet}
-                      </p>
-                      {source.claimHint && (
-                        <p className="mt-1 text-[11px] rt-text-dim">
-                          validating claim: {source.claimHint}
-                        </p>
-                      )}
-                      {source.note && (
-                        <p className="mt-1 text-[11px] rt-text-dim">note: {source.note}</p>
-                      )}
-                      {source.verifiedFields?.length ? (
-                        <div className="mt-2 rounded-lg border rt-border-soft p-2">
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
-                            Extracted signals
-                          </p>
-                          <p className="mt-0.5 text-[10px] rt-text-dim">
-                            Extracted from page text — not semantically validated. Manual review recommended.
-                          </p>
-                          <div className="mt-1 space-y-1.5">
-                            {source.verifiedFields.map((field, index) => (
-                              <div
-                                key={`${source.id}-field-${index}`}
-                                className="rounded-lg border rt-border-soft px-2 py-1.5"
-                              >
-                                <div className="flex items-start justify-between gap-2">
-                                  <p className="text-[11px] font-medium rt-text-strong">
-                                    {field.label}
-                                  </p>
-                                  <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
-                                    {field.confidence === 'high'
-                                      ? 'strong signal'
-                                      : field.confidence === 'medium'
-                                        ? 'signal'
-                                        : 'weak signal'}
-                                  </span>
-                                </div>
-                                <p className="mt-1 text-[11px] leading-relaxed rt-text-dim">
-                                  {field.value}
-                                </p>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                      {source.verificationNotes?.length ? (
-                        <div className="mt-2 space-y-1">
-                          {source.verificationNotes.map((item, index) => (
-                            <p
-                              key={`${source.id}-note-${index}`}
-                              className="text-[11px] rt-text-dim"
-                            >
-                              - {item}
-                            </p>
-                          ))}
-                        </div>
-                      ) : null}
-                      {!source.selected && source.excludedReason && (
-                        <p className="mt-1 text-[11px] rt-text-dim">
-                          excluded: {source.excludedReason}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                  <div className="space-y-3">
+                    {categorySources.map((source) => (
+                      <SourceCard
+                        key={source.id}
+                        sessionId={sessionId}
+                        source={source}
+                        onToggleSourceSelection={onToggleSourceSelection}
+                        onPatchSource={onPatchSource}
+                      />
+                    ))}
+                  </div>
+                </section>
               ))}
             </div>
           )}
-            </CardContent>
-          </motion.div>
-        )}
-      </AnimatePresence>
+        </CardContent>
+      )}
     </Card>
   );
 }
 
-function StatusChip({
-  status,
-  sourceCount,
+function ContextBlock({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-4">
+      <p className="text-sm font-medium rt-text-strong">{title}</p>
+      <div className="mt-3">{children}</div>
+    </div>
+  );
+}
+
+function SourceCard({
+  sessionId,
+  source,
+  onToggleSourceSelection,
+  onPatchSource,
 }: {
-  status: ResearchStatus | ResearchRunDetail['status'];
-  sourceCount: number;
+  sessionId: string | null;
+  source: ResearchSource;
+  onToggleSourceSelection: ResearchPanelProps['onToggleSourceSelection'];
+  onPatchSource: ResearchPanelProps['onPatchSource'];
 }) {
-  const content =
-    status === 'running'
-      ? 'Searching…'
-      : status === 'completed'
-        ? `${sourceCount} sources`
-        : status === 'partial'
-          ? `Partial · ${sourceCount}`
-          : status === 'failed'
-            ? 'Failed'
-            : status === 'skipped'
-              ? 'Skipped'
-              : 'Idle';
+  const metadata = [
+    source.selected ? 'Selected' : 'Excluded',
+    source.pinned ? 'Pinned' : null,
+    source.sourceType === 'browser_verification' ? 'Captured page' : null,
+    source.publishedDate ? source.publishedDate.slice(0, 10) : null,
+    source.capturedAt ? `Captured ${formatCapturedAt(source.capturedAt)}` : null,
+    source.captureStatus
+      ? source.captureStatus === 'screenshot'
+        ? 'Live screenshot'
+        : 'Snapshot fallback'
+      : null,
+    source.verificationProfile
+      ? lookupProfile(source.verificationProfile)?.label ?? source.verificationProfile
+      : null,
+    source.extractionMethod
+      ? source.extractionMethod === 'playwright_dom'
+        ? 'DOM extract'
+        : 'HTML fallback'
+      : null,
+    source.extractionQuality ? `Extraction ${source.extractionQuality}` : null,
+    source.stale ? 'Stale' : null,
+    `Rank ${source.rank}`,
+    `Score ${source.score.toFixed(2)}`,
+    ...source.qualityFlags,
+  ].filter((item): item is string => Boolean(item));
 
   return (
-    <span className="rounded-full border border-[color-mix(in_srgb,var(--rt-live-state)_35%,transparent)] bg-[color-mix(in_srgb,var(--rt-live-state)_12%,transparent)] px-2 py-0.5 text-[10px] font-semibold rt-text-strong">
-      {content}
+    <div
+      className={cn(
+        'rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-4 shadow-none',
+        !source.selected && 'opacity-65'
+      )}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 space-y-2">
+          <p className="text-xs font-medium rt-text-muted">
+            {getResearchSourceCitationLabel(source)} · {source.domain || 'Unknown source'}
+          </p>
+          <a
+            href={source.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block text-sm font-medium leading-6 rt-text-strong transition-colors duration-150 ease-out hover:underline"
+          >
+            {source.title}
+          </a>
+          <p className="text-sm leading-6 rt-text-muted">{source.snippet}</p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {onToggleSourceSelection && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 px-3 text-xs"
+              onClick={() => onToggleSourceSelection(source.id, !source.selected)}
+            >
+              {source.selected ? 'Exclude' : 'Include'}
+            </Button>
+          )}
+          {onPatchSource && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 px-3 text-xs"
+              onClick={() => onPatchSource(source.id, { pinned: !source.pinned })}
+            >
+              {source.pinned ? 'Unpin' : 'Pin'}
+            </Button>
+          )}
+          {source.snapshotPath && sessionId && (
+            <a
+              href={`/api/sessions/${sessionId}/research/sources/${source.id}/snapshot`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[color:var(--color-border)] rt-text-muted transition-colors duration-150 ease-out hover:rt-text-strong"
+              title="Open captured snapshot"
+            >
+              <Globe className="h-3.5 w-3.5" />
+            </a>
+          )}
+          <a
+            href={source.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[color:var(--color-border)] rt-text-muted transition-colors duration-150 ease-out hover:rt-text-strong"
+            title="Open source"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        </div>
+      </div>
+
+      <ChipOverflowRow items={metadata} className="mt-4" />
+
+      {onPatchSource && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-8 px-3 text-xs"
+            onClick={() => {
+              onPatchSource(source.id, {
+                rank: Math.max(1, source.rank - 1),
+              });
+            }}
+          >
+            Raise rank
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-8 px-3 text-xs"
+            onClick={() => {
+              onPatchSource(source.id, { rank: source.rank + 1 });
+            }}
+          >
+            Lower rank
+          </Button>
+        </div>
+      )}
+
+      {source.claimHint && (
+        <p className="mt-4 text-sm leading-6 rt-text-muted">Claim under review: {source.claimHint}</p>
+      )}
+      {source.note && (
+        <p className="mt-2 text-sm leading-6 rt-text-muted">Note: {source.note}</p>
+      )}
+      {source.verifiedFields?.length ? (
+        <div className="mt-4 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-muted-bg)] p-4">
+          <p className="text-sm font-medium rt-text-strong">Extracted signals</p>
+          <p className="mt-2 text-sm leading-6 rt-text-muted">
+            These signals were extracted from page text and still require human judgment.
+          </p>
+          <div className="mt-4 space-y-3">
+            {source.verifiedFields.map((field, index) => (
+              <div
+                key={`${source.id}-field-${index}`}
+                className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-4"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium rt-text-strong">{field.label}</p>
+                  <StatusPill
+                    label={
+                      field.confidence === 'high'
+                        ? 'Strong signal'
+                        : field.confidence === 'medium'
+                          ? 'Signal'
+                          : 'Weak signal'
+                    }
+                  />
+                </div>
+                <p className="mt-2 text-sm leading-6 rt-text-muted">{field.value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {source.verificationNotes?.length ? (
+        <div className="mt-4 space-y-2">
+          <p className="text-sm font-medium rt-text-strong">Verification notes</p>
+          <ListBlock items={source.verificationNotes} />
+        </div>
+      ) : null}
+      {!source.selected && source.excludedReason && (
+        <p className="mt-4 text-sm leading-6 rt-text-muted">Excluded because: {source.excludedReason}</p>
+      )}
+    </div>
+  );
+}
+
+function ChipOverflowRow({
+  items,
+  className,
+}: {
+  items: string[];
+  className?: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const visibleItems = expanded ? items : items.slice(0, 2);
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className={cn('space-y-2', className)}>
+      <div className="flex flex-wrap gap-2">
+        {visibleItems.map((item) => (
+          <StatusPill key={item} label={item} />
+        ))}
+      </div>
+      {items.length > 2 && (
+        <button
+          type="button"
+          className="text-xs font-medium rt-text-dim transition-colors duration-150 ease-out hover:rt-text-strong"
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? 'Show fewer details' : `+${items.length - 2} more`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function StatusPill({ label }: { label: string }) {
+  return (
+    <span className="inline-flex rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-card)] px-2 py-1 text-xs font-medium rt-text-muted">
+      {label}
     </span>
   );
 }
 
 function Metric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border rt-border-soft px-2 py-1.5">
-      <p className="text-[10px] uppercase tracking-[0.18em] rt-text-muted">{label}</p>
-      <p className="mt-1 text-sm font-semibold rt-text-strong">{value}%</p>
+    <div className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-muted-bg)] p-4">
+      <p className="text-sm font-medium rt-text-muted">{label}</p>
+      <p className="mt-2 text-base font-semibold rt-text-strong">{value}%</p>
     </div>
+  );
+}
+
+function ListBlock({ items }: { items: string[] }) {
+  return (
+    <ul className="space-y-3 pl-5 text-sm leading-6 rt-text-muted marker:rt-text-dim list-disc">
+      {items.map((item, index) => (
+        <li key={`${item}-${index}`}>{item}</li>
+      ))}
+    </ul>
   );
 }
 
@@ -648,7 +605,7 @@ function groupSourcesByCategory(sources: ResearchSource[]) {
 
 function classifySourceCategory(source: ResearchSource) {
   if (source.sourceType === 'browser_verification') {
-    return 'Captured Page';
+    return 'Captured pages';
   }
   const domain = source.domain.toLowerCase();
   const title = source.title.toLowerCase();
@@ -658,7 +615,7 @@ function classifySourceCategory(source: ResearchSource) {
     /docs|support|developer|official/.test(domain) ||
     /official|documentation|filing/.test(title)
   ) {
-    return 'Official / Documentation';
+    return 'Official and documentation';
   }
 
   if (/news|times|journal|post|reuters|bloomberg|techcrunch|theinformation/.test(domain)) {
@@ -666,15 +623,40 @@ function classifySourceCategory(source: ResearchSource) {
   }
 
   if (/blog|medium|substack|opinion|analysis|insights/.test(domain + title)) {
-    return 'Analysis / Opinion';
+    return 'Analysis and opinion';
   }
 
   return 'Reference';
 }
 
-function lookupProfile(profileId?: string | null) {
-  if (!profileId) return null;
-  return VERIFICATION_PROFILES.find(
-    (profile) => profile.id === profileId
-  ) as (typeof VERIFICATION_PROFILES)[number] | null;
+function formatStatusLabel(status: ResearchStatus | ResearchRunDetail['status']) {
+  if (status === 'running') return 'Searching';
+  if (status === 'completed') return 'Completed';
+  if (status === 'partial') return 'Partial';
+  if (status === 'failed') return 'Failed';
+  if (status === 'skipped') return 'Skipped';
+  return 'Idle';
+}
+
+function describeResearchState(
+  status: ResearchStatus | ResearchRunDetail['status'],
+  selectedCount: number,
+  totalCount: number
+) {
+  if (status === 'running') {
+    return 'Research is in progress and new evidence may still appear.';
+  }
+  if (status === 'failed') {
+    return 'Research did not complete, so the evidence base may be incomplete.';
+  }
+  if (status === 'skipped') {
+    return 'Research was skipped for this session.';
+  }
+  if (status === 'partial') {
+    return `${selectedCount} of ${totalCount} sources are currently selected from a partial run.`;
+  }
+  if (status === 'completed') {
+    return `${selectedCount} of ${totalCount} sources are currently selected for context.`;
+  }
+  return 'Research is available when a session begins.';
 }

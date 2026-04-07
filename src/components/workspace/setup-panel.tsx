@@ -24,15 +24,15 @@ export function SetupPanel({
   footer,
 }: SetupPanelProps) {
   return (
-    <aside className="flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden">
+    <aside className="flex h-full min-h-0 min-w-0 flex-col gap-2 overflow-hidden">
       <div className="shrink-0 flex h-10 border-b rt-border-soft gap-0">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => onChangeTab(tab.id)}
-            className={`flex h-full flex-1 items-center justify-center gap-1.5 text-xs font-medium transition-all border-b-2 -mb-px ${
+            className={`flex h-full flex-1 items-center justify-center gap-1.5 text-xs font-medium transition-[color,border-color] duration-150 border-b-2 -mb-px ${
               activeTab === tab.id
-                ? 'border-[var(--rt-hh6-primary)] rt-text-strong'
+                ? 'border-[var(--color-accent)] rt-text-strong'
                 : 'border-transparent rt-text-dim hover:rt-text-muted'
             }`}
           >

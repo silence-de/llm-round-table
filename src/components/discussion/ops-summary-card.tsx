@@ -71,15 +71,15 @@ export function OpsSummaryCard({ summary }: OpsSummaryCardProps) {
   if (!summary || summary.sessionsAnalyzed === 0) return null;
 
   return (
-    <Card className="rt-surface">
-      <CardHeader className="px-3 pb-1.5 pt-3">
-        <CardTitle className="flex items-center gap-2 text-sm rt-text-strong">
-          <Activity className="h-4 w-4 rt-text-muted" />
-          <span>Ops Watch</span>
+    <Card className="border border-white/8 bg-neutral-900">
+      <CardHeader className="px-4 pb-2 pt-4">
+        <CardTitle className="flex items-center gap-2 text-sm font-semibold text-neutral-100">
+          <Activity className="h-4 w-4 text-neutral-400" />
+          <span>Ops watch</span>
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3 px-3 pb-3">
-        <div className="grid grid-cols-2 gap-2 text-xs">
+      <CardContent className="space-y-4 px-4 pb-4">
+        <div className="grid grid-cols-2 gap-2">
           <Metric label="Timeout rate" value={summary.metrics.timeoutRate} />
           <Metric label="Resume success" value={summary.metrics.resumeSuccessRate} />
           <Metric label="Degraded rate" value={summary.metrics.agentDegradedRate} />
@@ -89,18 +89,18 @@ export function OpsSummaryCard({ summary }: OpsSummaryCardProps) {
           />
         </div>
 
-        <div className="space-y-1">
-          <SectionTitle icon={Activity} label="Research Budget" />
-          <p className="text-[11px] rt-text-dim">
-            reruns {summary.researchBudget.reruns} · recent queries {summary.researchBudget.recentQueries} · provider errors {summary.researchBudget.providerErrors}
+        <div className="space-y-1.5">
+          <SectionTitle icon={Activity} label="Research budget" />
+          <p className="text-xs text-neutral-500">
+            Reruns {summary.researchBudget.reruns} · recent queries {summary.researchBudget.recentQueries} · provider errors {summary.researchBudget.providerErrors}
           </p>
         </div>
 
         {summary.recentFailures.length > 0 && (
-          <div className="space-y-1">
-            <SectionTitle icon={AlertTriangle} label="Recent Failures" />
+          <div className="space-y-1.5">
+            <SectionTitle icon={AlertTriangle} label="Recent failures" />
             {summary.recentFailures.map((item) => (
-              <p key={`failure-${item.sessionId}`} className="text-[11px] rt-text-dim">
+              <p key={`failure-${item.sessionId}`} className="text-xs text-neutral-500">
                 {item.sessionId.slice(0, 8)} · {item.status} · {formatWhen(item.createdAt)}
               </p>
             ))}
@@ -108,10 +108,10 @@ export function OpsSummaryCard({ summary }: OpsSummaryCardProps) {
         )}
 
         {summary.degradedAgentSessions.length > 0 && (
-          <div className="space-y-1">
-            <SectionTitle icon={ShieldAlert} label="Degraded Sessions" />
+          <div className="space-y-1.5">
+            <SectionTitle icon={ShieldAlert} label="Degraded sessions" />
             {summary.degradedAgentSessions.map((item) => (
-              <p key={`degraded-${item.sessionId}`} className="text-[11px] rt-text-dim">
+              <p key={`degraded-${item.sessionId}`} className="text-xs text-neutral-500">
                 {item.sessionId.slice(0, 8)} · {item.degradedEventCount ?? 0} event(s) ·{' '}
                 {formatWhen(item.createdAt)}
               </p>
@@ -120,10 +120,10 @@ export function OpsSummaryCard({ summary }: OpsSummaryCardProps) {
         )}
 
         {summary.unresolvedEvidenceSessions.length > 0 && (
-          <div className="space-y-1">
-            <SectionTitle icon={AlertTriangle} label="Evidence Gaps" />
+          <div className="space-y-1.5">
+            <SectionTitle icon={AlertTriangle} label="Evidence gaps" />
             {summary.unresolvedEvidenceSessions.map((item) => (
-              <p key={`evidence-${item.sessionId}`} className="text-[11px] rt-text-dim">
+              <p key={`evidence-${item.sessionId}`} className="text-xs text-neutral-500">
                 {item.sessionId.slice(0, 8)} · {item.unresolvedEvidenceCount} unresolved ·{' '}
                 {formatWhen(item.createdAt)}
               </p>
@@ -132,9 +132,9 @@ export function OpsSummaryCard({ summary }: OpsSummaryCardProps) {
         )}
 
         {summary.calibration.reviewedSessions > 0 && (
-          <div className="space-y-2">
+          <div className="space-y-3">
             <SectionTitle icon={Activity} label="Calibration" />
-            <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="grid grid-cols-2 gap-2">
               <Metric
                 label="Predicted avg"
                 value={summary.calibration.averagePredictedConfidence}
@@ -152,7 +152,7 @@ export function OpsSummaryCard({ summary }: OpsSummaryCardProps) {
                 value={summary.calibration.averageCalibrationGap}
               />
             </div>
-            <p className="text-[11px] rt-text-dim">
+            <p className="text-xs text-neutral-500">
               Source-backed avg {summary.calibration.sourcedVsUnsourcedOutcomeGap.sourcedAverage}% ·
               Mixed/unsupported avg {summary.calibration.sourcedVsUnsourcedOutcomeGap.unsourcedAverage}% ·
               Delta {summary.calibration.sourcedVsUnsourcedOutcomeGap.delta}pt
@@ -160,19 +160,19 @@ export function OpsSummaryCard({ summary }: OpsSummaryCardProps) {
             {summary.calibration.templateHitRates.length > 0 && (
               <div className="space-y-1">
                 {summary.calibration.templateHitRates.map((item) => (
-                  <p key={`template-${item.templateId}`} className="text-[11px] rt-text-dim">
+                  <p key={`template-${item.templateId}`} className="text-xs text-neutral-500">
                     {item.templateId} · {item.hitRate}% hit · {item.reviewedSessions} review(s)
                   </p>
                 ))}
               </div>
             )}
             {summary.calibration.agentModelOverconfidence.length > 0 && (
-              <div className="space-y-1">
-                <SectionTitle icon={ShieldAlert} label="Agent / Model Drift" />
+              <div className="space-y-1.5">
+                <SectionTitle icon={ShieldAlert} label="Agent / model drift" />
                 {summary.calibration.agentModelOverconfidence.map((item) => (
                   <p
                     key={`agent-model-${item.agentId}-${item.modelId}`}
-                    className="text-[11px] rt-text-dim"
+                    className="text-xs text-neutral-500"
                   >
                     {item.agentId} · {item.modelId} · {item.averageDelta}pt over ·{' '}
                     {item.averageOutcomeConfidence}% outcome · {item.reviewedSessions} review(s)
@@ -181,10 +181,10 @@ export function OpsSummaryCard({ summary }: OpsSummaryCardProps) {
               </div>
             )}
             {summary.calibration.overconfidenceTrend.length > 0 && (
-              <div className="space-y-1">
-                <SectionTitle icon={Activity} label="Recent Prediction Gaps" />
+              <div className="space-y-1.5">
+                <SectionTitle icon={Activity} label="Recent prediction gaps" />
                 {summary.calibration.overconfidenceTrend.map((item) => (
-                  <p key={`trend-${item.sessionId}`} className="text-[11px] rt-text-dim">
+                  <p key={`trend-${item.sessionId}`} className="text-xs text-neutral-500">
                     {item.sessionId.slice(0, 8)} · {item.predictedConfidence}% to{' '}
                     {item.outcomeConfidence}% · {item.delta}pt
                   </p>
@@ -200,9 +200,9 @@ export function OpsSummaryCard({ summary }: OpsSummaryCardProps) {
 
 function Metric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl border rt-border-soft p-2">
-      <p className="text-[10px] uppercase tracking-[0.16em] rt-text-muted">{label}</p>
-      <p className="mt-1 text-sm font-semibold rt-text-strong">{value}%</p>
+    <div className="rounded-xl border border-white/8 p-2.5">
+      <p className="text-xs font-medium text-neutral-400">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-neutral-100">{value}%</p>
     </div>
   );
 }
@@ -215,7 +215,7 @@ function SectionTitle({
   label: string;
 }) {
   return (
-    <p className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+    <p className="flex items-center gap-1.5 text-xs font-medium text-neutral-400">
       <Icon className="h-3.5 w-3.5" />
       <span>{label}</span>
     </p>

@@ -13,6 +13,9 @@ import {
   normalizeActionItemStatus,
 } from '@/lib/decision/utils';
 
+const INPUT_CLS = 'h-8 text-xs border-white/8 bg-neutral-900 text-neutral-300';
+const INPUT_CLS_PH = `${INPUT_CLS} placeholder:text-neutral-600`;
+
 interface ActionItemsBoardProps {
   title: string;
   items: ActionItem[];
@@ -62,23 +65,23 @@ export function ActionItemsBoard({
   if (items.length === 0) return null;
 
   return (
-    <Card className="rt-surface">
-      <CardHeader className="px-3 pb-1.5 pt-3">
-        <CardTitle className="flex items-center justify-between gap-2 text-sm rt-text-strong">
+    <Card className="border border-white/8 bg-neutral-900">
+      <CardHeader className="px-4 pb-2 pt-4">
+        <CardTitle className="flex items-center justify-between gap-2 text-sm font-semibold text-neutral-100">
           <span>{title}</span>
-          <span className="text-xs font-normal rt-text-muted">
+          <span className="text-xs font-normal text-neutral-500">
             {stats.total} total · {stats.pending} pending · {stats.inProgress} in progress ·{' '}
             {stats.verified} verified · {stats.overdue} overdue
           </span>
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-2 px-3 pb-3">
+      <CardContent className="space-y-3 px-4 pb-4">
         <div className="grid grid-cols-3 gap-2">
           <Select
             value={statusFilter}
             onValueChange={(value) => setStatusFilter(value as 'all' | ActionItemStatus)}
           >
-            <SelectTrigger className="rt-input h-8 text-xs">
+            <SelectTrigger className={INPUT_CLS}>
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
@@ -98,7 +101,7 @@ export function ActionItemsBoard({
               setPriorityFilter(value as 'all' | ActionItem['priority'])
             }
           >
-            <SelectTrigger className="rt-input h-8 text-xs">
+            <SelectTrigger className={INPUT_CLS}>
               <SelectValue placeholder="Priority" />
             </SelectTrigger>
             <SelectContent>
@@ -106,22 +109,22 @@ export function ActionItemsBoard({
                 All priorities
               </SelectItem>
               <SelectItem value="high" className="text-xs">
-                high
+                High
               </SelectItem>
               <SelectItem value="medium" className="text-xs">
-                medium
+                Medium
               </SelectItem>
               <SelectItem value="low" className="text-xs">
-                low
+                Low
               </SelectItem>
             </SelectContent>
           </Select>
           <button
             type="button"
-            className={`rt-input h-8 rounded-md border px-2 text-xs transition-[color,border-color,background-color,transform,box-shadow] duration-150 ease-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--rt-live-state)] ${
+            className={`h-8 rounded-lg border px-2 text-xs transition-colors duration-150 ease-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 ${
               overdueOnly
-                ? 'rt-text-strong border-[color:var(--rt-hh6-primary)] bg-[color-mix(in_srgb,var(--rt-hh6-primary)_10%,transparent)]'
-                : 'rt-text-muted hover:bg-[color-mix(in_srgb,var(--rt-text-dim,currentColor)_8%,transparent)]'
+                ? 'border-neutral-500 bg-neutral-800 text-neutral-100'
+                : 'border-white/8 bg-transparent text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'
             }`}
             onClick={() => setOverdueOnly((value) => !value)}
           >
@@ -130,7 +133,7 @@ export function ActionItemsBoard({
         </div>
 
         {filteredItems.length === 0 && (
-          <p className="rounded-xl border rt-border-soft p-3 text-xs rt-text-muted">
+          <p className="rounded-xl border border-white/8 p-3 text-xs text-neutral-500">
             No action items under current filters.
           </p>
         )}
@@ -140,17 +143,17 @@ export function ActionItemsBoard({
             normalizeActionItemStatus(item.status)
           );
           return (
-            <div key={item.id} className="rounded-xl border rt-border-soft p-2.5">
+            <div key={item.id} className="rounded-xl border border-white/8 p-3">
               <div className="flex items-start justify-between gap-2">
-                <div className="space-y-1">
-                  <p className="text-sm font-medium rt-text-strong">{item.content}</p>
+                <div className="space-y-1.5">
+                  <p className="text-sm font-medium text-neutral-100">{item.content}</p>
                   {showSourceMeta && (
                     <div className="flex flex-wrap gap-1">
-                      <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
+                      <span className="rounded-lg border border-white/8 px-2 py-0.5 text-xs text-neutral-400">
                         {item.source === 'carried_forward' ? 'Carried forward' : 'Generated'}
                       </span>
                       {item.carriedFromSessionId && (
-                        <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
+                        <span className="rounded-lg border border-white/8 px-2 py-0.5 text-xs text-neutral-400">
                           {item.carriedFromSessionId.slice(0, 8)}
                         </span>
                       )}
@@ -171,7 +174,7 @@ export function ActionItemsBoard({
                   }}
                   disabled={disabled}
                 >
-                  <SelectTrigger className="rt-input h-8 w-[160px] text-xs">
+                  <SelectTrigger className={`${INPUT_CLS} w-[160px]`}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -203,7 +206,7 @@ export function ActionItemsBoard({
                     )
                   }
                   placeholder="Owner"
-                  className="rt-input h-8 text-xs"
+                  className={INPUT_CLS_PH}
                   disabled={disabled}
                 />
                 <Input
@@ -227,7 +230,7 @@ export function ActionItemsBoard({
                       onError?.(error instanceof Error ? error.message : String(error))
                     )
                   }
-                  className="rt-input h-8 text-xs"
+                  className={INPUT_CLS}
                   disabled={disabled}
                 />
               </div>
@@ -245,18 +248,18 @@ export function ActionItemsBoard({
                   }}
                   disabled={disabled}
                 >
-                  <SelectTrigger className="rt-input h-8 text-xs">
+                  <SelectTrigger className={INPUT_CLS}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="low" className="text-xs">
-                      low
+                      Low
                     </SelectItem>
                     <SelectItem value="medium" className="text-xs">
-                      medium
+                      Medium
                     </SelectItem>
                     <SelectItem value="high" className="text-xs">
-                      high
+                      High
                     </SelectItem>
                   </SelectContent>
                 </Select>
@@ -264,7 +267,7 @@ export function ActionItemsBoard({
                   value={item.verifiedAt ? formatDateLabel(item.verifiedAt) : ''}
                   readOnly
                   placeholder="Verified at"
-                  className="rt-input h-8 text-xs"
+                  className={INPUT_CLS_PH}
                 />
               </div>
               <Textarea
@@ -282,7 +285,7 @@ export function ActionItemsBoard({
                   )
                 }
                 placeholder="Execution note, result, or owner"
-                className="rt-input mt-2 min-h-[74px] text-xs"
+                className={`mt-2 min-h-[74px] ${INPUT_CLS_PH}`}
                 disabled={disabled}
               />
               <Textarea
@@ -301,7 +304,7 @@ export function ActionItemsBoard({
                   )
                 }
                 placeholder="Verification note"
-                className="rt-input mt-2 min-h-[60px] text-xs"
+                className={`mt-2 min-h-[60px] ${INPUT_CLS_PH}`}
                 disabled={disabled}
               />
             </div>

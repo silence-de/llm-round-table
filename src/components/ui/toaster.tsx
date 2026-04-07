@@ -3,22 +3,16 @@
 import { Toaster } from 'sonner';
 import { useToastBridge } from '@/hooks/use-toast-bridge';
 
+const toastClassNames = {
+  toast:
+    'border border-border bg-card text-sm text-card-foreground shadow-[var(--shadow-sm)]',
+  description: 'text-xs text-muted-foreground',
+  error: '!border-destructive/30 !bg-destructive/10 !text-foreground',
+  success: '!border-[var(--color-accent-border)] !bg-[var(--color-accent-subtle)] !text-foreground',
+};
+
 export function RoundTableToaster() {
-  return (
-    <Toaster
-      position="bottom-right"
-      toastOptions={{
-        classNames: {
-          toast: 'rt-surface border rt-border-soft text-sm rt-text-strong !shadow-none',
-          description: 'rt-text-dim text-xs',
-          error:
-            '!bg-[color-mix(in_srgb,var(--rt-error-state)_12%,var(--rt-bg-5))] !border-[color-mix(in_srgb,var(--rt-error-state)_40%,transparent)]',
-          success:
-            '!border-[color-mix(in_srgb,var(--rt-live-state)_35%,transparent)] !bg-[color-mix(in_srgb,var(--rt-live-state)_10%,var(--rt-bg-5))]',
-        },
-      }}
-    />
-  );
+  return <Toaster position="bottom-right" toastOptions={{ classNames: toastClassNames }} />;
 }
 
 export function ToastBridgeProvider() {

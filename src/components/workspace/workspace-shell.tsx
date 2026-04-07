@@ -3,30 +3,38 @@
 import type { ReactNode } from 'react';
 
 interface WorkspaceShellProps {
-  header: ReactNode;
-  setupPanel?: ReactNode;
-  liveSessionPanel?: ReactNode;
-  rightPanel?: ReactNode;
+  /** Rendered in the persistent top bar area when a session is active. */
+  header?: ReactNode;
   children?: ReactNode;
+  /** When true the shell renders the active-session 2-column layout.
+   *  When false (default) the shell renders the idle centered-card layout. */
+  isActive?: boolean;
 }
 
 export function WorkspaceShell({
   header,
-  setupPanel,
-  liveSessionPanel,
-  rightPanel,
   children,
+  isActive = false,
 }: WorkspaceShellProps) {
+  const rootClassName =
+    'flex h-dvh flex-col overflow-hidden bg-[var(--color-bg)] antialiased font-sans';
+
+  if (!isActive) {
+    // ── Idle / empty state ─────────────────────────────────────────────────
+    // No persistent grid, no empty sidebars — full viewport centered layout.
+    return <div className={rootClassName}>{children}</div>;
+  }
+
+  // ── Active session state ─────────────────────────────────────────────────
+  // Narrow top bar (header) + scrollable content area below.
   return (
-    <div className="flex h-dvh flex-col overflow-hidden rt-shell">
-      {header}
-      {children ?? (
-        <main className="flex-1 overflow-hidden grid gap-2 p-3 lg:grid-cols-[minmax(240px,260px)_minmax(0,1fr)] xl:grid-cols-[minmax(260px,280px)_minmax(0,1fr)_minmax(300px,340px)]">
-          {setupPanel}
-          {liveSessionPanel}
-          {rightPanel}
-        </main>
+    <div className={rootClassName}>
+      {header && (
+        <div className="shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2">
+          {header}
+        </div>
       )}
+      <div className="flex-1 overflow-hidden">{children}</div>
     </div>
   );
 }

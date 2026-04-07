@@ -3,6 +3,7 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Activity,
+  ChevronLeft,
   Cpu,
   FastForward,
   FileText,
@@ -297,7 +298,7 @@ export default function HomePage() {
   } = useSessionHistory({
     onError: (message) => setError(message),
     onLoadStart: () => {
-      setAutoScroll('follow');
+      setAutoScroll('paused');
       resetReplay();
     },
     onLoaded: () => {
@@ -1547,43 +1548,55 @@ export default function HomePage() {
   // Render
   // ─────────────────────────────────────────────────────────────────────────
 
+  // Active: a session is running or a history record is loaded.
+  const isActive = isRunning || historyDetail !== null;
+
+  const setupTabs = [
+    { id: 'brief', label: 'Brief', icon: <FileText className="h-3.5 w-3.5 shrink-0" /> },
+    { id: 'council', label: 'Council', icon: <Users className="h-3.5 w-3.5 shrink-0" /> },
+    { id: 'research', label: 'Research', icon: <Search className="h-3.5 w-3.5 shrink-0" /> },
+  ] as const;
+
+  // ── Active-session status bar (48px, per design spec §7.1) ──────────────
+  const statusBar = (
+    <div className="h-12 flex items-center justify-between px-4">
+      {/* Left: back button (history view only) + app title + phase info */}
+      <div className="flex items-center gap-3 min-w-0">
+        {historyDetail && !isRunning && (
+          <button
+            onClick={() => setHistoryDetail(null)}
+            className="flex items-center gap-1.5 shrink-0 text-xs rt-text-dim hover:rt-text-muted transition-[color,opacity] duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] rounded-md px-1 py-0.5 -ml-1"
+            title="Back to sessions"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Sessions</span>
+          </button>
+        )}
+        <span className="text-sm font-semibold rt-text-strong shrink-0">Round Table</span>
+        <span className="text-xs rt-text-dim">·</span>
+        <PhaseIndicator
+          phase={phase}
+          round={round}
+          isRunning={isRunning}
+          moderator={stageModerator.displayName}
+        />
+      </div>
+      {/* Right: theme toggle */}
+      <ThemeToggle />
+    </div>
+  );
+
   return (
-    <WorkspaceShell
-      header={
-        <header className="shrink-0 border-b rt-surface-glass px-4 py-2.5 md:px-5">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h1 className="text-lg font-bold tracking-tight rt-text-strong">
-                Round Table
-              </h1>
-              <p className="hidden text-xs rt-text-dim sm:block font-normal">
-                Multi-agent council · strategy &amp; decisions
-              </p>
-            </div>
-            <div className="flex min-w-0 items-center gap-2">
-              <PhaseIndicator
-                phase={phase}
-                round={round}
-                isRunning={isRunning}
-                moderator={stageModerator.displayName}
-              />
-              <ThemeToggle />
-            </div>
-          </div>
-        </header>
-      }
-    >
-      <main className="flex-1 overflow-hidden grid gap-2 p-3 lg:grid-cols-[minmax(240px,260px)_minmax(0,1fr)] xl:grid-cols-[minmax(260px,280px)_minmax(0,1fr)_minmax(300px,340px)]">
+    <WorkspaceShell isActive={isActive} header={isActive ? statusBar : undefined}>
+      {isActive ? (
+        /* ── Active session: 3-panel grid ─────────────────────────────── */
+        <main className="h-full overflow-hidden grid grid-rows-1 gap-2 p-2 lg:grid-cols-[minmax(260px,280px)_minmax(0,1fr)_minmax(260px,300px)] xl:grid-cols-[minmax(280px,300px)_minmax(0,1fr)_minmax(300px,340px)]">
 
         {/* ─────────────────────────────────────────────────────────────────
             LEFT PANEL: Session Setup + Compact Agent Config
         ───────────────────────────────────────────────────────────────── */}
         <SetupPanel
-          tabs={[
-            { id: 'brief', label: 'Brief', icon: <FileText className="h-3.5 w-3.5 shrink-0" /> },
-            { id: 'council', label: 'Council', icon: <Users className="h-3.5 w-3.5 shrink-0" /> },
-            { id: 'research', label: 'Research', icon: <Search className="h-3.5 w-3.5 shrink-0" /> },
-          ]}
+          tabs={setupTabs}
           activeTab={leftTab}
           onChangeTab={(tabId) => setLeftTab(tabId as typeof leftTab)}
           footer={
@@ -1595,7 +1608,7 @@ export default function HomePage() {
                   className="h-10 flex-1 rounded-2xl text-sm"
                 >
                   <Play className="h-4 w-4" />
-                  Start Session
+                  Start session
                 </Button>
                 {isRunning && (
                   <Button variant="destructive" className="h-10" onClick={stopDiscussion}>
@@ -1606,13 +1619,13 @@ export default function HomePage() {
 
               {isRunning && interjections.length > 0 && (
                 <div className="flex items-center gap-1.5 rounded-lg border rt-surface px-2.5 py-1.5 text-xs rt-text-dim">
-                  <Zap className="h-3 w-3 text-[var(--rt-live-state)]" />
+                  <Zap className="h-3 w-3 text-amber-400" />
                   <span>{interjections.length} queued</span>
                 </div>
               )}
               {isRunning && degradedAgents.length > 0 && (
                 <div className="flex items-center gap-1.5 rounded-lg border rt-surface px-2.5 py-1.5 text-xs rt-text-dim">
-                  <Activity className="h-3 w-3 text-[var(--rt-warning-state)]" />
+                  <Activity className="h-3 w-3 text-amber-400" />
                   <span>Degraded agents: {degradedAgents.join(', ')}</span>
                 </div>
               )}
@@ -1664,7 +1677,7 @@ export default function HomePage() {
               </div>
               <div>
                 <label className="mb-1 block rt-eyebrow">
-                  Decision Type
+                  Decision type
                 </label>
                 <Select
                   value={brief.decisionType}
@@ -1708,7 +1721,7 @@ export default function HomePage() {
                       {activeTemplate.description}
                     </p>
                   </div>
-                  <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim">
+                  <span className="rounded-full border rt-border-soft px-2 py-0.5 text-xs rt-text-dim">
                     {activeTemplate.family} / {activeTemplate.verificationProfileId}
                   </span>
                 </div>
@@ -1716,7 +1729,7 @@ export default function HomePage() {
                   {activeTemplate.evidenceExpectations.map((item) => (
                     <span
                       key={`${activeTemplate.id}-${item}`}
-                      className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-dim"
+                      className="rounded-full border rt-border-soft px-2 py-0.5 text-xs rt-text-dim"
                     >
                       {item}
                     </span>
@@ -1724,29 +1737,29 @@ export default function HomePage() {
                 </div>
                 <div className="mt-2 grid gap-2 md:grid-cols-2">
                   <div className="rounded-lg border rt-border-soft p-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                    <p className="text-xs font-semibold rt-text-muted">
                       Default red lines
                     </p>
                     <div className="mt-1 space-y-1">
                       {activeTemplate.defaultRedLines.map((item) => (
-                        <p key={`${activeTemplate.id}-red-${item}`} className="text-[11px] rt-text-dim">
+                        <p key={`${activeTemplate.id}-red-${item}`} className="text-xs rt-text-dim">
                           - {item}
                         </p>
                       ))}
                     </div>
                   </div>
                   <div className="rounded-lg border rt-border-soft p-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] rt-text-muted">
+                    <p className="text-xs font-semibold rt-text-muted">
                       Revisit defaults
                     </p>
                     <div className="mt-1 space-y-1">
-                      <p className="text-[11px] rt-text-dim">
+                      <p className="text-xs rt-text-dim">
                         {activeTemplate.reviewWindowSuggestion}
                       </p>
                       {activeTemplate.defaultRevisitTriggers.map((item) => (
                         <p
                           key={`${activeTemplate.id}-trigger-${item}`}
-                          className="text-[11px] rt-text-dim"
+                          className="text-xs rt-text-dim"
                         >
                           - {item}
                         </p>
@@ -1786,7 +1799,7 @@ export default function HomePage() {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="mb-1 block rt-eyebrow">
-                  Desired Output
+                  Desired output
                 </label>
                 <Select
                   value={brief.desiredOutput}
@@ -1806,8 +1819,8 @@ export default function HomePage() {
                     {[
                       ['recommendation', 'Recommendation'],
                       ['comparison', 'Comparison'],
-                      ['risk_assessment', 'Risk Assessment'],
-                      ['action_plan', 'Action Plan'],
+                      ['risk_assessment', 'Risk assessment'],
+                      ['action_plan', 'Action plan'],
                       ['consensus', 'Consensus'],
                     ].map(([value, label]) => (
                       <SelectItem key={value} value={value} className="text-xs">
@@ -1817,7 +1830,7 @@ export default function HomePage() {
                   </SelectContent>
                 </Select>
               </div>
-                <div className="rounded-xl border rt-border-soft px-3 py-2 text-[11px] rt-text-dim">
+                <div className="rounded-xl border rt-border-soft px-3 py-2 text-xs rt-text-dim">
                 {activeTemplate
                   ? activeTemplate.description
                   : 'Use a template to prefill a repeatable decision workflow.'}
@@ -1827,9 +1840,9 @@ export default function HomePage() {
             {activeTemplate && (
               <div className="rounded-xl border rt-surface p-2.5">
                 <p className="rt-eyebrow">
-                  Template Guide
+                  Template guide
                 </p>
-                <div className="mt-2 space-y-1.5 text-[11px] leading-relaxed rt-text-dim">
+                <div className="mt-2 space-y-1.5 text-xs leading-relaxed rt-text-dim">
                   <p>Goal hint: {activeTemplate.goal}</p>
                   <p>Background hint: {activeTemplate.background}</p>
                   <p>Constraint hint: {activeTemplate.constraints}</p>
@@ -1867,7 +1880,7 @@ export default function HomePage() {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="mb-1 block rt-eyebrow">
-                  Time Horizon
+                  Time horizon
                 </label>
                 <Input
                   placeholder="例如：3个月 / 2年"
@@ -1879,7 +1892,7 @@ export default function HomePage() {
               </div>
               <div>
                 <label className="mb-1 block rt-eyebrow">
-                  Review At
+                  Review at
                 </label>
                 <Input
                   type="date"
@@ -1893,7 +1906,7 @@ export default function HomePage() {
 
             <div>
               <label className="mb-1.5 block rt-eyebrow">
-                Non-Negotiables
+                Non-negotiables
               </label>
               <Textarea
                 placeholder="哪些条件不能退让"
@@ -1906,7 +1919,7 @@ export default function HomePage() {
 
             <div>
               <label className="mb-1.5 block rt-eyebrow">
-                Acceptable Downside
+                Acceptable downside
               </label>
               <Textarea
                 placeholder="你能接受的最坏情况 / 最大损失"
@@ -2102,7 +2115,7 @@ export default function HomePage() {
                   disabled={isRunning || !researchConfig.enabled}
                   className="rt-input min-h-[52px] text-xs"
                 />
-                <p className="text-[10px] leading-relaxed rt-text-dim">
+                <p className="text-xs leading-relaxed rt-text-dim">
                   Auto mode will generate topic, risk, and verification queries.
                   Guided mode keeps those and appends your custom queries.
                 </p>
@@ -2113,7 +2126,7 @@ export default function HomePage() {
             {/* ── Council Tab ── */}
             {leftTab === 'council' && <>
             {followUpParentSession && (
-              <div className="rounded-xl border bg-[color-mix(in_srgb,var(--rt-live-state)_10%,transparent)] px-3 py-2 text-xs">
+              <div className="rounded-xl border border-white/8 bg-neutral-900/60 px-3 py-2 text-xs">
                 <p className="font-semibold rt-text-strong">
                   {followUpParentSession.mode === 'resume'
                     ? 'Safe resume'
@@ -2126,7 +2139,7 @@ export default function HomePage() {
                 </p>
                 <button
                   type="button"
-                  className="mt-1 rt-text-dim underline transition-[color,opacity] duration-150 ease-out hover:rt-text-muted active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--rt-live-state)] focus-visible:rounded-sm"
+                  className="mt-1 rt-text-dim underline transition-[color,opacity] duration-150 ease-out hover:rt-text-muted active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 focus-visible:rounded-sm"
                   onClick={() => {
                     setFollowUpParentSession(null);
                     setResumePreview(null);
@@ -2161,7 +2174,7 @@ export default function HomePage() {
                       </SelectContent>
                     </Select>
                     {followUpCarryPreview && (
-                      <p className="mt-1 text-[11px] rt-text-muted">
+                      <p className="mt-1 text-xs rt-text-muted">
                         {followUpCarryPreview.inheritedActionCount} items will be inherited
                         {followUpCarryPreview.skippedReason.length > 0
                           ? ` · skipped ${followUpCarryPreview.skippedReason.length}`
@@ -2169,7 +2182,7 @@ export default function HomePage() {
                       </p>
                     )}
                     {followUpCarryPreview?.parentReviewComparison && (
-                      <div className="mt-2 rounded-lg border rt-border-soft p-2 text-[11px] rt-text-muted">
+                      <div className="mt-2 rounded-lg border rt-border-soft p-2 text-xs rt-text-muted">
                         <p className="font-semibold rt-text-strong">
                           Previous prediction vs reality
                         </p>
@@ -2192,7 +2205,7 @@ export default function HomePage() {
                 )}
                 {followUpParentSession.mode === 'resume' &&
                   (resumePreview || resumeSnapshot) && (
-                    <div className="mt-2 rounded-lg border rt-border-soft p-2 text-[11px] rt-text-muted">
+                    <div className="mt-2 rounded-lg border rt-border-soft p-2 text-xs rt-text-muted">
                       {(() => {
                         const snapshot = resumePreview ?? resumeSnapshot;
                         if (!snapshot) return null;
@@ -2276,7 +2289,7 @@ export default function HomePage() {
               <p className="rt-eyebrow">
                 Council
               </p>
-              <span className="text-[11px] rt-text-dim">{selectedAgents.size} selected</span>
+              <span className="text-xs rt-text-dim">{selectedAgents.size} selected</span>
             </div>
 
             {/* Compact agent cards — no accordion, config always visible */}
@@ -2296,7 +2309,7 @@ export default function HomePage() {
                   return (
                     <div
                       key={agent.id}
-                      className={`border-l-2 pl-2.5 pr-3 py-3 rt-surface rounded-xl transition-all duration-200 ${
+                      className={`border-l-2 pl-2.5 pr-3 py-3 rt-surface rounded-xl transition-[border-color,opacity,background-color,color] duration-200 ${
                         isSelected
                           ? 'border-[var(--rt-live-state)]'
                           : 'border-transparent opacity-55'
@@ -2319,13 +2332,13 @@ export default function HomePage() {
                         {isModerator && (
                           <Badge
                             variant="secondary"
-                            className="shrink-0 border border-[color-mix(in_srgb,var(--rt-stage-glow-secondary)_35%,transparent)] bg-[color-mix(in_srgb,var(--rt-stage-glow-secondary)_18%,transparent)] px-1.5 py-0 text-[9px] rt-text-strong"
+                            className="shrink-0 border border-white/10 bg-white/8 px-1.5 py-0 text-xs rt-text-strong"
                           >
                             MC
                           </Badge>
                         )}
                         {!agent.available && (
-                          <span className="shrink-0 text-[10px] rt-error">No key</span>
+                          <span className="shrink-0 text-xs rt-error">No key</span>
                         )}
                       </div>
 
@@ -2370,9 +2383,9 @@ export default function HomePage() {
                                         active ? undefined : presetId
                                       )
                                     }
-                                    className={`rounded-full border px-2 py-0.5 text-[10px] transition-[color,border-color,background-color,transform,box-shadow] duration-150 ease-out active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--rt-live-state)] ${
+                                    className={`rounded-full border px-2 py-0.5 text-xs transition-[color,border-color,background-color,transform,box-shadow] duration-150 ease-out active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 ${
                                       active
-                                        ? 'rt-border-strong bg-[color-mix(in_srgb,var(--rt-live-state)_22%,transparent)] rt-text-strong'
+                                        ? 'border-neutral-400 bg-white/10 rt-text-strong'
                                         : 'rt-surface rt-text-dim hover:rt-text-muted'
                                     }`}
                                   >
@@ -2518,7 +2531,7 @@ export default function HomePage() {
                 <Button
                   size="sm"
                   variant="secondary"
-                  className="h-6 shrink-0 text-[11px]"
+                  className="h-6 shrink-0 text-xs"
                   onClick={() => setAutoScroll('follow')}
                 >
                   ↓ Follow
@@ -2560,7 +2573,7 @@ export default function HomePage() {
                   >
                     <FastForward className="h-3 w-3" />
                   </Button>
-                  <span className="rt-chip-live rounded-full border px-2 py-0.5 text-[10px]">
+                  <span className="rt-chip-live rounded-full border px-2 py-0.5 text-xs">
                     {replay.status === 'idle'
                       ? `${replayableMessages.length} msgs`
                       : `${Math.min(replay.cursor + 1, replayableMessages.length)} / ${replayableMessages.length}`}
@@ -2620,9 +2633,9 @@ export default function HomePage() {
                         />
                       )}
                       <div
-                        className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all duration-300 ${
+                        className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium transition-[border-color,opacity,background-color,color] duration-300 ${
                           isActive
-                            ? 'bg-[color-mix(in_srgb,var(--rt-live-state)_18%,transparent)] text-[var(--rt-live-state)] border border-[color-mix(in_srgb,var(--rt-live-state)_40%,transparent)]'
+                            ? 'bg-white/10 text-amber-300 border border-white/10'
                             : isDone
                             ? 'rt-text-dim'
                             : 'rt-text-dim opacity-40'
@@ -2653,7 +2666,7 @@ export default function HomePage() {
 
           {/* Error banner */}
           {error && (
-            <div className="shrink-0 rounded-xl border bg-[color-mix(in_srgb,var(--rt-stage-glow-secondary)_12%,transparent)] px-3 py-2 text-sm rt-error">
+            <div className="shrink-0 rounded-xl border border-red-500/20 bg-red-950/30 px-3 py-2 text-sm rt-error">
               {error}
             </div>
           )}
@@ -2680,7 +2693,7 @@ export default function HomePage() {
                   </SelectContent>
                 </Select>
                 {interjections.length > 0 && (
-                  <span className="ml-auto text-[10px] rt-text-dim">
+                  <span className="ml-auto text-xs rt-text-dim">
                     {interjections.length} queued
                   </span>
                 )}
@@ -2712,8 +2725,8 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* Stage + Research fallback at lg (non-xl screens without right panel) */}
-          <div className="xl:hidden shrink-0 space-y-3">
+          {/* Stage + Research fallback at md (screens without right panel) */}
+          <div className="lg:hidden shrink-0 space-y-3">
             <RoundTableStage
               moderator={stageMod}
               moderatorMessage={stageModeratorMessage}
@@ -2886,7 +2899,7 @@ export default function HomePage() {
                 {currentSummary && (
                   <Card className="rt-surface-minutes">
                     <CardHeader className="px-3 pb-1.5 pt-3">
-                      <CardTitle className="text-sm rt-text-strong">Meeting Minutes</CardTitle>
+                      <CardTitle className="text-sm rt-text-strong">Meeting minutes</CardTitle>
                     </CardHeader>
                     <CardContent className="px-3 pb-3">
                       <div className="rt-surface-glass mb-2 max-h-[200px] overflow-auto rounded-xl border p-3 text-sm">
@@ -2910,7 +2923,7 @@ export default function HomePage() {
 
                 {decisionSummary && (
                   <DecisionSummaryCard
-                    title="Current Decision Card"
+                    title="Current decision card"
                     decisionSummary={decisionSummary}
                     researchSources={research.run?.sources ?? research.sources}
                     researchEvaluation={research.run?.evaluation ?? null}
@@ -2954,7 +2967,7 @@ export default function HomePage() {
 
                 {sessionId && actionItems.length > 0 && (
                   <ActionItemsBoard
-                    title="Execution Plan"
+                    title="Execution plan"
                     items={actionItems}
                     disabled={isRunning}
                     onItemsChange={setActionItems}
@@ -2969,7 +2982,7 @@ export default function HomePage() {
                   <Card className="rt-surface">
                     <CardHeader className="px-3 pb-1.5 pt-3">
                       <CardTitle className="text-sm rt-text-strong">
-                        Outcome Review
+                        Outcome review
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-2 px-3 pb-3">
@@ -3053,7 +3066,7 @@ export default function HomePage() {
                 </div>
 
                 {sessionId && (
-                  <p className="truncate text-[11px] rt-text-dim">Session: {sessionId}</p>
+                  <p className="truncate text-xs rt-text-dim">Session: {sessionId}</p>
                 )}
               </>
             )}
@@ -3154,7 +3167,7 @@ export default function HomePage() {
                           </SelectContent>
                         </Select>
                       </div>
-                      <span className="text-[11px] rt-text-dim pb-1.5">
+                      <span className="text-xs rt-text-dim pb-1.5">
                         {filteredSessions.length} / {sessions.length}
                       </span>
                     </div>
@@ -3188,16 +3201,16 @@ export default function HomePage() {
                             className={`rounded-xl border p-2.5 ${active ? 'rt-surface-live' : 'rt-surface'}`}
                           >
                             <button
-                              className="w-full text-left transition-opacity duration-150 ease-out hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--rt-live-state)] focus-visible:rounded-md"
+                              className="w-full text-left transition-opacity duration-150 ease-out hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 focus-visible:rounded-md"
                               onClick={() => void loadHistory(session.id)}
                             >
                               <p className="line-clamp-2 text-sm font-semibold rt-text-strong">
                                 {session.topic}
                               </p>
-                              <p className="mt-0.5 text-[11px] rt-text-muted">
+                              <p className="mt-0.5 text-xs rt-text-muted">
                                 {new Date(session.createdAt).toLocaleString()} · {session.status}
                               </p>
-                              <p className="mt-0.5 text-[10px] rt-text-dim">
+                              <p className="mt-0.5 text-xs rt-text-dim">
                                 {(DECISION_TEMPLATES.find(
                                   (template) => template.id === session.templateId
                                 )?.label ?? session.decisionType) || 'General'}
@@ -3205,21 +3218,21 @@ export default function HomePage() {
                                 {session.decisionStatus}
                               </p>
                               {uniquePresetLabels.length > 0 && (
-                                <p className="mt-0.5 text-[10px] rt-text-dim">
+                                <p className="mt-0.5 text-xs rt-text-dim">
                                   {uniquePresetLabels.join(', ')}
                                 </p>
                               )}
                             </button>
                             <div className="mt-1.5 flex items-center justify-between">
                               <div className="flex items-center gap-1.5">
-                                <span className="text-[10px] rt-text-dim">
+                                <span className="text-xs rt-text-dim">
                                   {session.id.slice(0, 8)}
                                 </span>
                                 <button
                                   type="button"
-                                  className={`rounded-full border px-2 py-0.5 text-[10px] transition-[color,border-color,background-color,transform,box-shadow] duration-150 ease-out active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--rt-live-state)] ${
+                                  className={`rounded-full border px-2 py-0.5 text-xs transition-[color,border-color,background-color,transform,box-shadow] duration-150 ease-out active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 ${
                                     compareSessionIds.includes(session.id)
-                                      ? 'rt-border-strong rt-text-strong bg-[color-mix(in_srgb,var(--rt-hh6-primary)_8%,transparent)]'
+                                      ? 'border-neutral-400 rt-text-strong bg-white/10'
                                       : 'rt-text-dim hover:rt-text-muted'
                                   }`}
                                   onClick={() => toggleCompareSession(session.id)}
@@ -3230,7 +3243,7 @@ export default function HomePage() {
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                className="h-6 px-2 text-[10px] rt-error hover:bg-[color-mix(in_srgb,var(--rt-stage-glow-secondary)_18%,transparent)]"
+                                className="h-6 px-2 text-xs rt-error hover:bg-red-950/30"
                                 onClick={() => void handleDeleteHistory(session.id)}
                               >
                                 Delete
@@ -3262,12 +3275,12 @@ export default function HomePage() {
                         {historyDetail.session.usageOutputTokens.toLocaleString()} out
                       </p>
                       <div className="mt-1 flex flex-wrap gap-1">
-                        <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
+                        <span className="rounded-full border rt-border-soft px-2 py-0.5 text-xs rt-text-muted">
                           {(DECISION_TEMPLATES.find(
                             (template) => template.id === historyDetail.session.templateId
                           )?.label ?? historyDetail.session.decisionType) || 'General'}
                         </span>
-                        <span className="rounded-full border rt-border-soft px-2 py-0.5 text-[10px] rt-text-muted">
+                        <span className="rounded-full border rt-border-soft px-2 py-0.5 text-xs rt-text-muted">
                           {historyDetail.session.desiredOutput}
                         </span>
                       </div>
@@ -3285,7 +3298,7 @@ export default function HomePage() {
                           return (
                             <span
                               key={`${historyDetail.session.id}-${agentId}`}
-                              className="rounded-full border rt-border-soft bg-[color-mix(in_srgb,var(--rt-live-state)_10%,transparent)] px-2 py-0.5 text-[10px] rt-text-muted"
+                              className="rounded-full border border-white/8 bg-white/5 px-2 py-0.5 text-xs rt-text-muted"
                             >
                               {agentId}: {label}
                             </span>
@@ -3353,7 +3366,7 @@ export default function HomePage() {
                       {historyDetail.parentSession && (
                         <button
                           type="button"
-                          className="mt-2 block text-left text-[11px] underline rt-text-dim transition-[color,opacity] duration-150 hover:rt-text-muted focus-visible:outline-none focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-[color:var(--rt-live-state)]"
+                          className="mt-2 block text-left text-xs underline rt-text-dim transition-[color,opacity] duration-150 hover:rt-text-muted focus-visible:outline-none focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-white/20"
                           onClick={() => void loadHistory(historyDetail.parentSession!.id)}
                         >
                           Parent session: {historyDetail.parentSession.topic}
@@ -3362,7 +3375,7 @@ export default function HomePage() {
                       {historyDetail.resumeMeta?.resumedFromSessionId && (
                         <button
                           type="button"
-                          className="mt-1 block text-left text-[11px] underline rt-text-dim transition-[color,opacity] duration-150 hover:rt-text-muted focus-visible:outline-none focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-[color:var(--rt-live-state)]"
+                          className="mt-1 block text-left text-xs underline rt-text-dim transition-[color,opacity] duration-150 hover:rt-text-muted focus-visible:outline-none focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-white/20"
                           onClick={() =>
                             void loadHistory(historyDetail.resumeMeta!.resumedFromSessionId!)
                           }
@@ -3371,7 +3384,7 @@ export default function HomePage() {
                         </button>
                       )}
                       {historyDetail.resumeMeta?.snapshot && (
-                        <div className="mt-2 rounded-lg border rt-border-soft p-2 text-[11px] rt-text-muted">
+                        <div className="mt-2 rounded-lg border rt-border-soft p-2 text-xs rt-text-muted">
                           <p className="font-semibold rt-text-strong">
                             Resume decision: {historyDetail.resumeMeta.snapshot.nextPhase} / round{' '}
                             {historyDetail.resumeMeta.snapshot.nextRound}
@@ -3392,7 +3405,7 @@ export default function HomePage() {
                         </div>
                       )}
                       {historyDetail.degradeEvents.length > 0 && (
-                        <div className="mt-2 rounded-lg border rt-border-soft p-2 text-[11px] rt-text-muted">
+                        <div className="mt-2 rounded-lg border rt-border-soft p-2 text-xs rt-text-muted">
                           <p className="font-semibold rt-text-strong">
                             Degrade events ({historyDetail.degradeEvents.length})
                           </p>
@@ -3508,7 +3521,7 @@ export default function HomePage() {
                     )}
                     {historyDetail.parentReviewComparison && (
                       <div className="rounded-xl border rt-surface p-2.5">
-                        <p className="rt-eyebrow">Previous Prediction Vs Reality</p>
+                        <p className="rt-eyebrow">Previous prediction vs reality</p>
                         <div className="mt-2 space-y-1 text-xs rt-text-muted">
                           <p>
                             Prior recommendation:{' '}
@@ -3546,11 +3559,11 @@ export default function HomePage() {
                           {historyDetail.decisionClaims.map((claim) => (
                             <div key={claim.id} className="rounded-lg border rt-border-soft p-2">
                               <p className="text-xs font-medium rt-text-strong">{claim.claim}</p>
-                              <p className="mt-1 text-[11px] rt-text-dim">
+                              <p className="mt-1 text-xs rt-text-dim">
                                 Citations: {claim.sourceIds.join(', ') || 'none'}
                               </p>
                               {claim.gapReason && (
-                                <p className="mt-1 text-[11px] rt-text-dim">
+                                <p className="mt-1 text-xs rt-text-dim">
                                   Gap: {claim.gapReason}
                                 </p>
                               )}
@@ -3569,10 +3582,10 @@ export default function HomePage() {
                               className="rounded-lg border rt-border-soft p-2"
                             >
                               <p className="text-xs font-medium rt-text-strong">{item.claim}</p>
-                              <p className="mt-1 text-[11px] rt-text-dim">
+                              <p className="mt-1 text-xs rt-text-dim">
                                 Citations: {item.sourceIds.join(', ') || 'none'}
                               </p>
-                              <p className="mt-1 text-[11px] rt-text-dim">
+                              <p className="mt-1 text-xs rt-text-dim">
                                 {item.gapReason || 'Evidence could not be resolved to persisted sources.'}
                               </p>
                             </div>
@@ -3648,7 +3661,7 @@ export default function HomePage() {
 
                     {historyDetail.actionItems.length > 0 && (
                       <ActionItemsBoard
-                        title="Execution Plan"
+                        title="Execution plan"
                         items={historyDetail.actionItems}
                         actionStats={historyDetail.actionStats ?? null}
                         onItemsChange={(items) =>
@@ -3671,7 +3684,7 @@ export default function HomePage() {
 
                     <div className="rounded-xl border rt-surface p-2.5">
                       <p className="rt-eyebrow">
-                        Outcome Review
+                        Outcome review
                       </p>
                       <div className="mt-2 space-y-2">
                         <Textarea
@@ -3809,14 +3822,14 @@ export default function HomePage() {
                     {historyDetail.childSessions.length > 0 && (
                       <div className="rounded-xl border rt-surface p-2.5">
                         <p className="rt-eyebrow">
-                          Follow-up Sessions
+                          Follow-up sessions
                         </p>
                         <div className="mt-2 space-y-1.5">
                           {historyDetail.childSessions.map((session) => (
                             <button
                               key={session.id}
                               type="button"
-                              className="block w-full rounded-lg border rt-border-soft px-2 py-1.5 text-left text-xs rt-text-strong transition-[background-color,box-shadow] duration-150 ease-out hover:bg-[color-mix(in_srgb,currentColor_5%,transparent)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--rt-live-state)]"
+                              className="block w-full rounded-lg border rt-border-soft px-2 py-1.5 text-left text-xs rt-text-strong transition-[background-color,box-shadow] duration-150 ease-out hover:bg-white/5 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
                               onClick={() => void loadHistory(session.id)}
                             >
                               {session.topic}
@@ -3829,14 +3842,14 @@ export default function HomePage() {
                     {similarSessions.length > 0 && (
                       <div className="rounded-xl border rt-surface p-2.5">
                         <p className="rt-eyebrow">
-                          Similar Sessions
+                          Similar sessions
                         </p>
                         <div className="mt-2 space-y-1.5">
                           {similarSessions.map((session) => (
                             <button
                               key={session.id}
                               type="button"
-                              className="block w-full rounded-lg border rt-border-soft px-2 py-1.5 text-left text-xs rt-text-strong transition-[background-color,box-shadow] duration-150 ease-out hover:bg-[color-mix(in_srgb,currentColor_5%,transparent)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--rt-live-state)]"
+                              className="block w-full rounded-lg border rt-border-soft px-2 py-1.5 text-left text-xs rt-text-strong transition-[background-color,box-shadow] duration-150 ease-out hover:bg-white/5 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
                               onClick={() => void loadHistory(session.id)}
                             >
                               {session.topic}
@@ -3851,7 +3864,7 @@ export default function HomePage() {
                 {compareDetails.length === 2 && (
                   <div className="rounded-xl border rt-surface p-2.5">
                     <p className="rt-eyebrow">
-                      Compare Sessions
+                      Compare sessions
                     </p>
                     <div className="mt-2 grid gap-2">
                       {compareDetails.map((detail) => (
@@ -3862,7 +3875,7 @@ export default function HomePage() {
                           <p className="text-sm font-semibold rt-text-strong">
                             {detail.session.topic}
                           </p>
-                          <p className="mt-1 text-[11px] rt-text-muted">
+                          <p className="mt-1 text-xs rt-text-muted">
                             {detail.session.decisionStatus} · {detail.session.decisionType}
                           </p>
                           <div className="mt-2 space-y-2">
@@ -3929,6 +3942,619 @@ export default function HomePage() {
             )}
         </HistoryPanel>
       </main>
+      ) : (
+        /* ── Idle / empty state: 2-column layout ─────────────────────── */
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          {/* Left: Setup sidebar — surface layer (slightly lighter than shell) */}
+          <div className="flex w-[420px] shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-surface)]">
+            {/* Wordmark header */}
+            <div className="flex shrink-0 items-center justify-between px-5 py-4 border-b border-[var(--color-border)]">
+              <div className="flex items-center gap-2.5">
+                <div className="h-6 w-6 rounded-md bg-[var(--color-accent)] flex items-center justify-center shrink-0">
+                  <span className="text-[10px] font-bold text-[var(--color-text-inverse)] leading-none">RT</span>
+                </div>
+                <h1 className="text-sm font-semibold rt-text-strong tracking-tight">Round Table</h1>
+              </div>
+              <ThemeToggle />
+            </div>
+            {/* Setup panel body */}
+            <div className="min-h-0 flex-1 overflow-hidden px-4 pb-4 pt-3">
+            <SetupPanel
+              tabs={setupTabs}
+              activeTab={leftTab}
+              onChangeTab={(tabId) => setLeftTab(tabId as typeof leftTab)}
+              footer={
+                <>
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={handleStart}
+                      disabled={isRunning || !brief.topic.trim() || selectedAgents.size < 2}
+                      className="h-10 flex-1 rounded-xl text-sm"
+                    >
+                      <Play className="h-4 w-4" />
+                      Start session
+                    </Button>
+                  </div>
+
+                  {error && (
+                    <div className="shrink-0 rounded-xl border border-white/8 bg-red-950/30 px-3 py-2 text-sm text-red-400">
+                      {error}
+                    </div>
+                  )}
+                </>
+              }
+            >
+              {/* ── Brief Tab ── */}
+              {leftTab === 'brief' && <>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="mb-1 block rt-eyebrow">
+                    Template
+                  </label>
+                  <Select
+                    value={brief.templateId ?? 'none'}
+                    onValueChange={(value) => {
+                      if (!value || value === 'none') {
+                        updateBrief('templateId', null);
+                        return;
+                      }
+                      applyTemplate(value);
+                    }}
+                    disabled={isRunning}
+                  >
+                    <SelectTrigger className="rt-input h-9 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none" className="text-xs">
+                        Custom
+                      </SelectItem>
+                      {groupedTemplates.map((group) => (
+                        <SelectGroup key={group.id}>
+                          <SelectLabel>{group.label}</SelectLabel>
+                          {group.templates.map((template) => (
+                            <SelectItem
+                              key={template.id}
+                              value={template.id}
+                              className="text-xs"
+                            >
+                              {template.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="mb-1 block rt-eyebrow">
+                    Decision type
+                  </label>
+                  <Select
+                    value={brief.decisionType}
+                    onValueChange={(value) => {
+                      if (!value) return;
+                      updateBrief(
+                        'decisionType',
+                        value as DecisionBrief['decisionType']
+                      );
+                    }}
+                    disabled={isRunning}
+                  >
+                    <SelectTrigger className="rt-input h-9 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[
+                        ['general', 'General'],
+                        ['investment', 'Investment'],
+                        ['product', 'Product'],
+                        ['career', 'Career'],
+                        ['life', 'Life'],
+                        ['risk', 'Risk'],
+                      ].map(([value, label]) => (
+                        <SelectItem key={value} value={value} className="text-xs">
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block rt-eyebrow">
+                  Topic
+                </label>
+                <Textarea
+                  placeholder="输入要讨论的议题"
+                  value={brief.topic}
+                  onChange={(e) => updateBrief('topic', e.target.value)}
+                  disabled={isRunning}
+                  className="rt-input min-h-[56px] text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block rt-eyebrow">
+                  Goal
+                </label>
+                <Textarea
+                  placeholder="这次讨论要帮你做出什么判断？"
+                  value={brief.goal}
+                  onChange={(e) => updateBrief('goal', e.target.value)}
+                  disabled={isRunning}
+                  className="rt-input min-h-[44px] text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block rt-eyebrow">
+                  Background
+                </label>
+                <Textarea
+                  placeholder="背景、上下文、你已知的情况"
+                  value={brief.background}
+                  onChange={(e) => updateBrief('background', e.target.value)}
+                  disabled={isRunning}
+                  className="rt-input min-h-[52px] text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block rt-eyebrow">
+                  Constraints
+                </label>
+                <Textarea
+                  placeholder="预算、时间、风险边界、不可接受后果"
+                  value={brief.constraints}
+                  onChange={(e) => updateBrief('constraints', e.target.value)}
+                  disabled={isRunning}
+                  className="rt-input min-h-[52px] text-sm"
+                />
+              </div>
+              </>}
+
+              {/* ── Council Tab ── */}
+              {leftTab === 'council' && <>
+              {/* Moderator + Debate Rounds (2-column) */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="mb-1 block rt-eyebrow">
+                    Moderator
+                  </label>
+                  <Select
+                    value={moderatorAgentId}
+                    onValueChange={(value) => {
+                      if (!value) return;
+                      setModeratorAgentId(value);
+                      setSelectedAgents((prev) => new Set([...prev, value]));
+                    }}
+                    disabled={isRunning}
+                  >
+                    <SelectTrigger className="rt-input h-9 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {agents
+                        .filter((agent) => agent.available)
+                        .map((agent) => (
+                          <SelectItem key={agent.id} value={agent.id} className="text-sm">
+                            {agent.displayName}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="mb-1 block rt-eyebrow">
+                    Rounds
+                  </label>
+                  <Select
+                    value={String(maxDebateRounds)}
+                    onValueChange={(value) => {
+                      if (!value) return;
+                      setMaxDebateRounds(Number(value));
+                    }}
+                    disabled={isRunning}
+                  >
+                    <SelectTrigger className="rt-input h-9 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[1, 2, 3].map((n) => (
+                        <SelectItem key={n} value={String(n)} className="text-sm">
+                          {n} rounds
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Council heading */}
+              <div className="flex items-center justify-between">
+                <p className="rt-eyebrow">
+                  Council
+                </p>
+                <span className="text-xs rt-text-dim">{selectedAgents.size} selected</span>
+              </div>
+
+              {/* Agent cards */}
+              {loadingAgents ? (
+                <p className="text-sm rt-text-muted">Loading agents…</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {agents.map((agent) => {
+                    const isModerator = agent.id === moderatorAgentId;
+                    const isSelected = selectedAgents.has(agent.id);
+                    const isDisabled = !agent.available || isRunning;
+                    const personaSelection = personaSelections[agent.id] ?? {};
+                    const recommendedPresetIds = (agent.recommendedPersonaPresetIds ?? [])
+                      .filter((id) => personaPresetMap.has(id))
+                      .slice(0, 3);
+
+                    return (
+                      <div
+                        key={agent.id}
+                        className={`border-l-2 pl-2.5 pr-3 py-3 rt-surface rounded-xl transition-[border-color,opacity] duration-150 ${
+                          isSelected
+                            ? 'border-neutral-400'
+                            : 'border-transparent opacity-55'
+                        } ${!agent.available ? 'opacity-40' : ''}`}
+                      >
+                        {/* Row 1: checkbox + color dot + name + badges */}
+                        <div className="flex items-center gap-1.5">
+                          <Checkbox
+                            checked={isSelected}
+                            onCheckedChange={() => toggleAgent(agent.id)}
+                            disabled={isDisabled || isModerator}
+                          />
+                          <span
+                            className="h-2.5 w-2.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: agent.color }}
+                          />
+                          <span className="min-w-0 flex-1 truncate text-sm font-semibold rt-text-strong">
+                            {agent.displayName}
+                          </span>
+                          {isModerator && (
+                            <Badge
+                              variant="secondary"
+                              className="shrink-0 border border-white/10 bg-white/8 px-1.5 py-0 text-xs rt-text-strong"
+                            >
+                              MC
+                            </Badge>
+                          )}
+                          {!agent.available && (
+                            <span className="shrink-0 text-xs rt-error">No key</span>
+                          )}
+                        </div>
+
+                        {/* Inline config — visible when selected */}
+                        {isSelected && agent.available && (
+                          <div className="mt-2 space-y-1.5 pl-[22px]">
+                            {/* Model select */}
+                            {agent.availableModels.length > 0 && (
+                              <Select
+                                value={modelSelections[agent.id] ?? agent.modelId}
+                                onValueChange={(v) => v && handleModelChange(agent.id, v)}
+                                disabled={isRunning}
+                              >
+                                <SelectTrigger className="rt-input h-7 text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {agent.availableModels.map((m) => (
+                                    <SelectItem key={m.id} value={m.id} className="text-xs">
+                                      {m.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
+
+                            {/* Persona preset chips */}
+                            {recommendedPresetIds.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {recommendedPresetIds.map((presetId) => {
+                                  const preset = personaPresetMap.get(presetId);
+                                  if (!preset) return null;
+                                  const active = presetId === personaSelection.presetId;
+                                  return (
+                                    <button
+                                      key={presetId}
+                                      type="button"
+                                      disabled={isRunning}
+                                      onClick={() =>
+                                        handlePersonaPresetChange(
+                                          agent.id,
+                                          active ? undefined : presetId
+                                        )
+                                      }
+                                      className={`rounded-full border px-2 py-0.5 text-xs transition-[color,border-color,background-color,transform] duration-150 ease-out active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 ${
+                                        active
+                                          ? 'border-neutral-400 bg-white/10 rt-text-strong'
+                                          : 'rt-surface rt-text-dim hover:rt-text-muted'
+                                      }`}
+                                    >
+                                      {preset.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {!agent.available && (
+                          <p className="mt-2 text-xs rt-error">Missing key: {agent.missingKey}</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              </>}
+
+              {/* ── Research Tab ── */}
+              {leftTab === 'research' && <>
+              <div className="rounded-xl border rt-surface p-2.5">
+                <p className="mb-2 rt-eyebrow">
+                  Agenda
+                </p>
+                <div className="space-y-2">
+                  <Textarea
+                    placeholder="重点问题"
+                    value={agenda.focalQuestions}
+                    onChange={(e) => updateAgenda('focalQuestions', e.target.value)}
+                    disabled={isRunning}
+                    className="rt-input min-h-[52px] text-xs"
+                  />
+                  <Textarea
+                    placeholder="必须覆盖的维度"
+                    value={agenda.requiredDimensions}
+                    onChange={(e) => updateAgenda('requiredDimensions', e.target.value)}
+                    disabled={isRunning}
+                    className="rt-input min-h-[52px] text-xs"
+                  />
+                  <label className="flex items-center gap-2 text-xs rt-text-strong">
+                    <Checkbox
+                      checked={agenda.requireResearch}
+                      onCheckedChange={(checked) =>
+                        updateAgenda('requireResearch', Boolean(checked))
+                      }
+                      disabled={isRunning}
+                    />
+                    Require research
+                  </label>
+                  <label className="flex items-center gap-2 text-xs rt-text-strong">
+                    <Checkbox
+                      checked={agenda.requestRecommendation}
+                      onCheckedChange={(checked) =>
+                        updateAgenda('requestRecommendation', Boolean(checked))
+                      }
+                      disabled={isRunning}
+                    />
+                    Request final recommendation
+                  </label>
+                </div>
+              </div>
+
+              <div className="rounded-xl border rt-surface p-2.5">
+                <p className="mb-2 rt-eyebrow">
+                  Research
+                </p>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-xs rt-text-strong">
+                    <Checkbox
+                      checked={researchConfig.enabled}
+                      onCheckedChange={(checked) =>
+                        updateResearchConfig('enabled', Boolean(checked))
+                      }
+                      disabled={isRunning}
+                    />
+                    Enable research pipeline
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Select
+                      value={researchConfig.mode}
+                      onValueChange={(value) => {
+                        if (!value) return;
+                        updateResearchConfig(
+                          'mode',
+                          value as ResearchConfig['mode']
+                        );
+                      }}
+                      disabled={isRunning || !researchConfig.enabled}
+                    >
+                      <SelectTrigger className="rt-input h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto" className="text-xs">
+                          Auto queries
+                        </SelectItem>
+                        <SelectItem value="guided" className="text-xs">
+                          Guided queries
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={String(researchConfig.maxSources)}
+                      onValueChange={(value) => {
+                        if (!value) return;
+                        updateResearchConfig('maxSources', Number(value));
+                      }}
+                      disabled={isRunning || !researchConfig.enabled}
+                    >
+                      <SelectTrigger className="rt-input h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[4, 6, 8].map((value) => (
+                          <SelectItem key={value} value={String(value)} className="text-xs">
+                            {value} sources
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <p className="text-xs leading-relaxed rt-text-dim">
+                    Auto mode generates topic, risk, and verification queries.
+                    Guided mode appends your custom queries.
+                  </p>
+                </div>
+              </div>
+              </>}
+            </SetupPanel>
+            </div>
+          </div>
+
+          {/* Right: Session history — shell bg, slightly darker than sidebar */}
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            {/* Fixed header: search + filters */}
+            <div className="shrink-0 space-y-2 border-b border-[var(--color-border)] px-5 py-4">
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-1.5">
+                  <History className="h-3.5 w-3.5 rt-text-muted" />
+                  <span className="rt-section-label">Sessions</span>
+                </div>
+                <span className="text-xs rt-text-dim">{filteredSessions.length} / {sessions.length}</span>
+              </div>
+              <Input
+                value={historyQuery}
+                onChange={(event) => setHistoryQuery(event.target.value)}
+                placeholder="Search topic, goal, status…"
+                className="rt-input h-8 text-xs"
+              />
+              <div className="grid grid-cols-3 gap-2">
+                <Select
+                  value={historyStatusFilter}
+                  onValueChange={(value) => { if (!value) return; setHistoryStatusFilter(value as typeof historyStatusFilter); }}
+                >
+                  <SelectTrigger className="rt-input h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all" className="text-xs">All statuses</SelectItem>
+                    {historyStatusOptions.map((status) => (
+                      <SelectItem key={status} value={status} className="text-xs">{status}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={historyTemplateFilter}
+                  onValueChange={(value) => { setHistoryTemplateFilter(value ?? 'all'); }}
+                >
+                  <SelectTrigger className="rt-input h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all" className="text-xs">All templates</SelectItem>
+                    {historyTemplateOptions.map((templateId) => (
+                      <SelectItem key={templateId} value={templateId} className="text-xs">
+                        {DECISION_TEMPLATES.find((template) => template.id === templateId)?.label ?? templateId}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={historyTimeRange}
+                  onValueChange={(value) => { if (!value) return; setHistoryTimeRange(value as typeof historyTimeRange); }}
+                >
+                  <SelectTrigger className="rt-input h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all" className="text-xs">All time</SelectItem>
+                    <SelectItem value="7d" className="text-xs">Last 7 days</SelectItem>
+                    <SelectItem value="30d" className="text-xs">Last 30 days</SelectItem>
+                    <SelectItem value="90d" className="text-xs">Last 90 days</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Scrollable body: session list + ops watch at bottom */}
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {/* Session list */}
+              <div className="px-5 py-4">
+                {sessions.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 gap-3">
+                    <History className="h-8 w-8 rt-text-dim" />
+                    <p className="text-sm rt-text-muted text-center">No sessions yet.<br />Start your first discussion on the left.</p>
+                  </div>
+                ) : filteredSessions.length === 0 ? (
+                  <p className="text-sm rt-text-muted py-4">No sessions match the current filters.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {filteredSessions.map((session) => {
+                      const active = session.id === activeHistoryId;
+                      const presetLabels = Object.values(
+                        parsePersonaSelectionMap(session.personaSelections)
+                      )
+                        .map((sel) =>
+                          sel.presetId
+                            ? personaPresetMap.get(sel.presetId)?.label
+                            : sel.customNote ? 'Custom' : undefined
+                        )
+                        .filter((l): l is string => Boolean(l));
+                      const uniquePresetLabels = [...new Set(presetLabels)].slice(0, 2);
+                      return (
+                        <div
+                          key={session.id}
+                          className={`group rounded-xl border p-3 transition-[background-color,border-color] duration-150 ${
+                            active ? 'rt-surface-live' : 'rt-surface hover:bg-[var(--color-card-elevated)]'
+                          }`}
+                        >
+                          <button
+                            className="w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/30 focus-visible:rounded-lg"
+                            onClick={() => void loadHistory(session.id)}
+                          >
+                            <p className="line-clamp-2 text-sm font-medium rt-text-strong leading-snug">{session.topic}</p>
+                            <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                              <span className="text-xs rt-text-dim">
+                                {new Date(session.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                              </span>
+                              <span className="h-1 w-1 rounded-full bg-[var(--color-border-strong)]" />
+                              <span className="text-xs rt-text-dim">
+                                {(DECISION_TEMPLATES.find((t) => t.id === session.templateId)?.label ?? session.decisionType) || 'General'}
+                              </span>
+                              <span className="h-1 w-1 rounded-full bg-[var(--color-border-strong)]" />
+                              <span className={`text-xs font-medium ${
+                                session.status === 'completed' ? 'text-[var(--color-success)]' :
+                                session.status === 'failed' ? 'text-[var(--color-destructive)]' :
+                                'rt-text-muted'
+                              }`}>{session.status}</span>
+                            </div>
+                            {uniquePresetLabels.length > 0 && (
+                              <p className="mt-1 text-xs rt-text-dim">{uniquePresetLabels.join(', ')}</p>
+                            )}
+                          </button>
+                          <div className="mt-2 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                            <span className="font-mono text-[11px] rt-text-dim">{session.id.slice(0, 8)}</span>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 px-2 text-xs rt-error hover:bg-red-950/30"
+                              onClick={() => void handleDeleteHistory(session.id)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Ops Watch — below the session list */}
+              {opsSummary && (
+                <div className="px-5 pb-5">
+                  <div className="border-t border-[var(--color-border)] pt-4">
+                    <OpsSummaryCard summary={opsSummary} />
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </WorkspaceShell>
   );
 }

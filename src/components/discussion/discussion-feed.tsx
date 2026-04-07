@@ -76,11 +76,15 @@ export function DiscussionFeed({
   emptyLabel = '等待会议开始…',
   className,
 }: DiscussionFeedProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!autoScroll) return;
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Use scrollTop on the container — avoids scrollIntoView bleeding out to parent/body
+    const el = containerRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, [messages, autoScroll]);
 
   const handleScroll = useCallback(
@@ -97,7 +101,7 @@ export function DiscussionFeed({
   );
 
   return (
-    <div className={`overflow-y-auto ${className}`} onScroll={handleScroll}>
+    <div ref={containerRef} className={`overflow-y-auto ${className}`} onScroll={handleScroll}>
       {messages.length === 0 ? (
         <div className="flex h-full min-h-[200px] flex-col items-center justify-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl border rt-surface rt-border-soft">
@@ -137,7 +141,7 @@ export function DiscussionFeed({
               );
             })}
           </AnimatePresence>
-          <div ref={bottomRef} className="h-4" />
+          <div className="h-4" />
         </div>
       )}
     </div>

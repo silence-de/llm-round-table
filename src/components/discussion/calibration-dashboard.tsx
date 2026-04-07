@@ -64,8 +64,8 @@ export function CalibrationDashboard({
 }: CalibrationDashboardProps) {
   if (!data || data.reviewedSessions === 0) {
     return (
-      <Card className="rt-panel">
-        <CardContent className="px-3 py-4 text-sm rt-text-muted">
+      <Card className="border border-white/8 bg-neutral-900">
+        <CardContent className="px-4 py-4 text-sm text-neutral-400">
           No reviewed sessions yet. Save outcome reviews to unlock calibration trends.
         </CardContent>
       </Card>
@@ -74,13 +74,13 @@ export function CalibrationDashboard({
 
   return (
     <div className="space-y-3">
-      <Card className="rt-panel">
-        <CardHeader className="px-3 pb-1.5 pt-3">
-          <CardTitle className="text-sm rt-text-strong">
+      <Card className="border border-white/8 bg-neutral-900">
+        <CardHeader className="px-4 pb-2 pt-4">
+          <CardTitle className="text-sm font-semibold text-neutral-100">
             Calibration snapshot
           </CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-2 px-3 pb-3">
+        <CardContent className="grid grid-cols-2 gap-2 px-4 pb-4">
           <Metric label="Reviewed" value={data.reviewedSessions} suffix="" />
           <Metric label="Predicted" value={data.averagePredictedConfidence} />
           <Metric label="Outcome" value={data.averageOutcomeConfidence} />
@@ -88,25 +88,25 @@ export function CalibrationDashboard({
         </CardContent>
       </Card>
 
-      <Card className="rt-panel">
-        <CardHeader className="px-3 pb-1.5 pt-3">
-          <CardTitle className="text-sm rt-text-strong">Sample reliability</CardTitle>
+      <Card className="border border-white/8 bg-neutral-900">
+        <CardHeader className="px-4 pb-2 pt-4">
+          <CardTitle className="text-sm font-semibold text-neutral-100">Sample reliability</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2 px-3 pb-3">
+        <CardContent className="space-y-2 px-4 pb-4">
           <MetricRow label="Sample label" value={data.sampleLabel} />
           <MetricRow
             label="Reliable sample target"
             value={`${data.minimumReliableSample} reviewed sessions`}
           />
-          <p className="text-[11px] rt-text-dim">{data.sampleNote}</p>
+          <p className="text-xs text-neutral-500">{data.sampleNote}</p>
         </CardContent>
       </Card>
 
-      <Card className="rt-panel">
-        <CardHeader className="px-3 pb-1.5 pt-3">
-          <CardTitle className="text-sm rt-text-strong">Where are we overconfident?</CardTitle>
+      <Card className="border border-white/8 bg-neutral-900">
+        <CardHeader className="px-4 pb-2 pt-4">
+          <CardTitle className="text-sm font-semibold text-neutral-100">Where are we overconfident?</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2 px-3 pb-3">
+        <CardContent className="space-y-2 px-4 pb-4">
           <MetricRow
             label="Average overconfidence"
             value={`${data.averageOverconfidence}pt`}
@@ -121,21 +121,21 @@ export function CalibrationDashboard({
           />
           <div className="space-y-1">
             {data.confidencePenaltyGuidance.map((item, index) => (
-              <p key={`guidance-${index}`} className="text-[11px] rt-text-dim">
-                - {item}
+              <p key={`guidance-${index}`} className="text-xs text-neutral-500">
+                {item}
               </p>
             ))}
           </div>
         </CardContent>
       </Card>
 
-      <Card className="rt-panel">
-        <CardHeader className="px-3 pb-1.5 pt-3">
-          <CardTitle className="text-sm rt-text-strong">
+      <Card className="border border-white/8 bg-neutral-900">
+        <CardHeader className="px-4 pb-2 pt-4">
+          <CardTitle className="text-sm font-semibold text-neutral-100">
             Which templates look more reliable?
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-1.5 px-3 pb-3">
+        <CardContent className="space-y-1.5 px-4 pb-4">
           {data.byTemplate.length > 0 ? (
             data.byTemplate.map((item) => (
               <ListRow
@@ -145,18 +145,18 @@ export function CalibrationDashboard({
               />
             ))
           ) : (
-            <p className="text-sm rt-text-muted">No template review data yet.</p>
+            <p className="text-sm text-neutral-400">No template review data yet.</p>
           )}
         </CardContent>
       </Card>
 
-      <Card className="rt-panel">
-        <CardHeader className="px-3 pb-1.5 pt-3">
-          <CardTitle className="text-sm rt-text-strong">
+      <Card className="border border-white/8 bg-neutral-900">
+        <CardHeader className="px-4 pb-2 pt-4">
+          <CardTitle className="text-sm font-semibold text-neutral-100">
             Do source-backed decisions perform better?
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-1.5 px-3 pb-3 text-xs rt-text-muted">
+        <CardContent className="space-y-1.5 px-4 pb-4 text-xs text-neutral-400">
           <p>
             Sourced sessions: {data.sourcedVsUnsourced.sourcedSessions} · avg outcome{' '}
             {data.sourcedVsUnsourced.sourcedAverage}%
@@ -172,13 +172,13 @@ export function CalibrationDashboard({
         </CardContent>
       </Card>
 
-      <Card className="rt-panel">
-        <CardHeader className="px-3 pb-1.5 pt-3">
-          <CardTitle className="text-sm rt-text-strong">
+      <Card className="border border-white/8 bg-neutral-900">
+        <CardHeader className="px-4 pb-2 pt-4">
+          <CardTitle className="text-sm font-semibold text-neutral-100">
             Which agent/model combinations drift more?
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-1.5 px-3 pb-3">
+        <CardContent className="space-y-1.5 px-4 pb-4">
           {data.agentModelDrift.length > 0 ? (
             data.agentModelDrift.map((item) => (
               <ListRow
@@ -188,20 +188,20 @@ export function CalibrationDashboard({
               />
             ))
           ) : (
-            <p className="text-sm rt-text-muted">No agent/model calibration data yet.</p>
+            <p className="text-sm text-neutral-400">No agent/model calibration data yet.</p>
           )}
         </CardContent>
       </Card>
 
-      <Card className="rt-panel">
-        <CardHeader className="px-3 pb-1.5 pt-3">
-          <CardTitle className="text-sm rt-text-strong">Recent prediction vs outcome</CardTitle>
+      <Card className="border border-white/8 bg-neutral-900">
+        <CardHeader className="px-4 pb-2 pt-4">
+          <CardTitle className="text-sm font-semibold text-neutral-100">Recent prediction vs outcome</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-1.5 px-3 pb-3">
+        <CardContent className="space-y-1.5 px-4 pb-4">
           {data.timeline.map((item) => (
             <ListRow
               key={item.sessionId}
-              title={`${templateLabelFor(item.templateId)} · ${item.predictedConfidence}% -> ${item.outcomeConfidence}%`}
+              title={`${templateLabelFor(item.templateId)} · ${item.predictedConfidence}% → ${item.outcomeConfidence}%`}
               body={`${formatDate(item.createdAt)} · gap ${item.delta}pt · ${item.decisionType}`}
             />
           ))}
@@ -221,9 +221,9 @@ function Metric({
   suffix?: string;
 }) {
   return (
-    <div className="rounded-lg border rt-border-soft px-2 py-2">
-      <p className="text-[10px] uppercase tracking-[0.18em] rt-text-muted">{label}</p>
-      <p className="mt-1 text-base font-semibold rt-text-strong">
+    <div className="rounded-lg border border-white/8 bg-neutral-800/50 px-3 py-2.5">
+      <p className="text-xs font-medium text-neutral-500">{label}</p>
+      <p className="mt-1 text-base font-semibold text-neutral-100">
         {value}
         {suffix}
       </p>
@@ -233,18 +233,18 @@ function Metric({
 
 function MetricRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-start justify-between gap-3 rounded-lg border rt-border-soft px-2 py-2">
-      <p className="text-[11px] rt-text-muted">{label}</p>
-      <p className="text-[11px] text-right rt-text-strong">{value}</p>
+    <div className="flex items-start justify-between gap-3 rounded-lg border border-white/8 bg-neutral-800/50 px-3 py-2">
+      <p className="text-xs text-neutral-400">{label}</p>
+      <p className="text-xs text-right font-medium text-neutral-200">{value}</p>
     </div>
   );
 }
 
 function ListRow({ title, body }: { title: string; body: string }) {
   return (
-    <div className="rounded-lg border rt-border-soft px-2 py-2">
-      <p className="text-xs font-medium rt-text-strong">{title}</p>
-      <p className="mt-1 text-[11px] rt-text-dim">{body}</p>
+    <div className="rounded-lg border border-white/8 bg-neutral-800/50 px-3 py-2">
+      <p className="text-xs font-medium text-neutral-200">{title}</p>
+      <p className="mt-1 text-xs text-neutral-500">{body}</p>
     </div>
   );
 }
